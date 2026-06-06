@@ -6432,12 +6432,17 @@ let _spAutoSync = localStorage.getItem('shic_sp_autosync') === 'true';
 let _spLastSync = localStorage.getItem('shic_sp_lastsync') || null;
 let _spClientId = localStorage.getItem('shic_sp_clientid') || '';
 let _spTenantId = localStorage.getItem('shic_sp_tenantid') || 'common';
-let _spSiteUrl  = localStorage.getItem('shic_sp_siteurl') || '';   // e.g. https://contoso.sharepoint.com/sites/shic
+let _spSiteUrl  = localStorage.getItem('shic_sp_siteurl') || '';
 let _spListName = localStorage.getItem('shic_sp_listname') || 'SHIC_AppData';
-let _spItemId   = localStorage.getItem('shic_sp_itemid') || '';    // cached item ID after first push
+let _spItemId   = localStorage.getItem('shic_sp_itemid') || '';
 let _spSyncTimer = null;
-let _spSiteId   = localStorage.getItem('shic_sp_siteid') || '';    // cached after first connect
-let _spListId   = localStorage.getItem('shic_sp_listid') || '';    // cached after first connect
+let _spSiteId   = localStorage.getItem('shic_sp_siteid') || '';
+let _spListId   = localStorage.getItem('shic_sp_listid') || '';
+// ── Conflict-safe sync state ──────────────────────────────
+let _spLastWriteTs = 0;       // timestamp of last data we pushed or pulled
+let _spDataHash = '';         // hash of last known remote data
+let _spPendingRemote = null;  // stashed remote snapshot while user has unsaved edits
+let _spPollingTimer = null;   // polling interval for remote changes
 
 const SP_SCOPES = ['https://graph.microsoft.com/Sites.ReadWrite.All', 'User.Read'];
 
@@ -6565,6 +6570,9 @@ async function connectSharePoint() {
     await spResolveSiteAndList(token);
     spSetStatus('connected', 'Connected as ' + _spAccount.username);
     showToast('Connected to SharePoint as ' + _spAccount.username, 'success');
+    // Pull latest data on connect, then start polling for changes
+    await spPullData().catch(() => {});
+    spStartPolling();
     renderSettings();
   } catch (e) {
     _spConnected = false;
@@ -6577,123 +6585,228 @@ async function connectSharePoint() {
 async function disconnectSharePoint() {
   if (!confirm('Disconnect SharePoint sync? Your local data will remain.')) return;
   if (_spMsalApp && _spAccount) { try { await _spMsalApp.logoutPopup({ account: _spAccount }); } catch (e) {} }
+  spStopPolling();
   _spAccount = null; _spMsalApp = null; _spConnected = false;
   localStorage.removeItem('shic_sp_autosync'); localStorage.removeItem('shic_sp_lastsync');
   localStorage.removeItem('shic_sp_itemid'); localStorage.removeItem('shic_sp_siteid'); localStorage.removeItem('shic_sp_listid');
   _spLastSync = null; _spAutoSync = false; _spItemId = ''; _spSiteId = ''; _spListId = '';
+  _spLastWriteTs = 0; _spDataHash = ''; _spPendingRemote = null;
   renderSettings(); showToast('Disconnected from SharePoint', 'warning');
 }
 
-// ── Push data to SharePoint List ──────────────────────────
+// ── Compute a lightweight hash of data for change detection ──
+function _spHash(data) {
+  return '' + (data.projects?.length||0) + (data.tasks?.length||0)
+    + (data.procurement?.length||0) + (data.resourceAllocations?.length||0)
+    + (data.costs?.length||0) + (data.equipment?.length||0)
+    + (data.manpower?.length||0) + (data.materials?.length||0);
+}
+
+// ── Fetch the raw item from SharePoint (no side effects) ──
+async function _spFetchRemote(token, siteId, listId) {
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$filter=fields/DataKey eq 'main'&$expand=fields`,
+    { headers: { Authorization: 'Bearer ' + token } }
+  );
+  if (!res.ok) throw new Error('Fetch failed: ' + res.status);
+  const result = await res.json();
+  if (!result.value || result.value.length === 0) return null;
+  const item = result.value[0];
+  if (item.id) { _spItemId = item.id; localStorage.setItem('shic_sp_itemid', _spItemId); }
+  const raw = item.fields?.DataBlob || '';
+  if (!raw) return null;
+  return JSON.parse(raw); // includes _ts, _by, ...data
+}
+
+// ── Write payload to SharePoint (upsert) ─────────────────
+async function _spWriteRemote(token, siteId, listId, payload) {
+  const body = JSON.stringify({
+    fields: {
+      Title: 'SHIC_Main', DataKey: 'main',
+      DataBlob: JSON.stringify(payload),
+      UpdatedBy: _spAccount.username,
+      UpdatedAt: new Date().toISOString(),
+    }
+  });
+  let res;
+  if (_spItemId) {
+    res = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${_spItemId}`,
+      { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body }
+    );
+    if (res.status === 404) { _spItemId = ''; localStorage.removeItem('shic_sp_itemid'); res = null; }
+  }
+  if (!_spItemId) {
+    res = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`,
+      { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body }
+    );
+    if (res && res.ok) {
+      const created = await res.json();
+      _spItemId = created.id; localStorage.setItem('shic_sp_itemid', _spItemId);
+    }
+  }
+  if (res && !res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error?.message || 'Write failed: ' + res.status);
+  }
+}
+
+// ── Apply a remote snapshot safely ───────────────────────
+function _spApplyRemote(data, _ts, _by) {
+  const hash = _spHash(data) + _ts;
+  if (hash === _spDataHash) return; // no change
+  _spDataHash = hash;
+  _spLastWriteTs = _ts || Date.now();
+  AppState.data = Object.assign(getDefaultData(), data);
+  if (typeof migrateData === 'function') migrateData();
+  if (typeof _origSaveForFb === 'function') _origSaveForFb();
+  else if (typeof _origSave === 'function') _origSave();
+  _spPendingRemote = null;
+  setTimeout(() => {
+    try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
+    try { buildSidebar(); } catch(e) {}
+    if (_by && _by !== _spAccount?.username)
+      showToast('↓ SharePoint synced — data updated by ' + _by, 'info', 3000);
+  }, 400);
+}
+
+// ── Push data to SharePoint (conflict-safe) ───────────────
 async function spPushData(silent = false) {
   if (_spSyncing) return;
   if (!_spConnected || !_spAccount) { if (!silent) showToast('Not connected to SharePoint', 'error'); return; }
   _spSyncing = true;
-  spSetStatus('syncing', 'Uploading to SharePoint...');
+  spSetStatus('syncing', 'Checking for remote changes...');
   try {
     const token = await getSpToken();
     if (!token) throw new Error('Could not acquire token');
     const { siteId, listId } = await spResolveSiteAndList(token);
 
-    const payload = {
-      fields: {
-        Title: 'SHIC_Main',
-        DataKey: 'main',
-        DataBlob: JSON.stringify({ ...AppState.data, _ts: Date.now(), _by: _spAccount.username }),
-        UpdatedBy: _spAccount.username,
-        UpdatedAt: new Date().toISOString(),
-      }
-    };
+    // ── Step 1: Fetch remote first to detect conflicts ────
+    const remote = await _spFetchRemote(token, siteId, listId);
+    if (remote && remote._ts && remote._ts > _spLastWriteTs) {
+      // Remote is newer — merge remote arrays into local before pushing
+      // Strategy: remote wins for records that exist in remote but not local
+      // Local wins for records added locally since last sync
+      const { _ts, _by, ...remoteData } = remote;
+      const merged = Object.assign({}, remoteData);
+      const ARRAY_KEYS = ['projects','tasks','resources','equipment','tools','vehicles',
+        'consumables','materials','manpower','procurement','procurementLogs',
+        'resourceAllocations','resourceUsageLogs','costs','qaqc','risks',
+        'actions','documents','progress','kpiData','assetHistory',
+        'thirdParties','thirdParty','projectTeam','calendar','activities','notifications','trades'];
+      ARRAY_KEYS.forEach(key => {
+        const localArr = AppState.data[key] || [];
+        const remoteArr = remoteData[key] || [];
+        if (!localArr.length && !remoteArr.length) return;
+        // Build a map of remote records by id
+        const remoteMap = new Map(remoteArr.map(r => [r.id, r]));
+        const localMap  = new Map(localArr.map(r => [r.id, r]));
+        // Start with all remote records
+        const mergedArr = [...remoteArr];
+        // Add local records that don't exist in remote (newly added by this user)
+        localArr.forEach(r => {
+          if (!remoteMap.has(r.id)) mergedArr.push(r);
+        });
+        merged[key] = mergedArr;
+      });
+      // Merge settings — local wins
+      merged.settings = Object.assign({}, remoteData.settings || {}, AppState.data.settings || {});
+      AppState.data = Object.assign(getDefaultData(), merged);
+      _spLastWriteTs = _ts;
+      _spDataHash = _spHash(remoteData) + _ts;
+      if (!silent) showToast('Merged remote changes before push', 'info', 2500);
+    }
 
-    let res;
-    if (_spItemId) {
-      // Update existing item
-      res = await fetch(
-        `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${_spItemId}`,
-        { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
-      );
-      if (res.status === 404) { _spItemId = ''; localStorage.removeItem('shic_sp_itemid'); }
-    }
-    if (!_spItemId) {
-      // Find existing or create new
-      const searchRes = await fetch(
-        `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$filter=fields/DataKey eq 'main'&$expand=fields`,
-        { headers: { Authorization: 'Bearer ' + token } }
-      );
-      const searchData = await searchRes.json();
-      if (searchData.value && searchData.value.length > 0) {
-        _spItemId = searchData.value[0].id;
-        localStorage.setItem('shic_sp_itemid', _spItemId);
-        res = await fetch(
-          `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${_spItemId}`,
-          { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
-        );
-      } else {
-        res = await fetch(
-          `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`,
-          { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
-        );
-        if (res.ok) {
-          const created = await res.json();
-          _spItemId = created.id;
-          localStorage.setItem('shic_sp_itemid', _spItemId);
-        }
-      }
-    }
-    if (res && !res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message || 'Upload failed: ' + res.status);
-    }
+    // ── Step 2: Push merged data ──────────────────────────
+    spSetStatus('syncing', 'Uploading to SharePoint...');
+    const nowTs = Date.now();
+    const payload = { ...AppState.data, _ts: nowTs, _by: _spAccount.username };
+    await _spWriteRemote(token, siteId, listId, payload);
+    _spLastWriteTs = nowTs;
+    _spDataHash = _spHash(AppState.data) + nowTs;
     _spLastSync = new Date().toISOString();
     localStorage.setItem('shic_sp_lastsync', _spLastSync);
     spSetStatus('connected', 'Last sync: ' + fmtSyncTime(_spLastSync));
-    if (!silent) showToast('Data pushed to SharePoint', 'success');
+    if (!silent) showToast('Data pushed to SharePoint ✓', 'success');
     spUpdateSyncInfo();
+    // Apply any pending remote that arrived while we were editing
+    if (_spPendingRemote) {
+      const { data, _ts, _by } = _spPendingRemote;
+      if (_ts > _spLastWriteTs) _spApplyRemote(data, _ts, _by);
+      else _spPendingRemote = null;
+    }
   } catch (e) {
     spSetStatus('error', 'Push failed: ' + e.message);
     if (!silent) showToast('SharePoint push failed: ' + e.message, 'error');
   } finally { _spSyncing = false; }
 }
 
-// ── Pull data from SharePoint List ───────────────────────
+// ── Pull data from SharePoint (with conflict warning) ────
 async function spPullData() {
   if (_spSyncing) return;
   if (!_spConnected || !_spAccount) { showToast('Not connected to SharePoint', 'error'); return; }
-  if (!confirm('Download data from SharePoint? This will REPLACE your current local data.')) return;
+  if (!confirm('Download latest data from SharePoint? Your local unsaved changes will be replaced.')) return;
   _spSyncing = true;
   spSetStatus('syncing', 'Downloading from SharePoint...');
   try {
     const token = await getSpToken();
     if (!token) throw new Error('Could not acquire token');
     const { siteId, listId } = await spResolveSiteAndList(token);
-    const res = await fetch(
-      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$filter=fields/DataKey eq 'main'&$expand=fields`,
-      { headers: { Authorization: 'Bearer ' + token } }
-    );
-    if (!res.ok) throw new Error('Fetch failed: ' + res.status);
-    const result = await res.json();
-    if (!result.value || result.value.length === 0) {
+    const remote = await _spFetchRemote(token, siteId, listId);
+    if (!remote) {
       showToast('No SHIC data found on SharePoint yet — push first', 'warning');
-      _spSyncing = false; spSetStatus('connected', _spLastSync ? 'Last sync: ' + fmtSyncTime(_spLastSync) : 'Connected'); return;
+      spSetStatus('connected', _spLastSync ? 'Last sync: ' + fmtSyncTime(_spLastSync) : 'Connected');
+      return;
     }
-    const item = result.value[0];
-    _spItemId = item.id; localStorage.setItem('shic_sp_itemid', _spItemId);
-    const raw = item.fields?.DataBlob || '';
-    if (!raw) throw new Error('DataBlob is empty');
-    const data = JSON.parse(raw);
-    const { _ts, _by, ...cleanData } = data;
-    AppState.data = { ...getDefaultData(), ...cleanData };
-    migrateData(); AppState.save();
+    const { _ts, _by, ...cleanData } = remote;
+    _spApplyRemote(cleanData, _ts, _by);
     _spLastSync = new Date().toISOString();
     localStorage.setItem('shic_sp_lastsync', _spLastSync);
     spSetStatus('connected', 'Last sync: ' + fmtSyncTime(_spLastSync));
-    navigate('dashboard'); buildSidebar();
-    showToast('Data loaded from SharePoint' + (_by ? ' (by ' + _by + ')' : ''), 'success');
+    showToast('Data loaded from SharePoint' + (_by ? ' (by ' + _by + ')' : '') + ' ✓', 'success');
     spUpdateSyncInfo();
   } catch (e) {
     spSetStatus('error', 'Pull failed: ' + e.message);
     showToast('SharePoint pull failed: ' + e.message, 'error');
   } finally { _spSyncing = false; }
+}
+
+// ── Poll SharePoint every 2 minutes for remote changes ───
+async function _spPollRemote() {
+  if (!_spConnected || !_spAccount || _spSyncing) return;
+  try {
+    const token = await getSpToken();
+    if (!token) return;
+    const { siteId, listId } = await spResolveSiteAndList(token);
+    const remote = await _spFetchRemote(token, siteId, listId);
+    if (!remote || !remote._ts) return;
+    if (remote._ts <= _spLastWriteTs) return; // nothing new
+    const { _ts, _by, ...data } = remote;
+    const hash = _spHash(data) + _ts;
+    if (hash === _spDataHash) return; // same data
+    // Don't overwrite if user has pending edits
+    if (typeof _pendingEdits !== 'undefined' && _pendingEdits) {
+      _spPendingRemote = { data, _ts, _by };
+      if (_by && _by !== _spAccount?.username)
+        showToast('⚠ ' + _by + ' updated SharePoint while you have unsaved changes', 'warning', 5000);
+      return;
+    }
+    _spApplyRemote(data, _ts, _by);
+  } catch (e) {
+    // Silent fail for background polling
+    console.warn('[SP] Poll error:', e.message);
+  }
+}
+
+function spStartPolling() {
+  if (_spPollingTimer) clearInterval(_spPollingTimer);
+  _spPollingTimer = setInterval(_spPollRemote, 120000); // every 2 minutes
+  console.log('[SP] Polling started — checking for remote changes every 2 min');
+}
+
+function spStopPolling() {
+  if (_spPollingTimer) { clearInterval(_spPollingTimer); _spPollingTimer = null; }
 }
 
 // ── Hook AppState.save to auto-sync ──────────────────────
@@ -6779,12 +6892,17 @@ function renderSpPanel() {
       ${_spItemId ? `<div style="font-size:10px;color:var(--text-muted);margin-top:4px">Item ID: <span style="font-family:var(--font-mono)">${_spItemId}</span></div>` : ''}
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-      <button class="btn btn-primary" onclick="spPushData()"><i class="fas fa-cloud-upload-alt"></i> Push to SharePoint</button>
-      <button class="btn btn-secondary" onclick="spPullData()"><i class="fas fa-cloud-download-alt"></i> Pull from SharePoint</button>
+      <button class="btn btn-primary" onclick="spPushData()"><i class="fas fa-cloud-upload-alt"></i> Push My Changes</button>
+      <button class="btn btn-secondary" onclick="spPullData()"><i class="fas fa-cloud-download-alt"></i> Pull Latest</button>
+      <button class="btn btn-secondary" onclick="_spPollRemote().then(()=>showToast('Checked for updates','info',2000))"><i class="fas fa-sync"></i> Check Now</button>
       <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
         <span style="font-size:11px;color:var(--text-secondary)">Auto-sync:</span>
         <label class="toggle"><input type="checkbox" ${_spAutoSync ? 'checked' : ''} onchange="spAutoSyncToggle(this.checked)"><span class="toggle-slider"></span></label>
       </div>
+    </div>
+    <div style="padding:8px 12px;background:rgba(63,185,80,.08);border-radius:6px;font-size:11px;margin-bottom:10px;border-left:3px solid var(--accent-green)">
+      <i class="fas fa-shield-alt" style="color:var(--accent-green);margin-right:6px"></i>
+      <strong>Conflict-safe sync enabled</strong> — changes from multiple users are merged automatically. Remote changes are checked every 2 minutes.
     </div>
     <div id="spStatusMsg" style="font-size:11px;margin-bottom:6px"></div>
     <div id="spSyncInfo" style="font-size:10px;color:var(--text-muted)">${_spLastSync ? 'Last synced: ' + fmtSyncTime(_spLastSync) : 'Never synced'}</div>
@@ -6868,6 +6986,11 @@ function renderSpPanel() {
       if (initSpMSAL() && _spAccount) {
         _spConnected = true;
         console.log('[SP] Auto-connected as', _spAccount.username);
+        // Pull latest then start polling
+        setTimeout(() => {
+          spPullData().catch(() => {});
+          spStartPolling();
+        }, 2000);
       }
     }, 500);
   }
