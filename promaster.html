@@ -4941,7 +4941,8 @@ ${(_spConnected&&_spAccount)?'<div style="padding:10px 14px;background:rgba(248,
 </div>
 
 <!-- ── ONEDRIVE SYNC PANEL ── -->
-<div class="card" style="margin-bottom:16px;border:1px solid ${connected?'rgba(63,185,80,.4)':'rgba(56,139,253,.25)'}">
+${(_spConnected&&_spAccount)?'<div style="padding:8px 12px;background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.2);border-radius:6px;font-size:11px;margin-bottom:8px;display:flex;align-items:center;gap:8px"><i class=\"fas fa-exclamation-triangle\" style=\"color:var(--accent-amber)\"></i><span><strong>OneDrive auto-sync is paused</strong> — SharePoint is your active database. OneDrive can still be used for manual backup.</span></div>':""}
+<div class="card" style="margin-bottom:16px;border:1px solid ${connected?'rgba(63,185,80,.4)':'rgba(56,139,253,.25)'};${(_spConnected&&_spAccount)?'opacity:0.75':''}">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
     <div style="display:flex;align-items:center;gap:12px">
       <div style="width:40px;height:40px;background:linear-gradient(135deg,#0078d4,#106ebe);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
@@ -5167,8 +5168,8 @@ function clearDemoData(){
   AppState.data.settings = savedSettings;
   AppState.save();
 
-  // Push to Firebase if connected
-  if(_fbDb && _fbConnected && _fbRef){
+  // Push to Firebase if connected (and SP not active)
+  if(_fbDb && _fbConnected && _fbRef && !(_spConnected&&_spAccount)){
     _fbIgnoreNext = true;
     _fbLastWrite = Date.now();
     const payload = Object.assign({}, AppState.data, {
@@ -5177,7 +5178,6 @@ function clearDemoData(){
     });
     _fbRef.set(payload)
       .then(()=>{
-        // Broadcast to team
         if(_fbDb){
           _fbDb.ref('shic/broadcast').set({
             type:'reload',
@@ -5192,8 +5192,19 @@ function clearDemoData(){
       .catch(e=>{
         showToast('Cleared locally. Firebase sync failed: '+e.message,'warning',5000);
       });
-  }else{
-    showToast('Data cleared locally. Connect to Firebase to sync to team.','success',4000);
+  }
+
+  // ── Push clear to SharePoint if connected ──
+  if(_spConnected && _spAccount){
+    spPushData(true).then(()=>{
+      showToast('All data cleared and synced to SharePoint — team will see empty data on next pull.','success',5000);
+    }).catch(e=>{
+      showToast('Cleared locally. SharePoint sync failed: '+e.message,'warning',5000);
+    });
+  }
+
+  if(!(_fbDb&&_fbConnected) && !(_spConnected&&_spAccount)){
+    showToast('Data cleared locally. Connect to Firebase or SharePoint to sync to team.','success',4000);
   }
 
   // Navigate to fresh dashboard
@@ -5478,6 +5489,16 @@ function handleOnline(){
     }else{
       updateSyncBar('online',_fbConnected?'Live sync active':'Online');
     }
+    // ── If SharePoint had queued changes, retry now ──
+    if(_spConnected && _spAccount && _spOfflineQueue){
+      showToast('Internet restored — syncing queued SharePoint changes...','info',3000);
+      setTimeout(_spRetryPush, 2000);
+    }
+    // ── If OneDrive had queued changes and SP is NOT active, retry now ──
+    if(_odAccount && !(_spConnected&&_spAccount) && _odAutoSync){
+      clearTimeout(_odSyncTimer);
+      _odSyncTimer = setTimeout(()=>syncToOneDrive(true), 3000);
+    }
   },1500);
 }
 
@@ -5489,6 +5510,10 @@ function handleOffline(){
   if(_fbDb){
     try{if(_fbDb)_fbDb.goOffline();}catch{}
   }
+  // ── Stop SP polling while offline to avoid noisy errors ──
+  if(_spPollingTimer){ clearInterval(_spPollingTimer); _spPollingTimer=null; }
+  // Mark SP as unavailable so save hook queues changes
+  if(_spConnected && _spAccount){ _spAvailable=false; _spOfflineQueue=true; }
 }
 
 // ── Sync Status Bar ───────────────────────────────────────
@@ -6398,6 +6423,9 @@ function odSaveClientId(){
 const _origSave=AppState.save.bind(AppState);
 AppState.save=function(){
   _origSave();
+  // ── If SharePoint is connected, skip OneDrive auto-sync ──
+  // Only one sync system should be active to prevent data conflicts.
+  if(_spConnected&&_spAccount)return;
   if(_odAutoSync&&_odAccount&&!_odSyncing){
     clearTimeout(_odSyncTimer);
     _odSyncTimer=setTimeout(()=>syncToOneDrive(true),5000);
@@ -6447,10 +6475,17 @@ let _spSyncTimer = null;
 let _spSiteId   = localStorage.getItem('shic_sp_siteid') || '';
 let _spListId   = localStorage.getItem('shic_sp_listid') || '';
 // ── Conflict-safe sync state ──────────────────────────────
-let _spLastWriteTs = 0;       // timestamp of last data we pushed or pulled
+let _spLastWriteTs = parseInt(localStorage.getItem('shic_sp_lastwritets')||'0'); // persisted across reloads
 let _spDataHash = '';         // hash of last known remote data
 let _spPendingRemote = null;  // stashed remote snapshot while user has unsaved edits
 let _spPollingTimer = null;   // polling interval for remote changes
+let _spOfflineQueue = !!localStorage.getItem('shic_sp_offlinequeue'); // persisted — survives page reload
+let _spAvailable = true;      // tracks whether SharePoint is reachable
+let _spRetryTimer = null;     // retry timer when SP is unavailable
+// Track deletions so they survive merges (deleted records won't get re-added by returning users)
+let _spDeletedIds = JSON.parse(localStorage.getItem('shic_sp_deleted_ids') || '{}');
+// Format: { 'projects': ['PRJ-001', 'PRJ-002'], 'tasks': ['TSK-001'] }
+const SP_DELETED_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // keep deletion records for 7 days
 
 const SP_SCOPES = ['https://graph.microsoft.com/Sites.ReadWrite.All', 'User.Read'];
 
@@ -6482,13 +6517,23 @@ function initSpMSAL() {
 async function getSpToken() {
   if (!_spMsalApp || !_spAccount) return null;
   try {
+    // MSAL 3.x: ensure initialized before token calls
+    if (_spMsalApp.initialize) {
+      try { await _spMsalApp.initialize(); } catch(ie) {}
+    }
     const res = await _spMsalApp.acquireTokenSilent({ scopes: SP_SCOPES, account: _spAccount });
     return res.accessToken;
   } catch (e) {
     try {
+      if (_spMsalApp.initialize) {
+        try { await _spMsalApp.initialize(); } catch(ie) {}
+      }
       const res = await _spMsalApp.acquireTokenPopup({ scopes: SP_SCOPES, account: _spAccount });
       return res.accessToken;
-    } catch (e2) { return null; }
+    } catch (e2) {
+      console.error('[SP] Token error:', e2.message || e2);
+      return null;
+    }
   }
 }
 
@@ -6546,6 +6591,20 @@ async function spResolveSiteAndList(token) {
         }
       );
       if (!createRes.ok) {
+        if (createRes.status === 409) {
+          // List already exists (concurrent creation) — find it
+          console.log('[SP] List creation conflict (409) — fetching existing list');
+          const retryRes = await fetch(
+            `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists?$filter=displayName eq '${_spListName}'`,
+            { headers: { Authorization: 'Bearer ' + token } }
+          );
+          const retryData = await retryRes.json();
+          if (retryData.value && retryData.value.length > 0) {
+            _spListId = retryData.value[0].id;
+            localStorage.setItem('shic_sp_listid', _spListId);
+            return { siteId: _spSiteId, listId: _spListId };
+          }
+        }
         const err = await createRes.json().catch(() => ({}));
         throw new Error('Could not create SharePoint list: ' + (err.error?.message || createRes.status));
       }
@@ -6578,8 +6637,33 @@ async function connectSharePoint() {
     await spResolveSiteAndList(token);
     spSetStatus('connected', 'Connected as ' + _spAccount.username);
     showToast('Connected to SharePoint as ' + _spAccount.username, 'success');
-    // Pull latest data on connect, then start polling for changes
-    await spPullData().catch(() => {});
+    // On connect: check if remote has data newer than local before pulling
+    // If local has unsaved edits, push instead of pulling (preserves user work)
+    try {
+      const token2 = await getSpToken();
+      if (token2) {
+        const { siteId: sid, listId: lid } = await spResolveSiteAndList(token2);
+        const remote = await _spFetchRemote(token2, sid, lid);
+        if (!remote || !remote._ts) {
+          // No remote data yet — push local data as the first dataset
+          console.log('[SP] SharePoint empty — pushing local data as initial dataset');
+          await spPushData(true);
+        } else if (remote._ts > _spLastWriteTs && !_spOfflineQueue) {
+          // Remote is newer and we have no queued local changes — safe to pull
+          console.log('[SP] Remote is newer — pulling from SharePoint');
+          const { _ts, _by, ...cleanData } = remote;
+          _spApplyRemote(cleanData, _ts, _by);
+        } else if (_spOfflineQueue) {
+          // We have queued local changes — push with merge (protects local work)
+          console.log('[SP] Local has queued changes — pushing with merge');
+          await spPushData(true);
+        } else {
+          console.log('[SP] Local data is current — no sync needed on connect');
+        }
+      }
+    } catch(ce) {
+      console.warn('[SP] Connect-time sync check failed:', ce.message);
+    }
     spStartPolling();
     renderSettings();
   } catch (e) {
@@ -6597,17 +6681,27 @@ async function disconnectSharePoint() {
   _spAccount = null; _spMsalApp = null; _spConnected = false;
   localStorage.removeItem('shic_sp_autosync'); localStorage.removeItem('shic_sp_lastsync');
   localStorage.removeItem('shic_sp_itemid'); localStorage.removeItem('shic_sp_siteid'); localStorage.removeItem('shic_sp_listid');
+  localStorage.removeItem('shic_sp_lastwritets'); localStorage.removeItem('shic_sp_offlinequeue');
+  localStorage.removeItem('shic_sp_deleted_ids');
   _spLastSync = null; _spAutoSync = false; _spItemId = ''; _spSiteId = ''; _spListId = '';
-  _spLastWriteTs = 0; _spDataHash = ''; _spPendingRemote = null;
+  _spLastWriteTs = 0; _spDataHash = ''; _spPendingRemote = null; _spOfflineQueue = false;
   renderSettings(); showToast('Disconnected from SharePoint', 'warning');
 }
 
-// ── Compute a lightweight hash of data for change detection ──
+// ── Compute a hash of data for change detection ──────────
+// Uses lengths + sample of IDs from key arrays to catch same-length-different-content changes
 function _spHash(data) {
-  return '' + (data.projects?.length||0) + (data.tasks?.length||0)
-    + (data.procurement?.length||0) + (data.resourceAllocations?.length||0)
-    + (data.costs?.length||0) + (data.equipment?.length||0)
-    + (data.manpower?.length||0) + (data.materials?.length||0);
+  const sample = (arr) => {
+    if (!arr || !arr.length) return '0';
+    // Take first, middle, last id + length
+    const a = arr[0]?.id || '';
+    const b = arr[Math.floor(arr.length/2)]?.id || '';
+    const c = arr[arr.length-1]?.id || '';
+    return arr.length + a + b + c;
+  };
+  return sample(data.projects) + sample(data.tasks) + sample(data.procurement)
+    + sample(data.resourceAllocations) + sample(data.costs)
+    + sample(data.equipment) + sample(data.manpower) + sample(data.materials);
 }
 
 // ── Fetch the raw item from SharePoint (no side effects) ──
@@ -6626,8 +6720,8 @@ async function _spFetchRemote(token, siteId, listId) {
   return JSON.parse(raw); // includes _ts, _by, ...data
 }
 
-// ── Write payload to SharePoint (upsert) ─────────────────
-async function _spWriteRemote(token, siteId, listId, payload) {
+// ── Write payload to SharePoint (upsert with 429 backoff) ─
+async function _spWriteRemote(token, siteId, listId, payload, attempt = 0) {
   const body = JSON.stringify({
     fields: {
       Title: 'SHIC_Main', DataKey: 'main',
@@ -6654,10 +6748,71 @@ async function _spWriteRemote(token, siteId, listId, payload) {
       _spItemId = created.id; localStorage.setItem('shic_sp_itemid', _spItemId);
     }
   }
+  // ── Handle 429 Too Many Requests (throttling) ──────────
+  if (res && res.status === 429) {
+    if (attempt >= 4) throw new Error('SharePoint is throttling — too many requests. Try again in a minute.');
+    const retryAfter = parseInt(res.headers.get('Retry-After') || '10');
+    const backoff = Math.max(retryAfter, Math.pow(2, attempt) * 5 + Math.random() * 5) * 1000;
+    console.warn(`[SP] 429 throttled — retrying in ${Math.round(backoff/1000)}s (attempt ${attempt+1})`);
+    spSetStatus('syncing', `Throttled by SharePoint — retrying in ${Math.round(backoff/1000)}s...`);
+    await new Promise(r => setTimeout(r, backoff));
+    // Refresh token before retry
+    token = await getSpToken() || token;
+    return _spWriteRemote(token, siteId, listId, payload, attempt + 1);
+  }
   if (res && !res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error?.message || 'Write failed: ' + res.status);
   }
+}
+
+// ── Record a deletion so it survives future merges ───────
+function _spTrackDeletion(arrayKey, id) {
+  if (!_spDeletedIds[arrayKey]) _spDeletedIds[arrayKey] = {};
+  _spDeletedIds[arrayKey][id] = Date.now();
+  // Prune old entries (> 7 days)
+  const cutoff = Date.now() - SP_DELETED_MAX_AGE;
+  Object.keys(_spDeletedIds).forEach(k => {
+    Object.keys(_spDeletedIds[k]).forEach(did => {
+      if (_spDeletedIds[k][did] < cutoff) delete _spDeletedIds[k][did];
+    });
+  });
+  localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
+}
+
+// ── Check if a record was locally deleted ─────────────────
+function _spWasDeleted(arrayKey, id) {
+  return !!(_spDeletedIds[arrayKey] && _spDeletedIds[arrayKey][id]);
+}
+
+// ── Merge helper: union of remote + local arrays ─────────
+// Remote wins for records that exist in BOTH (authoritative)
+// Local wins only for records added locally that aren't in remote yet
+// Local FIELD edits to existing records are preserved if remote record unchanged
+// Deletions tracked in _spDeletedIds are respected — deleted records NOT re-added
+function _spMergeArrays(localArr, remoteArr, localEdited, arrayKey) {
+  if (!remoteArr.length && !localArr.length) return [];
+  const remoteMap = new Map(remoteArr.map(r => [r.id, r]));
+  const localMap  = new Map(localArr.map(r => [r.id, r]));
+  const result = [];
+  // Start with remote as the base, skipping records we deleted locally
+  remoteArr.forEach(remoteRec => {
+    // Skip if we locally deleted this record
+    if (arrayKey && _spWasDeleted(arrayKey, remoteRec.id)) return;
+    const localRec = localMap.get(remoteRec.id);
+    if (localRec && localEdited) {
+      result.push(localRec); // preserve local field edits
+    } else {
+      result.push(remoteRec);
+    }
+  });
+  // Add records that only exist locally (newly added, not deleted)
+  localArr.forEach(localRec => {
+    if (!remoteMap.has(localRec.id) && !(arrayKey && _spWasDeleted(arrayKey, localRec.id))) {
+      result.push(localRec);
+    }
+  });
+  return result;
 }
 
 // ── Apply a remote snapshot safely ───────────────────────
@@ -6666,17 +6821,54 @@ function _spApplyRemote(data, _ts, _by) {
   if (hash === _spDataHash) return; // no change
   _spDataHash = hash;
   _spLastWriteTs = _ts || Date.now();
-  AppState.data = Object.assign(getDefaultData(), data);
-  if (typeof migrateData === 'function') migrateData();
-  if (typeof _origSaveForFb === 'function') _origSaveForFb();
-  else if (typeof _origSave === 'function') _origSave();
+  localStorage.setItem('shic_sp_lastwritets', String(_spLastWriteTs));
+
+  // ── Determine if user has local unsaved edits ──────────
+  const hasLocalEdits = _spOfflineQueue || (typeof _pendingEdits !== 'undefined' && _pendingEdits);
+
+  if (hasLocalEdits) {
+    // User has local changes — merge instead of replace
+    // This preserves local additions and field edits
+    const ARRAY_KEYS = ['projects','tasks','resources','equipment','tools','vehicles',
+      'consumables','materials','manpower','procurement','procurementLogs',
+      'resourceAllocations','resourceUsageLogs','costs','qaqc','risks',
+      'actions','documents','progress','kpiData','assetHistory',
+      'thirdParties','thirdParty','projectTeam','calendar','activities','notifications','trades'];
+    const merged = Object.assign({}, data);
+    ARRAY_KEYS.forEach(key => {
+      merged[key] = _spMergeArrays(
+        AppState.data[key] || [],
+        data[key] || [],
+        true, // preserve local field edits
+        key   // deletion tracking
+      );
+    });
+    merged.settings = Object.assign({}, data.settings || {}, AppState.data.settings || {});
+    AppState.data = Object.assign(getDefaultData(), merged);
+    if (typeof migrateData === 'function') migrateData();
+    if (typeof _origSaveForFb === 'function') _origSaveForFb();
+    else if (typeof _origSave === 'function') _origSave();
+    setTimeout(() => {
+      try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
+      try { buildSidebar(); } catch(e) {}
+      if (_by && _by !== _spAccount?.username)
+        showToast('↓ Merged remote changes from ' + _by + ' — your local edits preserved', 'info', 4000);
+    }, 400);
+  } else {
+    // No local edits — safe full replace
+    AppState.data = Object.assign(getDefaultData(), data);
+    if (typeof migrateData === 'function') migrateData();
+    if (typeof _origSaveForFb === 'function') _origSaveForFb();
+    else if (typeof _origSave === 'function') _origSave();
+    setTimeout(() => {
+      try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
+      try { buildSidebar(); } catch(e) {}
+      if (_by && _by !== _spAccount?.username)
+        showToast('↓ SharePoint synced — data updated by ' + _by, 'info', 3000);
+    }, 400);
+  }
+
   _spPendingRemote = null;
-  setTimeout(() => {
-    try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
-    try { buildSidebar(); } catch(e) {}
-    if (_by && _by !== _spAccount?.username)
-      showToast('↓ SharePoint synced — data updated by ' + _by, 'info', 3000);
-  }, 400);
 }
 
 // ── Push data to SharePoint (conflict-safe) ───────────────
@@ -6704,19 +6896,12 @@ async function spPushData(silent = false) {
         'actions','documents','progress','kpiData','assetHistory',
         'thirdParties','thirdParty','projectTeam','calendar','activities','notifications','trades'];
       ARRAY_KEYS.forEach(key => {
-        const localArr = AppState.data[key] || [];
-        const remoteArr = remoteData[key] || [];
-        if (!localArr.length && !remoteArr.length) return;
-        // Build a map of remote records by id
-        const remoteMap = new Map(remoteArr.map(r => [r.id, r]));
-        const localMap  = new Map(localArr.map(r => [r.id, r]));
-        // Start with all remote records
-        const mergedArr = [...remoteArr];
-        // Add local records that don't exist in remote (newly added by this user)
-        localArr.forEach(r => {
-          if (!remoteMap.has(r.id)) mergedArr.push(r);
-        });
-        merged[key] = mergedArr;
+        merged[key] = _spMergeArrays(
+          AppState.data[key] || [],
+          remoteData[key] || [],
+          true, // local edits win for existing records
+          key   // deletion tracking
+        );
       });
       // Merge settings — local wins
       merged.settings = Object.assign({}, remoteData.settings || {}, AppState.data.settings || {});
@@ -6729,9 +6914,18 @@ async function spPushData(silent = false) {
     // ── Step 2: Push merged data ──────────────────────────
     spSetStatus('syncing', 'Uploading to SharePoint...');
     const nowTs = Date.now();
-    const payload = { ...AppState.data, _ts: nowTs, _by: _spAccount.username };
+    // Prune large arrays to keep blob under 5MB SP limit
+    const dataForPush = { ...AppState.data };
+    if ((dataForPush.activities || []).length > 200)
+      dataForPush.activities = dataForPush.activities.slice(-200);
+    if ((dataForPush.notifications || []).length > 100)
+      dataForPush.notifications = dataForPush.notifications.slice(-100);
+    // Include deletion tracking so other users' merges respect our deletes
+    dataForPush._deletedIds = _spDeletedIds;
+    const payload = { ...dataForPush, _ts: nowTs, _by: _spAccount.username };
     await _spWriteRemote(token, siteId, listId, payload);
     _spLastWriteTs = nowTs;
+    localStorage.setItem('shic_sp_lastwritets', String(_spLastWriteTs));
     _spDataHash = _spHash(AppState.data) + nowTs;
     _spLastSync = new Date().toISOString();
     localStorage.setItem('shic_sp_lastsync', _spLastSync);
@@ -6745,16 +6939,52 @@ async function spPushData(silent = false) {
       else _spPendingRemote = null;
     }
   } catch (e) {
-    spSetStatus('error', 'Push failed: ' + e.message);
-    if (!silent) showToast('SharePoint push failed: ' + e.message, 'error');
+    // ── SharePoint unavailable — queue the push for retry ──
+    _spAvailable = false;
+    _spOfflineQueue = true;
+    spSetStatus('error', 'SharePoint unavailable — changes queued locally');
+    if (!silent) showToast('SharePoint unreachable — changes saved locally and will sync when restored', 'warning', 5000);
+    console.warn('[SP] Push failed, queuing for retry:', e.message);
+    // Schedule retry in 60 seconds
+    clearTimeout(_spRetryTimer);
+    _spRetryTimer = setTimeout(() => _spRetryPush(), 60000);
   } finally { _spSyncing = false; }
+}
+
+// ── Retry push when SharePoint becomes available again ───
+async function _spRetryPush() {
+  if (!_spConnected || !_spAccount || !_spOfflineQueue) return;
+  if (_spSyncing) { _spRetryTimer = setTimeout(_spRetryPush, 30000); return; }
+  console.log('[SP] Retrying queued push...');
+  spSetStatus('syncing', 'Retrying sync...');
+  try {
+    const token = await getSpToken();
+    if (!token) throw new Error('No token');
+    // Test connectivity with a lightweight request
+    const { siteId, listId } = await spResolveSiteAndList(token);
+    _spAvailable = true;
+    // Now do a full merge push — only clear queue if push succeeds
+    await spPushData(true);
+    // spPushData succeeded (no exception thrown) — safe to clear queue
+    _spOfflineQueue = false;
+    localStorage.removeItem('shic_sp_offlinequeue');
+    showToast('SharePoint reconnected — queued changes synced ✓', 'success', 4000);
+  } catch (e) {
+    console.warn('[SP] Retry failed, will try again in 60s:', e.message);
+    // Keep _spOfflineQueue = true so we retry again
+    _spRetryTimer = setTimeout(_spRetryPush, 60000);
+  }
 }
 
 // ── Pull data from SharePoint (with conflict warning) ────
 async function spPullData() {
   if (_spSyncing) return;
   if (!_spConnected || !_spAccount) { showToast('Not connected to SharePoint', 'error'); return; }
-  if (!confirm('Download latest data from SharePoint? Your local unsaved changes will be replaced.')) return;
+  const hasLocalEdits = _spOfflineQueue || (typeof _pendingEdits !== 'undefined' && _pendingEdits);
+  const msg = hasLocalEdits
+    ? '⚠ You have LOCAL UNSAVED CHANGES that will be LOST if you pull now.\n\nPull anyway and discard your changes?\n\n(Click Cancel to push your changes first instead.)'
+    : 'Download latest data from SharePoint? This will replace your current local data.';
+  if (!confirm(msg)) return;
   _spSyncing = true;
   spSetStatus('syncing', 'Downloading from SharePoint...');
   try {
@@ -6767,11 +6997,23 @@ async function spPullData() {
       spSetStatus('connected', _spLastSync ? 'Last sync: ' + fmtSyncTime(_spLastSync) : 'Connected');
       return;
     }
-    const { _ts, _by, ...cleanData } = remote;
+    const { _ts, _by, _deletedIds: remoteDeleted, ...cleanData } = remote;
+    // Merge remote deletion records into local
+    if (remoteDeleted) {
+      Object.keys(remoteDeleted).forEach(k => {
+        if (!_spDeletedIds[k]) _spDeletedIds[k] = {};
+        Object.assign(_spDeletedIds[k], remoteDeleted[k]);
+      });
+      localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
+    }
     _spApplyRemote(cleanData, _ts, _by);
     _spLastSync = new Date().toISOString();
     localStorage.setItem('shic_sp_lastsync', _spLastSync);
     spSetStatus('connected', 'Last sync: ' + fmtSyncTime(_spLastSync));
+    // Pull succeeded — clear any queued offline changes (remote is now authoritative)
+    _spOfflineQueue = false;
+    localStorage.removeItem('shic_sp_offlinequeue');
+    clearTimeout(_spRetryTimer);
     showToast('Data loaded from SharePoint' + (_by ? ' (by ' + _by + ')' : '') + ' ✓', 'success');
     spUpdateSyncInfo();
   } catch (e) {
@@ -6788,6 +7030,20 @@ async function _spPollRemote() {
     if (!token) return;
     const { siteId, listId } = await spResolveSiteAndList(token);
     const remote = await _spFetchRemote(token, siteId, listId);
+
+    // ── SharePoint is reachable ──
+    if (!_spAvailable) {
+      // SP just came back online
+      _spAvailable = true;
+      console.log('[SP] SharePoint is back online');
+      if (_spOfflineQueue) {
+        // We have queued changes — push them now (merge will handle conflicts)
+        showToast('SharePoint reconnected — syncing queued changes...', 'info', 3000);
+        setTimeout(() => spPushData(true), 1000);
+        return; // skip applying remote for now — push will handle merge
+      }
+    }
+
     if (!remote || !remote._ts) return;
     if (remote._ts <= _spLastWriteTs) return; // nothing new
     const { _ts, _by, ...data } = remote;
@@ -6802,15 +7058,52 @@ async function _spPollRemote() {
     }
     _spApplyRemote(data, _ts, _by);
   } catch (e) {
-    // Silent fail for background polling
-    console.warn('[SP] Poll error:', e.message);
+    // SharePoint unreachable
+    if (_spAvailable) {
+      _spAvailable = false;
+      _spOfflineQueue = true;
+      spSetStatus('error', 'SharePoint unreachable — working locally');
+      console.warn('[SP] Poll error — SP marked unavailable:', e.message);
+    }
   }
 }
 
+// ── Proactive token refresh — refresh 5 min before expiry ──
+let _spTokenExpiry = 0;
+async function _spRefreshTokenIfNeeded() {
+  if (!_spMsalApp || !_spAccount) return;
+  const fiveMinFromNow = Date.now() + 5 * 60 * 1000;
+  if (_spTokenExpiry > fiveMinFromNow) return; // still fresh
+  try {
+    if (_spMsalApp.initialize) await _spMsalApp.initialize().catch(()=>{});
+    const res = await _spMsalApp.acquireTokenSilent({ scopes: SP_SCOPES, account: _spAccount });
+    // Parse expiry from token
+    try {
+      const payload = JSON.parse(atob(res.accessToken.split('.')[1]));
+      _spTokenExpiry = payload.exp * 1000;
+    } catch(e) { _spTokenExpiry = Date.now() + 55 * 60 * 1000; } // assume 55min if can't parse
+  } catch(e) {
+    console.warn('[SP] Proactive token refresh failed:', e.message);
+  }
+}
+// Check token every 10 minutes
+setInterval(_spRefreshTokenIfNeeded, 10 * 60 * 1000);
+
 function spStartPolling() {
   if (_spPollingTimer) clearInterval(_spPollingTimer);
-  _spPollingTimer = setInterval(_spPollRemote, 120000); // every 2 minutes
-  console.log('[SP] Polling started — checking for remote changes every 2 min');
+  // Use 90s base + 0-60s random jitter per user to stagger 10 concurrent pollers
+  // Without jitter: 10 users fire simultaneously → 10 SP requests at same second
+  // With jitter: requests spread across 2min window → max 1-2 requests/10s
+  const baseInterval = 90000;
+  const jitter = Math.floor(Math.random() * 60000);
+  const pollInterval = baseInterval + jitter;
+  _spPollingTimer = setInterval(() => {
+    if (!_isOnline) return;
+    _spPollRemote();
+  }, pollInterval);
+  console.log(`[SP] Polling started — interval: ${Math.round(pollInterval/1000)}s (with jitter)`);
+  // First poll after random delay (3-15s) to stagger startup polls
+  setTimeout(_spPollRemote, 3000 + Math.floor(Math.random() * 12000));
 }
 
 function spStopPolling() {
@@ -6818,14 +7111,54 @@ function spStopPolling() {
 }
 
 // ── Hook AppState.save to auto-sync ──────────────────────
-// Note: OneDrive already patched AppState.save above; we chain on top
+let _spLastSavedHash = ''; // track actual data changes to avoid idle-timer storms
+let _spPrevData = null;    // previous data snapshot for deletion detection
+
+// ── Detect and record deletions by comparing snapshots ───
+function _spDetectDeletions(prevData, newData) {
+  if (!prevData || !_spConnected) return;
+  const ARRAY_KEYS = ['projects','tasks','resources','equipment','tools','vehicles',
+    'consumables','materials','manpower','procurement','resourceAllocations',
+    'costs','qaqc','risks','actions','documents','thirdParties','thirdParty'];
+  ARRAY_KEYS.forEach(key => {
+    const prev = prevData[key] || [];
+    const next = newData[key] || [];
+    if (prev.length <= next.length) return; // no deletions
+    const nextIds = new Set(next.map(r => r.id));
+    prev.forEach(r => {
+      if (r.id && !nextIds.has(r.id)) {
+        _spTrackDeletion(key, r.id);
+      }
+    });
+  });
+}
 const _origSaveForSp = AppState.save.bind(AppState);
 AppState.save = function () {
   _origSaveForSp();
-  if (_spAutoSync && _spConnected && _spAccount && !_spSyncing) {
-    clearTimeout(_spSyncTimer);
-    _spSyncTimer = setTimeout(() => spPushData(true), 8000); // 8s idle debounce
+  if (!_spConnected || !_spAccount) return;
+
+  // Only trigger sync if data actually changed (prevents 30s auto-save storms)
+  const currentHash = _spHash(AppState.data);
+  if (currentHash === _spLastSavedHash) return; // no real change
+  // Detect and record any deletions before updating hash
+  _spDetectDeletions(_spPrevData, AppState.data);
+  _spPrevData = JSON.parse(JSON.stringify(AppState.data)); // snapshot for next comparison
+  _spLastSavedHash = currentHash;
+
+  // Mark that we have unsaved changes regardless of availability
+  _spOfflineQueue = true;
+  localStorage.setItem('shic_sp_offlinequeue', '1');
+  if (!_spAutoSync || _spSyncing) return;
+  if (!_spAvailable || !_isOnline) {
+    spSetStatus('error', 'Offline — changes queued locally');
+    clearTimeout(_spRetryTimer);
+    _spRetryTimer = setTimeout(_spRetryPush, 5000);
+    return;
   }
+  // Add per-user jitter (0-5s) to spread out pushes from concurrent users
+  const jitter = Math.floor(Math.random() * 5000);
+  clearTimeout(_spSyncTimer);
+  _spSyncTimer = setTimeout(() => spPushData(true), 8000 + jitter);
 };
 
 // ── UI helpers ────────────────────────────────────────────
@@ -6990,13 +7323,37 @@ function renderSpPanel() {
 // Initialize SharePoint MSAL on load if credentials saved
 (function spAutoInit() {
   if (_spClientId && _spSiteUrl) {
-    setTimeout(() => {
+    setTimeout(async () => {
       if (initSpMSAL() && _spAccount) {
         _spConnected = true;
         console.log('[SP] Auto-connected as', _spAccount.username);
-        // Pull latest then start polling
-        setTimeout(() => {
-          spPullData().catch(() => {});
+        setTimeout(async () => {
+          // Smart sync on reload: check timestamps before deciding direction
+          try {
+            const token = await getSpToken();
+            if (!token) { spStartPolling(); return; }
+            const { siteId, listId } = await spResolveSiteAndList(token);
+            const remote = await _spFetchRemote(token, siteId, listId);
+            if (!remote || !remote._ts) {
+              // SP empty — push local data
+              console.log('[SP] Auto-init: SP empty, pushing local data');
+              await spPushData(true);
+            } else if (_spOfflineQueue) {
+              // We have queued local changes — push with merge first
+              console.log('[SP] Auto-init: queued local changes, pushing with merge');
+              await spPushData(true);
+            } else if (remote._ts > _spLastWriteTs) {
+              // Remote is strictly newer than what we last synced — safe to apply
+              console.log('[SP] Auto-init: remote is newer, applying');
+              const { _ts, _by, ...cleanData } = remote;
+              _spApplyRemote(cleanData, _ts, _by);
+            } else {
+              // Local is current — no action needed
+              console.log('[SP] Auto-init: local is current, no sync needed');
+            }
+          } catch(e) {
+            console.warn('[SP] Auto-init sync failed:', e.message);
+          }
           spStartPolling();
         }, 2000);
       }
@@ -7298,9 +7655,14 @@ async function handleAuthStateChange(user){
       if(typeof fbConnectPresence==='function')fbConnectPresence();
     }).catch(e=>{
       console.error('[SHIC] Firebase data load failed:',e.message);
-      AppState.data=getDefaultData();
+      // ── CRITICAL: Do NOT reset to empty data on Firebase error ──
+      // SP-synced data in localStorage must be preserved.
+      // Only reset if there's genuinely no local data at all.
+      if(!AppState.data || !AppState.data.projects){
+        AppState.data=getDefaultData();
+      }
       if(typeof renderPage==='function')renderPage('dashboard');
-      showToast('Firebase sync failed — working offline','warning',4000);
+      showToast('Firebase sync failed — working with local data','warning',4000);
     });
   }
 }
@@ -8013,6 +8375,11 @@ function importData(){
         AppState.save();
         buildSidebar();navigate('dashboard');
         showToast(`Data imported from v${importVersion} backup`,'success');
+        // ── Push imported data to SharePoint if connected ──
+        if(_spConnected && _spAccount){
+          setTimeout(()=>spPushData(true),1000);
+          showToast('Pushing imported data to SharePoint...','info',3000);
+        }
       }catch(e){showToast('Import failed: '+e.message,'error');}
     };
     r.readAsText(f);
@@ -8027,6 +8394,7 @@ function clearAllData(){
   try{if(_auth)_auth.signOut();}catch(e){}
   ['pm_data','pm_theme','shic_data_version','shic_applied_patches',
    PERSISTENT_PATCHES_KEY,'shic_offline_queue','shic_offline_data',
+   'shic_sp_lastwritets','shic_sp_offlinequeue','shic_sp_lastsync','shic_sp_itemid',
   ].forEach(k=>{try{localStorage.removeItem(k);}catch{} });
   // Keep Firebase config so user doesn't have to reconnect
   localStorage.removeItem('pm_data');
@@ -11993,16 +12361,42 @@ window.addEventListener('load',init);
 
 // Push pending edits on page unload (browser close, tab close, navigation)
 window.addEventListener('beforeunload', function(e){
-  if(_pendingEdits && _fbConnected && _fbDb){
-    // Use sendBeacon-style synchronous Firebase for before-unload
+  // ── SP: flush pending changes using keepalive fetch (survives tab close) ──
+  if (_spConnected && _spAccount && _spOfflineQueue && !_spSyncing) {
+    try {
+      getSpToken().then(token => {
+        if (!token) return;
+        return spResolveSiteAndList(token).then(({ siteId, listId }) => {
+          const body = JSON.stringify({ fields: {
+            Title: 'SHIC_Main', DataKey: 'main',
+            DataBlob: JSON.stringify({ ...AppState.data, _ts: Date.now(), _by: _spAccount.username }),
+            UpdatedBy: _spAccount.username, UpdatedAt: new Date().toISOString(),
+          }});
+          const url = _spItemId
+            ? `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${_spItemId}`
+            : `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`;
+          return fetch(url, {
+            method: _spItemId ? 'PATCH' : 'POST',
+            headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body, keepalive: true
+          });
+        });
+      }).then(() => {
+        _spOfflineQueue = false;
+        localStorage.removeItem('shic_sp_offlinequeue');
+      }).catch(() => {});
+    } catch(e2) {}
+    // Show warning dialog so user knows to wait a moment
+    const spMsg = 'You have unsaved changes not yet synced to SharePoint. Please wait a moment before closing.';
+    e.preventDefault(); e.returnValue = spMsg; return spMsg;
+  }
+  // ── Firebase: flush pending changes ──
+  if(_pendingEdits && _fbConnected && _fbDb && !(_spConnected&&_spAccount)){
     clearTimeout(window._fbIdleTimer);
     clearTimeout(window._fbBatchTimer);
-    fbPushData(true); // best-effort — browser may not complete it
-    // Show browser's native "unsaved changes" dialog as fallback
-    const msg = 'You have unsaved changes that may not be synced to Firebase yet.';
-    e.preventDefault();
-    e.returnValue = msg;
-    return msg;
+    fbPushData(true);
+    const msg = 'You have unsaved changes that may not be synced yet.';
+    e.preventDefault(); e.returnValue = msg; return msg;
   }
 });
 </script>
