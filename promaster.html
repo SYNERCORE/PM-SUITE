@@ -7190,8 +7190,9 @@ async function handleAuthStateChange(user){
         const btn=document.getElementById('pendingSelfApprove');
         if(btn)btn.style.display=hasAdmin?'none':'block';
       }).catch(()=>{
+        // On error, default to hiding the button — safer than allowing self-approve
         const btn=document.getElementById('pendingSelfApprove');
-        if(btn)btn.style.display='block';
+        if(btn)btn.style.display='none';
       });
     }
     return;
@@ -7434,6 +7435,21 @@ async function doForgotPassword(){
 // ── Logout ────────────────────────────────────────────────
 async function selfApproveAsAdmin(){
   if(!_auth||!_fbDb||!_currentUser){showToast('Not signed in','error');return;}
+  // Re-verify on server that no admin exists before allowing self-approve
+  try{
+    const snap=await _fbDb.ref('shic/users').once('value');
+    const users=[];snap.forEach(c=>users.push(c.val()));
+    const hasAdmin=users.some(u=>u.isAdmin&&u.status==='approved'&&u.uid!==_currentUser.uid);
+    if(hasAdmin){
+      showToast('An admin already exists — contact them to approve your account.','error',5000);
+      const btn=document.getElementById('pendingSelfApprove');
+      if(btn)btn.style.display='none';
+      return;
+    }
+  }catch(e){
+    showToast('Could not verify admin status — try again later.','error');
+    return;
+  }
   if(!confirm('Approve yourself as Admin? Only do this if you are the first user and there is no existing admin.'))return;
   const uid=_currentUser.uid;
   const email=_currentUser.email||'';
