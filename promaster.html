@@ -4815,7 +4815,8 @@ $('#settings').innerHTML=`
 <div id="offlineStatusContainer"></div>
 
 <!-- ── FIREBASE REAL-TIME COLLABORATION PANEL ── -->
-<div class="card" id="fbCollabCard" style="margin-bottom:16px;border:1px solid rgba(251,143,68,.25)">
+${(_spConnected&&_spAccount)?'<div style="padding:10px 14px;background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.25);border-radius:8px;font-size:11px;margin-bottom:12px;display:flex;align-items:center;gap:8px"><i class=\"fas fa-exclamation-triangle\" style=\"color:var(--accent-red)\"></i><span><strong>Firebase sync is paused</strong> — SharePoint is your active database. Firebase auto-push and listener are disabled to prevent data conflicts.</span></div>':""}
+<div class="card" id="fbCollabCard" style="margin-bottom:16px;border:1px solid rgba(251,143,68,.25);${(_spConnected&&_spAccount)?'opacity:0.6;pointer-events:none':''}">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
     <div style="display:flex;align-items:center;gap:12px">
       <div style="width:40px;height:40px;background:linear-gradient(135deg,#ff9a00,#ff6f00);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
@@ -5983,6 +5984,9 @@ function fbListenData(){
   _fbListening=true;
   _fbRef.on('value',snap=>{
     if(_fbIgnoreNext){_fbIgnoreNext=false;return;}
+    // ── If SharePoint is the primary DB, ignore Firebase snapshots ──
+    // Firebase listener firing would overwrite SharePoint-synced data.
+    if(_spConnected && _spAccount){ return; }
     const remote=snap.val();
     if(!remote)return;
     if(!remote._ts||remote._ts<=_fbLastWrite)return; // our data is newer or same
@@ -6145,6 +6149,10 @@ let   _pendingEdits  = false;
 
 AppState.save = function(){
   _origSaveForFb(); // always save to localStorage instantly
+
+  // ── If SharePoint is the primary DB, skip Firebase auto-push entirely ──
+  // Two sync systems pushing simultaneously causes data loss (last write wins).
+  if(_spConnected && _spAccount) return;
 
   if(window._shicSyncMode==='manual') return; // manual mode: no auto-push
   if(!_fbConnected || !_fbDb) return;
