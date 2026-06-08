@@ -607,6 +607,7 @@ function getDefaultData(){
     assetHistory:[],thirdParties:[],projectTeam:[],activities:[],notifications:[],
     trades:[],
     settings:{companyName:'SHIC',currency:'PHP',timezone:'Asia/Manila'},
+    businessUnits:[], // [{id,name,color,description}]
   };
 }
 
@@ -1229,7 +1230,7 @@ ctx.fillStyle='#8b949e';ctx.font='9px Outfit';ctx.textAlign='center';
 ctx.fillText(p.id.replace('PRJ-','P'),x+bW/2,H-4);});}
 
 
-let projectFilter='all',projectSearch='';
+let projectFilter='all',projectSearch='',projectBUFilter='all';
 function renderProjects(){
 const el=$('#projects');
 el.innerHTML=`<div class="section-header" style="margin-bottom:14px">
@@ -1240,6 +1241,11 @@ el.innerHTML=`<div class="section-header" style="margin-bottom:14px">
 </div></div>
 <div class="filters-bar">
 ${['all','active','completed','planned'].map(f=>`<button class="btn btn-sm ${projectFilter===f?'btn-primary':'btn-secondary'}" onclick="filterProjects('${f}')">${f.charAt(0).toUpperCase()+f.slice(1)}</button>`).join('')}
+<select class="form-select" style="height:30px;width:160px" id="projBUFilter" onchange="projectBUFilter=this.value;renderProjCards()&&($('#projectsGrid').innerHTML=renderProjCards())">
+  <option value="all">All Business Units</option>
+  <option value="">Main Company</option>
+  ${(AppState.data.businessUnits||[]).map(bu=>`<option value="${bu.id}" ${typeof projectBUFilter!=='undefined'&&projectBUFilter===bu.id?'selected':''}>${bu.name}</option>`).join('')}
+</select>
 <div class="search-bar" style="margin-left:auto"><i class="fas fa-search"></i><input type="text" placeholder="Search..." value="${projectSearch}" oninput="searchProjects(this.value)"></div>
 </div>
 <div class="grid grid-3" id="projectsGrid">${renderProjCards()}</div>`;}
@@ -1247,6 +1253,9 @@ ${['all','active','completed','planned'].map(f=>`<button class="btn btn-sm ${pro
 function renderProjCards(){
 let ps=AppState.data.projects;
 if(projectFilter!=='all')ps=ps.filter(p=>p.status===projectFilter);
+if(typeof projectBUFilter!=='undefined'&&projectBUFilter!=='all'){
+  ps=ps.filter(p=>(p.businessUnit||'')===(projectBUFilter||'')); 
+}
 if(projectSearch)ps=ps.filter(p=>p.name.toLowerCase().includes(projectSearch.toLowerCase())||p.client.toLowerCase().includes(projectSearch.toLowerCase()));
 if(!ps.length)return`<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-folder-open"></i><p>No projects found</p></div>`;
 return ps.map(p=>{
@@ -1254,7 +1263,9 @@ const bu=Math.round((p.spent/p.budget)*100);
 const dl=daysBetween(new Date().toISOString().split('T')[0],p.endDate);
 return`<div class="project-card">
 <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
-<div><div class="project-card-id">${p.id} &middot; ${p.discipline||''}</div><div class="project-card-name">${p.name}</div><div class="project-card-client"><i class="fas fa-building" style="font-size:9px"></i> ${p.client}</div></div>
+<div><div class="project-card-id">${p.id} &middot; ${p.discipline||''}</div><div class="project-card-name">${p.name}</div><div class="project-card-client"><i class="fas fa-building" style="font-size:9px"></i> ${p.client}</div>
+${p.businessUnit?(()=>{const bu=(AppState.data.businessUnits||[]).find(b=>b.id===p.businessUnit);return bu?`<div style="margin-top:3px"><span style="font-size:9px;padding:1px 7px;border-radius:10px;background:${bu.color||'#388bfd'}22;color:${bu.color||'#388bfd'};font-weight:600;border:1px solid ${bu.color||'#388bfd'}44"><i class="fas fa-layer-group" style="margin-right:3px;font-size:8px"></i>${bu.name}</span></div>`:'';})():''}
+</div>
 <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">${sBadge(p.status)}${pBadge(p.priority)}</div></div>
 <div style="margin:10px 0">
 <div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="font-size:10px;color:var(--text-secondary)">Progress</span><span style="font-size:11px;font-weight:700;font-family:var(--font-mono)">${p.progress}%</span></div>
@@ -1289,6 +1300,11 @@ $('#projectModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">Priority</label><select class="form-select" id="pPri">${['critical','high','medium','low'].map(s=>`<option value="${s}" ${p?.priority===s?'selected':''}>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Discipline</label><input class="form-input" id="pDisc" value="${p?.discipline||''}" placeholder="e.g., Civil/Structural"></div>
 <div class="form-group"><label class="form-label">Progress %</label><input class="form-input" type="number" id="pProg" value="${p?.progress||0}" min="0" max="100"></div>
+<div class="form-group"><label class="form-label">Business Unit</label>
+<select class="form-select" id="pBU">
+<option value="">— None / Main Company —</option>
+${(AppState.data.businessUnits||[]).map(bu=>`<option value="${bu.id}" ${p?.businessUnit===bu.id?'selected':''}>${bu.name}</option>`).join('')}
+</select></div>
 </div>
 <div class="form-group"><label class="form-label">Description</label><textarea class="form-textarea" id="pDesc">${p?.description||''}</textarea></div>
 <div class="modal-footer">
@@ -1297,7 +1313,7 @@ $('#projectModalBody').innerHTML=`<div class="form-grid">
 </div>`; openModal('projectModal');}
 
 function saveProject(id){
-const pr={id:$('#pId').value,name:$('#pName').value,client:$('#pClient').value,location:$('#pLoc').value,startDate:$('#pStart').value,endDate:$('#pEnd').value,budget:parseFloat($('#pBudget').value)||0,pm:$('#pPM').value,status:$('#pStatus').value,priority:$('#pPri').value,discipline:$('#pDisc').value,progress:parseInt($('#pProg').value)||0,description:$('#pDesc').value,spent:0,riskLevel:'medium',phase:'Initiation'};
+const pr={id:$('#pId').value,name:$('#pName').value,client:$('#pClient').value,location:$('#pLoc').value,startDate:$('#pStart').value,endDate:$('#pEnd').value,budget:parseFloat($('#pBudget').value)||0,pm:$('#pPM').value,status:$('#pStatus').value,priority:$('#pPri').value,discipline:$('#pDisc').value,progress:parseInt($('#pProg').value)||0,description:$('#pDesc').value,businessUnit:$('#pBU')?.value||'',spent:0,riskLevel:'medium',phase:'Initiation'};
 if(!pr.name){showToast('Project name required','error');return;}
 if(id){const idx=(AppState.data.projects||[]).findIndex(p=>p.id===id);AppState.data.projects[idx]={...AppState.data.projects[idx],...pr};}
 else AppState.data.projects.push(pr);
@@ -4660,46 +4676,297 @@ $('#upcomingEvents').innerHTML=upcoming.length?upcoming.map(e=>`
 <div style="font-size:11px;font-family:var(--font-mono);color:var(--text-secondary)">${e.date}</div>
 </div>`).join(''):`<div class="empty-state"><i class="fas fa-calendar-check"></i><p>No upcoming events</p></div>`;}
 
+// ── Report filter state ───────────────────────────────────
+let _reportBUFilter = 'all'; // 'all' | '' (main co) | bu.id
+
 function renderReports(){
-const{projects,costs}=AppState.data;
-const totBudget=projects.reduce((s,p)=>s+p.budget,0),totSpent=projects.reduce((s,p)=>s+p.spent,0);
-const avgProg=Math.round(projects.reduce((s,p)=>s+p.progress,0)/projects.length);
-const now=new Date().toLocaleDateString('en',{year:'numeric',month:'long',day:'numeric'});
-$('#reports').innerHTML=`<div class="section-header" style="margin-bottom:14px">
-<div class="section-title">Report Generator</div>
-<div style="display:flex;gap:7px">
-<button class="btn btn-secondary btn-sm" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
-<button class="btn btn-primary btn-sm" onclick="exportCSV((AppState.data.projects||[]).map(p=>[p.id,p.name,p.client,p.status,p.progress+'%',p.budget,p.spent]),['ID','Name','Client','Status','Progress','Budget','Spent'],'report.csv')"><i class="fas fa-file-csv"></i> Export CSV</button>
-</div></div>
-<div class="grid grid-3" style="margin-bottom:14px">
-${['Project Status Report','Resource Utilization','Cost & Budget Report','QA/QC Summary','Risk Summary','Procurement Status'].map((r,i)=>`
-<div class="card" style="cursor:pointer;transition:var(--transition)" onmouseover="this.style.borderColor='var(--accent-blue)'" onmouseout="this.style.borderColor='var(--border)'" onclick="showToast('Generating: ${r}','info')">
-<div style="display:flex;align-items:center;gap:10px">
-<div style="width:38px;height:38px;border-radius:8px;background:rgba(56,139,253,.15);display:flex;align-items:center;justify-content:center">
-<i class="fas ${['fa-chart-bar','fa-users','fa-dollar-sign','fa-check-double','fa-shield-alt','fa-shopping-cart'][i]}" style="color:var(--accent-blue)"></i></div>
-<div><div style="font-size:13px;font-weight:600">${r}</div><div style="font-size:11px;color:var(--text-secondary)">Click to generate</div></div></div></div>`).join('')}
-</div>
-<div style="background:linear-gradient(135deg,#0d47a1,#1565c0);color:#fff;padding:18px;border-radius:var(--radius);margin-bottom:14px">
-<div style="font-size:18px;font-weight:700">Executive Project Status Report</div>
-<div style="font-size:12px;opacity:.8">Generated: ${now} &middot; ${AppState.data.settings.companyName}</div></div>
-<div class="grid grid-4" style="margin-bottom:14px">
-${sc('fas fa-briefcase','Total Projects',projects.length,'Portfolio','#388bfd','rgba(56,139,253,.15)')}
-${sc('fas fa-chart-line','Avg Progress',avgProg+'%',projects.filter(p=>p.status==='active').length+' active','#3fb950','rgba(63,185,80,.15)')}
-${sc('fas fa-dollar-sign','Total Budget',fmtNum(totBudget),'All projects','#f0a450','rgba(240,164,80,.15)')}
-${sc('fas fa-dollar-sign','Total Spent',fmtNum(totSpent),Math.round(totSpent/totBudget*100)+'% utilized','#bc8cff','rgba(188,140,255,.15)')}
-</div>
-<div class="card"><div class="table-wrap"><table>
-<thead><tr><th>Project ID</th><th>Name</th><th>Client</th><th>PM</th><th>Progress</th><th>Budget</th><th>Status</th><th>Risk Level</th></tr></thead>
-<tbody>${_pgSlice("projects_list",projects).map(p=>`<tr>
-<td style="font-size:10px;font-family:var(--font-mono)">${p.id}</td>
-<td style="font-size:12px;font-weight:500;max-width:200px">${p.name}</td>
-<td style="font-size:11px">${p.client}</td>
-<td style="font-size:11px">${p.pm.split(' ')[0]}</td>
-<td><div style="display:flex;align-items:center;gap:5px"><div class="progress-bar" style="width:55px;height:5px"><div class="progress-fill" style="width:${p.progress}%;background:${pColor(p.progress)}"></div></div><span style="font-size:10px;font-family:var(--font-mono)">${p.progress}%</span></div></td>
-<td style="font-family:var(--font-mono);font-size:11px">${fmtCur(p.budget)}</td>
-<td>${sBadge(p.status)}</td>
-<td><span class="badge ${p.riskLevel==='high'?'badge-red':p.riskLevel==='medium'?'badge-amber':'badge-green'}">${p.riskLevel||'low'}</span></td>
-</tr>`).join('')}</tbody></table>${_pgNav("projects_list",projects,typeof renderProjects==="function"?renderProjects:null)}</div></div>`;}
+  const now = new Date().toLocaleDateString('en',{year:'numeric',month:'long',day:'numeric'});
+  const companyName = AppState.data.settings?.companyName || 'SHIC';
+  const BUs = AppState.data.businessUnits || [];
+
+  // Build report view for a given set of projects + scope label
+  function buildReportHTML(scopeProjects, scopeLabel, scopeColor, isCompact) {
+    const costs = AppState.data.costs || [];
+    const scopeCosts = costs.filter(c => scopeProjects.some(p => p.id === c.projectId));
+    const totBudget = scopeProjects.reduce((s,p)=>s+p.budget,0);
+    const totSpent  = scopeProjects.reduce((s,p)=>s+p.spent,0);
+    const totPlanned = scopeCosts.reduce((s,c)=>s+c.planned,0);
+    const totActual  = scopeCosts.reduce((s,c)=>s+c.actual,0);
+    const avgProg = scopeProjects.length ? Math.round(scopeProjects.reduce((s,p)=>s+p.progress,0)/scopeProjects.length) : 0;
+    const active  = scopeProjects.filter(p=>p.status==='active').length;
+    const completed = scopeProjects.filter(p=>p.status==='completed').length;
+    const budgetUtil = totBudget ? Math.round(totSpent/totBudget*100) : 0;
+    const costVariance = totPlanned - totActual;
+
+    return `
+    <div style="border:1px solid ${scopeColor}44;border-radius:10px;overflow:hidden;margin-bottom:${isCompact?'10':'16'}px">
+      <!-- Report header -->
+      <div style="background:linear-gradient(135deg,${scopeColor}dd,${scopeColor}aa);color:#fff;padding:${isCompact?'10px 14px':'14px 18px'}">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:${isCompact?'13':'16'}px;font-weight:700">${scopeLabel}</div>
+            <div style="font-size:10px;opacity:.8">Generated: ${now} &middot; ${companyName}</div>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-sm" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.3);font-size:10px"
+              onclick="exportReportCSV('${scopeLabel}')">
+              <i class="fas fa-file-csv" style="margin-right:4px"></i>Export CSV
+            </button>
+            <button class="btn btn-sm" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.3);font-size:10px"
+              onclick="window.print()">
+              <i class="fas fa-print" style="margin-right:4px"></i>Print
+            </button>
+          </div>
+        </div>
+      </div>
+      <!-- KPI row -->
+      <div style="display:grid;grid-template-columns:repeat(${isCompact?'6':'6'},1fr);gap:1px;background:var(--border)">
+        ${[
+          ['Projects',scopeProjects.length,'total'],
+          ['Active',active,'projects'],
+          ['Completed',completed,'projects'],
+          ['Avg Progress',avgProg+'%','physical'],
+          ['Budget',fmtCur(totBudget),'total'],
+          ['Budget Used',budgetUtil+'%',budgetUtil>90?'⚠ Over budget':'on track'],
+        ].map(([l,v,s])=>`
+        <div style="background:var(--bg-card);padding:10px;text-align:center">
+          <div style="font-size:${isCompact?'13':'16'}px;font-weight:700;font-family:var(--font-mono);color:${scopeColor}">${v}</div>
+          <div style="font-size:9px;font-weight:600;color:var(--text-secondary)">${l}</div>
+          <div style="font-size:9px;color:var(--text-muted)">${s}</div>
+        </div>`).join('')}
+      </div>
+      <!-- Cost breakdown -->
+      ${scopeCosts.length ? `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border)">
+        ${[
+          ['Planned Cost',fmtCur(totPlanned),'from cost records'],
+          ['Actual Cost',fmtCur(totActual),'incurred to date'],
+          ['Variance',fmtCur(Math.abs(costVariance)),(costVariance>=0?'✓ Under':'⚠ Over')+' by '+fmtCur(Math.abs(costVariance))],
+        ].map(([l,v,s])=>`
+        <div style="background:var(--bg-secondary);padding:8px 12px">
+          <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px">${l}</div>
+          <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${v}</div>
+          <div style="font-size:9px;color:${costVariance>=0?'var(--accent-green)':'var(--accent-red)'}">${s}</div>
+        </div>`).join('')}
+      </div>` : ''}
+      <!-- Cost by category -->
+      ${scopeCosts.length ? `
+      <div style="padding:10px 14px;background:var(--bg-secondary)">
+        <div style="font-size:11px;font-weight:600;margin-bottom:8px;color:var(--text-secondary)">COST BY CATEGORY</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${Object.entries(scopeCosts.reduce((acc,c)=>{acc[c.category]=(acc[c.category]||0)+c.actual;return acc;},{}))
+            .sort((a,b)=>b[1]-a[1])
+            .map(([cat,amt])=>`<div style="padding:4px 10px;background:var(--bg-hover);border-radius:6px;font-size:10px">
+              <span style="font-weight:600">${cat}</span>
+              <span style="font-family:var(--font-mono);color:${scopeColor};margin-left:6px">${fmtCur(amt)}</span>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
+      <!-- Projects table -->
+      ${!isCompact ? `
+      <div style="padding:0">
+        <div style="background:var(--bg-hover);padding:7px 14px;font-size:10px;font-weight:700;color:var(--text-secondary);letter-spacing:.5px">PROJECT LIST</div>
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th style="font-size:10px">ID</th>
+            <th style="font-size:10px">Project Name</th>
+            <th style="font-size:10px">Client</th>
+            <th style="font-size:10px">PM</th>
+            <th style="font-size:10px">Progress</th>
+            <th style="font-size:10px">Budget</th>
+            <th style="font-size:10px">Spent</th>
+            <th style="font-size:10px">Status</th>
+          </tr></thead>
+          <tbody>${scopeProjects.map(p=>`<tr>
+            <td style="font-size:10px;font-family:var(--font-mono);font-weight:700;color:${scopeColor}">${p.id}</td>
+            <td style="font-size:11px;font-weight:500;max-width:180px">${p.name}</td>
+            <td style="font-size:10px;color:var(--text-secondary)">${p.client}</td>
+            <td style="font-size:10px">${(p.pm||'').split(' ')[0]}</td>
+            <td>
+              <div style="display:flex;align-items:center;gap:5px">
+                <div class="progress-bar" style="width:50px;height:5px">
+                  <div class="progress-fill" style="width:${p.progress}%;background:${pColor(p.progress)}"></div>
+                </div>
+                <span style="font-size:10px;font-family:var(--font-mono)">${p.progress}%</span>
+              </div>
+            </td>
+            <td style="font-size:10px;font-family:var(--font-mono)">${fmtCur(p.budget)}</td>
+            <td style="font-size:10px;font-family:var(--font-mono);color:${p.spent/p.budget>0.9?'var(--accent-red)':'inherit'}">${fmtCur(p.spent)}</td>
+            <td>${sBadge(p.status)}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>` : `
+      <div style="padding:8px 14px;font-size:10px;color:var(--text-muted)">${scopeProjects.length} project(s) — click <strong>View Full Report</strong> to see details</div>`}
+    </div>`;
+  }
+
+  // Filter projects based on report scope
+  function getProjectsForScope(buId) {
+    const all = AppState.data.projects || [];
+    if (buId === 'all') return all;
+    if (buId === '') return all.filter(p => !p.businessUnit);
+    return all.filter(p => p.businessUnit === buId);
+  }
+
+  // Build BU summary cards for consolidated view
+  function buildBUSummaryCards() {
+    const BUColors = ['#388bfd','#3fb950','#f0a450','#bc8cff','#39d3f2','#f85149','#fb8f44'];
+    let html = '';
+
+    // Main company section
+    const mainProjects = getProjectsForScope('');
+    if (mainProjects.length) {
+      html += buildReportHTML(mainProjects,
+        `${companyName} — Main Company`, '#388bfd', _reportBUFilter !== 'all' && _reportBUFilter !== '');
+    }
+
+    // Each BU section
+    BUs.forEach((bu, i) => {
+      const buProjects = getProjectsForScope(bu.id);
+      const color = bu.color || BUColors[i % BUColors.length];
+      html += buildReportHTML(buProjects,
+        bu.name, color, _reportBUFilter !== 'all' && _reportBUFilter !== bu.id);
+    });
+
+    return html || '<div class="empty-state"><i class="fas fa-layer-group"></i><p>No business units configured yet. Add them in Settings.</p></div>';
+  }
+
+  const allProjects = getProjectsForScope('all');
+  const allCosts = AppState.data.costs || [];
+
+  $('#reports').innerHTML = `
+  <div class="section-header" style="margin-bottom:14px">
+    <div>
+      <div class="section-title">Reports & Analytics</div>
+      <div class="section-sub">Consolidated &amp; per Business Unit reports</div>
+    </div>
+    <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-secondary btn-sm" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+      <button class="btn btn-primary btn-sm" onclick="exportReportCSV('All')"><i class="fas fa-file-csv"></i> Export CSV</button>
+    </div>
+  </div>
+
+  <!-- Report scope selector -->
+  <div class="card" style="margin-bottom:16px;padding:14px">
+    <div style="font-size:12px;font-weight:600;margin-bottom:10px"><i class="fas fa-filter" style="color:var(--accent-blue);margin-right:6px"></i>Report Scope</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-sm ${_reportBUFilter==='all'?'btn-primary':'btn-secondary'}"
+        onclick="_reportBUFilter='all';renderReports()">
+        <i class="fas fa-globe" style="margin-right:4px"></i>Consolidated (All)
+      </button>
+      <button class="btn btn-sm ${_reportBUFilter===''?'btn-primary':'btn-secondary'}"
+        onclick="_reportBUFilter='';renderReports()">
+        <i class="fas fa-building" style="margin-right:4px"></i>${companyName} — Main Company
+      </button>
+      ${BUs.map(bu=>`
+      <button class="btn btn-sm ${_reportBUFilter===bu.id?'btn-primary':'btn-secondary'}"
+        style="${_reportBUFilter===bu.id?'background:'+bu.color+';border-color:'+bu.color:''}"
+        onclick="_reportBUFilter='${bu.id}';renderReports()">
+        <i class="fas fa-layer-group" style="margin-right:4px"></i>${bu.name}
+      </button>`).join('')}
+    </div>
+  </div>
+
+  <!-- Consolidated summary (only shown when viewing all) -->
+  ${_reportBUFilter==='all' ? `
+  <div style="background:linear-gradient(135deg,#0d47a1,#1565c0);color:#fff;padding:16px 20px;border-radius:10px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+      <div>
+        <div style="font-size:18px;font-weight:800">${companyName} — Consolidated Report</div>
+        <div style="font-size:11px;opacity:.7">All Business Units &middot; Generated: ${now}</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px">
+      ${[
+        ['Total Projects', allProjects.length],
+        ['Active', allProjects.filter(p=>p.status==='active').length],
+        ['Completed', allProjects.filter(p=>p.status==='completed').length],
+        ['Avg Progress', Math.round(allProjects.reduce((s,p)=>s+p.progress,0)/(allProjects.length||1))+'%'],
+        ['Total Budget', fmtCur(allProjects.reduce((s,p)=>s+p.budget,0))],
+        ['Total Spent', fmtCur(allProjects.reduce((s,p)=>s+p.spent,0))],
+      ].map(([l,v])=>`
+      <div style="background:rgba(255,255,255,.1);border-radius:7px;padding:8px;text-align:center">
+        <div style="font-size:15px;font-weight:700;font-family:var(--font-mono)">${v}</div>
+        <div style="font-size:9px;opacity:.7">${l}</div>
+      </div>`).join('')}
+    </div>
+    <!-- BU breakdown bar -->
+    ${BUs.length ? `
+    <div style="margin-top:12px">
+      <div style="font-size:10px;opacity:.7;margin-bottom:5px">BUDGET DISTRIBUTION BY BUSINESS UNIT</div>
+      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;gap:1px">
+        ${(()=>{
+          const totalBudget = allProjects.reduce((s,p)=>s+p.budget,0)||1;
+          const BUColors = ['#388bfd','#3fb950','#f0a450','#bc8cff','#39d3f2','#f85149'];
+          const segments = [];
+          // Main company
+          const mainBudget = getProjectsForScope('').reduce((s,p)=>s+p.budget,0);
+          if(mainBudget) segments.push(`<div style="flex:${mainBudget/totalBudget};background:#888;min-width:2px" title="Main: ${fmtCur(mainBudget)}"></div>`);
+          BUs.forEach((bu,i)=>{
+            const buBudget = getProjectsForScope(bu.id).reduce((s,p)=>s+p.budget,0);
+            if(buBudget) segments.push(`<div style="flex:${buBudget/totalBudget};background:${bu.color||BUColors[i%BUColors.length]};min-width:2px" title="${bu.name}: ${fmtCur(buBudget)}"></div>`);
+          });
+          return segments.join('');
+        })()}
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:5px">
+        <div style="display:flex;align-items:center;gap:4px;font-size:9px;opacity:.7">
+          <div style="width:8px;height:8px;border-radius:2px;background:#888"></div>Main Company
+        </div>
+        ${BUs.map((bu,i)=>{
+          const BUColors=['#388bfd','#3fb950','#f0a450','#bc8cff','#39d3f2','#f85149'];
+          const buBudget=getProjectsForScope(bu.id).reduce((s,p)=>s+p.budget,0);
+          return `<div style="display:flex;align-items:center;gap:4px;font-size:9px;opacity:.7">
+            <div style="width:8px;height:8px;border-radius:2px;background:${bu.color||BUColors[i%BUColors.length]}"></div>${bu.name} (${fmtCur(buBudget)})
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
+  </div>` : ''}
+
+  <!-- Per-scope report content -->
+  ${_reportBUFilter === 'all'
+    ? buildBUSummaryCards()
+    : buildReportHTML(
+        getProjectsForScope(_reportBUFilter),
+        _reportBUFilter === ''
+          ? companyName + ' — Main Company'
+          : (BUs.find(b=>b.id===_reportBUFilter)||{name:'Business Unit'}).name,
+        _reportBUFilter === ''
+          ? '#388bfd'
+          : (BUs.find(b=>b.id===_reportBUFilter)||{color:'#388bfd'}).color || '#388bfd',
+        false
+      )
+  }`;
+}
+
+// ── Export report CSV for a given scope ──────────────────
+function exportReportCSV(scopeLabel) {
+  const BUs = AppState.data.businessUnits || [];
+  let projects;
+  if (_reportBUFilter === 'all') projects = AppState.data.projects || [];
+  else if (_reportBUFilter === '') projects = (AppState.data.projects||[]).filter(p=>!p.businessUnit);
+  else projects = (AppState.data.projects||[]).filter(p=>p.businessUnit===_reportBUFilter);
+
+  const costs = AppState.data.costs || [];
+  const rows = projects.map(p => {
+    const pCosts = costs.filter(c=>c.projectId===p.id);
+    const planned = pCosts.reduce((s,c)=>s+c.planned,0);
+    const actual  = pCosts.reduce((s,c)=>s+c.actual,0);
+    const bu = BUs.find(b=>b.id===p.businessUnit);
+    return [
+      p.id, p.name, p.client, bu?bu.name:'Main Company',
+      p.status, p.progress+'%', p.pm,
+      p.budget, p.spent, planned, actual, (planned-actual),
+      p.startDate, p.endDate
+    ];
+  });
+  exportCSV(rows,
+    ['Project ID','Project Name','Client','Business Unit','Status','Progress','PM',
+     'Contract Budget','Spent','Planned Cost','Actual Cost','Variance','Start Date','End Date'],
+    `SHIC_Report_${scopeLabel.replace(/[^a-z0-9]/gi,'_')}_${new Date().toISOString().slice(0,10)}.csv`
+  );
+}
 
 // ── MODULE ACCESS CONTROL ─────────────────────────────────
 const ALL_MODULES=[
@@ -5033,6 +5300,28 @@ ${(_spConnected&&_spAccount)?'<div style="padding:8px 12px;background:rgba(248,8
 <!-- ── SHAREPOINT / M365 DATABASE PANEL ── -->
 ${renderSpPanel()}
 
+<!-- ── BUSINESS UNIT MANAGEMENT ── -->
+<div class="card" style="margin-bottom:16px;border:1px solid rgba(188,140,255,.25)">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="width:40px;height:40px;background:linear-gradient(135deg,#7c3aed,#a855f7);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <i class="fas fa-layer-group" style="color:#fff;font-size:16px"></i>
+      </div>
+      <div>
+        <div style="font-size:15px;font-weight:700">Business Units</div>
+        <div style="font-size:11px;color:var(--text-secondary)">Manage your main company and business unit structure</div>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="showAddBU()"><i class="fas fa-plus"></i> Add Business Unit</button>
+  </div>
+  <div style="padding:8px 12px;background:rgba(188,140,255,.08);border-radius:7px;font-size:11px;margin-bottom:12px;border-left:3px solid #bc8cff">
+    <i class="fas fa-info-circle" style="color:#bc8cff;margin-right:6px"></i>
+    Projects can be assigned to a Business Unit in the project form. Reports can be filtered by BU.
+    The <strong>Main Company</strong> covers projects with no BU assigned.
+  </div>
+  <div id="buList">${renderBUList()}</div>
+</div>
+
 <div class="grid grid-2">
   <div class="card">
     <div style="font-size:14px;font-weight:600;margin-bottom:14px">Company Settings</div>
@@ -5138,6 +5427,134 @@ function saveSettings(){
 AppState.data.settings.companyName=$('#sCompany').value;
 AppState.data.settings.currency=$('#sCurrency').value;
 AppState.save();showToast('Settings saved','success');}
+
+// ── BUSINESS UNIT FUNCTIONS ───────────────────────────────
+const BU_COLORS=['#388bfd','#3fb950','#f0a450','#bc8cff','#39d3f2','#f85149','#fb8f44','#ff6b9d'];
+
+function renderBUList(){
+  const BUs=AppState.data.businessUnits||[];
+  if(!BUs.length)return`<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:12px">
+    <i class="fas fa-layer-group" style="font-size:24px;display:block;margin-bottom:8px;opacity:.3"></i>
+    No business units yet. Click <strong>Add Business Unit</strong> to create one.
+  </div>`;
+  return`<div style="display:flex;flex-direction:column;gap:7px">
+    ${BUs.map((bu,i)=>{
+      const projCount=(AppState.data.projects||[]).filter(p=>p.businessUnit===bu.id).length;
+      return`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-hover);border-radius:8px;border-left:4px solid ${bu.color||BU_COLORS[i%BU_COLORS.length]}">
+        <div style="width:32px;height:32px;border-radius:8px;background:${bu.color||BU_COLORS[i%BU_COLORS.length]}22;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <i class="fas fa-layer-group" style="color:${bu.color||BU_COLORS[i%BU_COLORS.length]};font-size:13px"></i>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600">${bu.name}</div>
+          ${bu.description?`<div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${bu.description}</div>`:''}
+          <div style="font-size:10px;color:var(--text-secondary);margin-top:2px"><span class="badge badge-blue" style="font-size:9px">${projCount} project${projCount!==1?'s':''}</span></div>
+        </div>
+        <div style="display:flex;gap:5px;flex-shrink:0">
+          <button class="btn btn-secondary btn-sm btn-icon" onclick="showEditBU('${bu.id}')" title="Edit"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-danger btn-sm btn-icon" onclick="deleteBU('${bu.id}')" title="Delete"><i class="fas fa-trash"></i></button>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function showAddBU(){
+  const nextColor=BU_COLORS[(AppState.data.businessUnits||[]).length%BU_COLORS.length];
+  $('#genericModalTitle').textContent='Add Business Unit';
+  $('#genericModalBody').innerHTML=`
+  <div class="form-grid">
+    <div class="form-group" style="grid-column:1/-1">
+      <label class="form-label">Business Unit Name *</label>
+      <input class="form-input" id="buName" placeholder="e.g., Fabrication Division">
+    </div>
+    <div class="form-group" style="grid-column:1/-1">
+      <label class="form-label">Description</label>
+      <input class="form-input" id="buDesc" placeholder="Brief description (optional)">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Color</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+        ${BU_COLORS.map(c=>`<div onclick="$('#buColor').value='${c}';$$('.bu-color-swatch').forEach(s=>s.style.outline='none');this.style.outline='2px solid #fff'" 
+          class="bu-color-swatch"
+          style="width:24px;height:24px;border-radius:50%;background:${c};cursor:pointer;${c===nextColor?'outline:2px solid #fff':''}"></div>`).join('')}
+        <input type="color" id="buColor" value="${nextColor}" style="width:24px;height:24px;border:none;border-radius:50%;cursor:pointer;padding:0;background:none">
+      </div>
+    </div>
+  </div>`;
+  $('#genericModalFooter').innerHTML=`
+    <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+    <button class="btn btn-primary" onclick="saveBU()"><i class="fas fa-save"></i> Add</button>`;
+  openModal('genericModal');
+}
+
+function showEditBU(id){
+  const bu=(AppState.data.businessUnits||[]).find(b=>b.id===id);
+  if(!bu)return;
+  $('#genericModalTitle').textContent='Edit Business Unit';
+  $('#genericModalBody').innerHTML=`
+  <div class="form-grid">
+    <div class="form-group" style="grid-column:1/-1">
+      <label class="form-label">Business Unit Name *</label>
+      <input class="form-input" id="buName" value="${bu.name}">
+    </div>
+    <div class="form-group" style="grid-column:1/-1">
+      <label class="form-label">Description</label>
+      <input class="form-input" id="buDesc" value="${bu.description||''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Color</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+        ${BU_COLORS.map(c=>`<div onclick="$('#buColor').value='${c}';$$('.bu-color-swatch').forEach(s=>s.style.outline='none');this.style.outline='2px solid #fff'"
+          class="bu-color-swatch"
+          style="width:24px;height:24px;border-radius:50%;background:${c};cursor:pointer;${c===bu.color?'outline:2px solid #fff':''}"></div>`).join('')}
+        <input type="color" id="buColor" value="${bu.color||'#388bfd'}" style="width:24px;height:24px;border:none;border-radius:50%;cursor:pointer;padding:0;background:none">
+      </div>
+    </div>
+  </div>`;
+  $('#genericModalFooter').innerHTML=`
+    <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+    <button class="btn btn-primary" onclick="saveBU('${id}')"><i class="fas fa-save"></i> Update</button>`;
+  openModal('genericModal');
+}
+
+function saveBU(id){
+  const name=($('#buName')||{}).value?.trim();
+  if(!name){showToast('Name is required','error');return;}
+  if(!AppState.data.businessUnits)AppState.data.businessUnits=[];
+  if(id){
+    const idx=AppState.data.businessUnits.findIndex(b=>b.id===id);
+    if(idx>=0){
+      AppState.data.businessUnits[idx]={...AppState.data.businessUnits[idx],
+        name,description:$('#buDesc').value?.trim()||'',color:$('#buColor').value};
+      showToast('Business unit updated','success');
+    }
+  }else{
+    const newId='BU-'+Date.now().toString(36).toUpperCase();
+    AppState.data.businessUnits.push({id:newId,name,description:$('#buDesc').value?.trim()||'',color:$('#buColor').value});
+    showToast('Business unit added','success');
+  }
+  AppState.save();
+  closeModal('genericModal');
+  const buListEl=$('#buList');
+  if(buListEl)buListEl.innerHTML=renderBUList();
+}
+
+function deleteBU(id){
+  const bu=(AppState.data.businessUnits||[]).find(b=>b.id===id);
+  if(!bu)return;
+  const projCount=(AppState.data.projects||[]).filter(p=>p.businessUnit===id).length;
+  const msg=projCount>0
+    ?`Delete "${bu.name}"? This BU has ${projCount} project(s). They will be reassigned to Main Company.`
+    :`Delete "${bu.name}"? This cannot be undone.`;
+  if(!confirm(msg))return;
+  // Unassign projects
+  (AppState.data.projects||[]).forEach(p=>{if(p.businessUnit===id)p.businessUnit='';});
+  AppState.data.businessUnits=(AppState.data.businessUnits||[]).filter(b=>b.id!==id);
+  AppState.save();
+  const buListEl=$('#buList');
+  if(buListEl)buListEl.innerHTML=renderBUList();
+  showToast('Business unit deleted','warning');
+}
 
 
 
@@ -6563,14 +6980,17 @@ async function spResolveSiteAndList(token) {
   }
 
   if (!_spListId) {
-    // Try to find existing list by name
+    // Fetch all lists and match by name — $filter causes 400 on some SharePoint configs
     const listRes = await fetch(
-      `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists?$filter=displayName eq '${_spListName}'`,
+      `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists?$top=100`,
       { headers: { Authorization: 'Bearer ' + token } }
     );
     const listData = await listRes.json();
-    if (listData.value && listData.value.length > 0) {
-      _spListId = listData.value[0].id;
+    const foundList = (listData.value||[]).find(l =>
+      l.displayName === _spListName || l.name === _spListName
+    );
+    if (foundList) {
+      _spListId = foundList.id;
     } else {
       // Create the list if it doesn't exist
       const createRes = await fetch(
@@ -6595,12 +7015,15 @@ async function spResolveSiteAndList(token) {
           // List already exists (concurrent creation) — find it
           console.log('[SP] List creation conflict (409) — fetching existing list');
           const retryRes = await fetch(
-            `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists?$filter=displayName eq '${_spListName}'`,
+            `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists?$top=100`,
             { headers: { Authorization: 'Bearer ' + token } }
           );
           const retryData = await retryRes.json();
-          if (retryData.value && retryData.value.length > 0) {
-            _spListId = retryData.value[0].id;
+          const retryFound = (retryData.value||[]).find(l =>
+            l.displayName === _spListName || l.name === _spListName
+          );
+          if (retryFound) {
+            _spListId = retryFound.id;
             localStorage.setItem('shic_sp_listid', _spListId);
             return { siteId: _spSiteId, listId: _spListId };
           }
@@ -6706,18 +7129,39 @@ function _spHash(data) {
 
 // ── Fetch the raw item from SharePoint (no side effects) ──
 async function _spFetchRemote(token, siteId, listId) {
+  // Strategy 1: fetch by cached item ID directly (fastest, no filter needed)
+  if (_spItemId) {
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${_spItemId}?$expand=fields`,
+      { headers: { Authorization: 'Bearer ' + token } }
+    );
+    if (res.ok) {
+      const item = await res.json();
+      const raw = item.fields?.DataBlob || '';
+      if (!raw) return null;
+      return JSON.parse(raw);
+    }
+    if (res.status === 404) {
+      // Item was deleted — clear cache and fall through to search
+      _spItemId = ''; localStorage.removeItem('shic_sp_itemid');
+    } else {
+      throw new Error('Fetch failed: ' + res.status);
+    }
+  }
+  // Strategy 2: fetch all items (list should only have 1 item) — no filter needed
   const res = await fetch(
-    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$filter=fields/DataKey eq 'main'&$expand=fields`,
+    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=10`,
     { headers: { Authorization: 'Bearer ' + token } }
   );
   if (!res.ok) throw new Error('Fetch failed: ' + res.status);
   const result = await res.json();
   if (!result.value || result.value.length === 0) return null;
-  const item = result.value[0];
+  // Find the SHIC_Main item by Title field
+  const item = result.value.find(i => i.fields?.Title === 'SHIC_Main') || result.value[0];
   if (item.id) { _spItemId = item.id; localStorage.setItem('shic_sp_itemid', _spItemId); }
   const raw = item.fields?.DataBlob || '';
   if (!raw) return null;
-  return JSON.parse(raw); // includes _ts, _by, ...data
+  return JSON.parse(raw);
 }
 
 // ── Write payload to SharePoint (upsert with 429 backoff) ─
