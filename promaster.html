@@ -6172,6 +6172,16 @@ function initFirebase(config){
     _fbConfig=config;
     _fbUser=fbGetUser();
     fbSaveConfig(config);
+    // ── If SharePoint is the primary DB, keep Firebase offline ──
+    // This prevents the BrowserPollConnection ERR_NAME_NOT_RESOLVED flood
+    if(_spConnected && _spAccount){
+      try{ _fbDb.goOffline(); }catch{}
+      console.log('[FB] SP is primary DB — Firebase kept offline (auth only)');
+      _fbConnected=true;
+      fbUpdateUI();
+      setTimeout(initFirebaseAuth,300);
+      return true;
+    }
     fbConnectPresence();
     fbListenData();
     _fbConnected=true;
@@ -7060,6 +7070,10 @@ async function connectSharePoint() {
     await spResolveSiteAndList(token);
     spSetStatus('connected', 'Connected as ' + _spAccount.username);
     showToast('Connected to SharePoint as ' + _spAccount.username, 'success');
+    // ── Silence Firebase now that SP is the primary DB ──
+    if(_fbDb){ try{ _fbDb.goOffline(); }catch{} }
+    clearTimeout(window._fbIdleTimer);
+    clearTimeout(window._fbBatchTimer);
     // On connect: check if remote has data newer than local before pulling
     // If local has unsaved edits, push instead of pulling (preserves user work)
     try {
@@ -7101,6 +7115,8 @@ async function disconnectSharePoint() {
   if (!confirm('Disconnect SharePoint sync? Your local data will remain.')) return;
   if (_spMsalApp && _spAccount) { try { await _spMsalApp.logoutPopup({ account: _spAccount }); } catch (e) {} }
   spStopPolling();
+  // Re-enable Firebase if it was running before SP took over
+  if(_fbDb){ try{ _fbDb.goOnline(); }catch{} }
   _spAccount = null; _spMsalApp = null; _spConnected = false;
   localStorage.removeItem('shic_sp_autosync'); localStorage.removeItem('shic_sp_lastsync');
   localStorage.removeItem('shic_sp_itemid'); localStorage.removeItem('shic_sp_siteid'); localStorage.removeItem('shic_sp_listid');
@@ -7402,8 +7418,16 @@ async function _spRetryPush() {
   console.log('[SP] Retrying queued push...');
   spSetStatus('syncing', 'Retrying sync...');
   try {
+    // Re-init MSAL if needed (handles page reload where _spMsalApp was lost)
+    if (!_spMsalApp && _spClientId) {
+      console.log('[SP] Re-initializing MSAL for retry...');
+      initSpMSAL();
+      if (_spMsalApp && _spMsalApp.initialize) {
+        await _spMsalApp.initialize().catch(()=>{});
+      }
+    }
     const token = await getSpToken();
-    if (!token) throw new Error('No token');
+    if (!token) throw new Error('No token — please reconnect SharePoint in Settings');
     // Test connectivity with a lightweight request
     const { siteId, listId } = await spResolveSiteAndList(token);
     _spAvailable = true;
@@ -7771,6 +7795,11 @@ function renderSpPanel() {
       if (initSpMSAL() && _spAccount) {
         _spConnected = true;
         console.log('[SP] Auto-connected as', _spAccount.username);
+        // Silence Firebase immediately since SP is taking over
+        if(typeof _fbDb !== 'undefined' && _fbDb){
+          try{ _fbDb.goOffline(); }catch{}
+          console.log('[FB] Silenced — SP is primary DB');
+        }
         setTimeout(async () => {
           // Smart sync on reload: check timestamps before deciding direction
           try {
