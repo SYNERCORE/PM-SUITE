@@ -7721,10 +7721,11 @@ async function disconnectSharePoint() {
   _spAccount = null; _spMsalApp = null; _spConnected = false;
   localStorage.removeItem('shic_sp_autosync'); localStorage.removeItem('shic_sp_lastsync');
   localStorage.removeItem('shic_sp_itemid'); localStorage.removeItem('shic_sp_siteid'); localStorage.removeItem('shic_sp_listid');
-  localStorage.removeItem('shic_sp_lastwritets'); localStorage.removeItem('shic_sp_offlinequeue');
-  localStorage.removeItem('shic_sp_deleted_ids');
+  // NOTE: keep shic_sp_lastwritets and shic_sp_deleted_ids — needed to prevent data loss on reconnect
+  localStorage.removeItem('shic_sp_offlinequeue');
   _spLastSync = null; _spAutoSync = false; _spItemId = ''; _spSiteId = ''; _spListId = '';
-  _spLastWriteTs = 0; _spDataHash = ''; _spPendingRemote = null; _spOfflineQueue = false;
+  // Keep _spLastWriteTs and _spDataHash — they protect against re-pulling old data on reconnect
+  _spPendingRemote = null; _spOfflineQueue = false;
   renderSettings(); showToast('Disconnected from SharePoint', 'warning');
 }
 
@@ -8430,12 +8431,16 @@ async function spAutoInit() {
       }
     } else if (_spLastWriteTs > 0 && remote._ts <= _spLastWriteTs) {
       // We were the last writer or local is current — no pull needed
-      console.log('[SP] Auto-init: local is current or we were last writer — no sync needed');
+      // This is the normal case after logout/login with same user
+      console.log('[SP] Auto-init: local is current (lastWriteTs=' + _spLastWriteTs + ', remote=' + remote._ts + ') — no sync needed');
+      // Update hash so polling works correctly
+      const { _ts, _by, ...remoteData0 } = remote;
+      _spDataHash = _spHash(remoteData0) + _ts;
       spSetStatus('connected', 'Connected — data is current');
     } else {
-      // Remote is newer OR first time connecting — MERGE, never full replace
-      // This protects Firebase data that may be newer than the SP snapshot
-      console.log('[SP] Auto-init: merging SharePoint data with local (remote _ts:', remote._ts, ')');
+      // Remote is newer — MERGE, never full replace
+      // This protects local data that may have been added since last push
+      console.log('[SP] Auto-init: merging SharePoint data with local (remote _ts:', remote._ts, ', local lastWrite:', _spLastWriteTs, ')');
       const { _ts, _by, _deletedIds: rd, ...remoteData } = remote;
       if (rd) {
         Object.keys(rd).forEach(k => {
@@ -8669,7 +8674,21 @@ async function ensureUsersListExists(token, siteId) {
   );
   if (!createRes.ok && createRes.status !== 409) {
     const err = await createRes.json().catch(()=>({}));
-    throw new Error('Could not create SHIC_Users list: ' + (err.error?.message || createRes.status));
+    // List creation failed — likely permissions issue
+    // Show helpful error message instead of crashing login
+    const errMsg = err.error?.message || createRes.status;
+    if (String(errMsg).toLowerCase().includes('access') || createRes.status === 403) {
+      throw new Error(
+        'The SHIC_Users list does not exist and could not be created automatically (Access Denied).\n\n' +
+        'Please create it manually in SharePoint:\n' +
+        '1. Go to your SharePoint site\n' +
+        '2. Click New → List\n' +
+        '3. Name it: SHIC_Users\n' +
+        '4. Add columns: UserEmail, UserUID, Status, IsAdmin, Role, Department, RegisteredAt, ApprovedBy, LastLogin\n\n' +
+        'Then try signing in again.'
+      );
+    }
+    throw new Error('Could not create SHIC_Users list: ' + errMsg);
   }
   if (createRes.status === 409) {
     // Already exists — fetch again
@@ -9497,6 +9516,12 @@ function doLogout(){
   _spOfflineQueue = false;
   _spLastSavedHash = '';
   _spPrevData = null;
+  _spPendingRemote = null;
+  // ── IMPORTANT: DO NOT clear _spLastWriteTs or _spDataHash ──
+  // These persist across logout/login to prevent data loss on reconnect.
+  // If cleared, the auto-init merge would think local data is older than SP
+  // and do a full replace, wiping any data loaded before logout.
+  // _spSiteId/_spListId are safe to clear (will re-resolve on next login)
   _spSiteId = ''; _spListId = ''; _spItemId = '';
   localStorage.removeItem('shic_sp_siteid');
   localStorage.removeItem('shic_sp_listid');
