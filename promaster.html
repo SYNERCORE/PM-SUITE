@@ -2379,7 +2379,7 @@ $('#genericModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">Qty on Hand</label><input class="form-input" type="number" id="cQty" placeholder="0"></div>
 <div class="form-group"><label class="form-label">Min Stock Level</label><input class="form-input" type="number" id="cMin" placeholder="0"></div>
 <div class="form-group"><label class="form-label">Reorder Qty</label><input class="form-input" type="number" id="cReorder" placeholder="0"></div>
-<div class="form-group"><label class="form-label">Project</label><select class="form-select" id="cProj">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}">${p.id}</option>`).join('')}</select></div>
+<div class="form-group"><label class="form-label">Project <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label><select class="form-select" id="cProj"><option value="N/A" selected>— Not Assigned (Warehouse) —</option>${(AppState.data.projects||[]).map(p=>`<option value="${p.id}">${p.id}${p.name?' — '+p.name.substring(0,30):''}</option>`).join('')}</select></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Supplier</label><input class="form-input" id="cSupp" placeholder="Supplier name"></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Notes</label><input class="form-input" id="cNotes" placeholder="Storage or handling notes"></div>
 </div>`;
@@ -2413,7 +2413,7 @@ function showEditConsumable(id){
     <div class="form-group"><label class="form-label">Min Stock Level</label><input class="form-input" type="number" id="ecMin" value="${c.minStock||0}" min="0"></div>
     <div class="form-group"><label class="form-label">Reorder Quantity</label><input class="form-input" type="number" id="ecReorder" value="${c.reorderQty||0}" min="0"></div>
     <div class="form-group"><label class="form-label">Unit Cost (₱)</label><input class="form-input" type="number" id="ecCost" value="${c.unitCost||0}" min="0"></div>
-    <div class="form-group"><label class="form-label">Project</label><select class="form-select" id="ecProj">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${c.projectId===p.id?'selected':''}>${p.id} — ${p.name.substring(0,20)}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Project <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label><select class="form-select" id="ecProj"><option value="N/A" ${(c.projectId==='N/A'||!c.projectId)?'selected':''}>— Not Assigned (Warehouse) —</option>${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${c.projectId===p.id?'selected':''}>${p.id}${p.name?' — '+p.name.substring(0,30):''}</option>`).join('')}</select></div>
     <div class="form-group"><label class="form-label">Supplier</label><input class="form-input" id="ecSupp" value="${c.supplier||''}" placeholder="Supplier name"></div>
     <div class="form-group" style="grid-column:1/-1"><label class="form-label">Storage / Handling Notes</label><input class="form-input" id="ecNotes" value="${c.notes||''}" placeholder="Storage instructions, handling notes..."></div>
   </div>
@@ -14537,7 +14537,7 @@ function showAddMaterial(){
   $('#genericModalTitle').textContent='Add Material';
   $('#genericModalBody').innerHTML=`<div class="form-grid">
     <div class="form-group" style="grid-column:1/-1"><label class="form-label">Material Name *</label><input class="form-input" id="mlMN" placeholder="Full material description"></div>
-    <div class="form-group"><label class="form-label">Project</label><select class="form-select" id="mlMP">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}">${p.id}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Project <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label><select class="form-select" id="mlMP"><option value="N/A" selected>— Not Assigned (Warehouse) —</option>${(AppState.data.projects||[]).map(p=>`<option value="${p.id}">${p.id}${p.name?' — '+p.name.substring(0,30):''}</option>`).join('')}</select></div>
     <div class="form-group"><label class="form-label">Supplier</label><input class="form-input" id="mlMS" placeholder="Supplier name"></div>
     <div class="form-group"><label class="form-label">Quantity</label><input class="form-input" type="number" id="mlMQ" value="0"></div>
     <div class="form-group"><label class="form-label">Unit</label><input class="form-input" id="mlMU" placeholder="MT, M, PCS, L, M2..."></div>
