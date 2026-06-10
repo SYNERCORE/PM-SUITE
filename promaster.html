@@ -8448,9 +8448,10 @@ async function spAutoInit() {
       console.log('[SP] Auto-init: local is current or we were last writer — no sync needed');
       spSetStatus('connected', 'Connected — data is current');
     } else {
-      // Remote is newer OR first time connecting — always pull
-      console.log('[SP] Auto-init: pulling from SharePoint (remote _ts:', remote._ts, ')');
-      const { _ts, _by, _deletedIds: rd, ...cleanData } = remote;
+      // Remote is newer OR first time connecting — MERGE, never full replace
+      // This protects Firebase data that may be newer than the SP snapshot
+      console.log('[SP] Auto-init: merging SharePoint data with local (remote _ts:', remote._ts, ')');
+      const { _ts, _by, _deletedIds: rd, ...remoteData } = remote;
       if (rd) {
         Object.keys(rd).forEach(k => {
           if (!_spDeletedIds[k]) _spDeletedIds[k] = {};
@@ -8458,7 +8459,61 @@ async function spAutoInit() {
         });
         localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
       }
-      _spApplyRemote(cleanData, _ts, _by);
+
+      // ── Safe merge: take the LARGER dataset as the base ──────
+      // Count total records in each source to determine which is more complete
+      const ARRAY_KEYS = ['projects','tasks','resources','equipment','tools','vehicles',
+        'consumables','materials','manpower','procurement','procurementLogs',
+        'resourceAllocations','resourceUsageLogs','costs','qaqc','risks',
+        'actions','documents','progress','assetHistory','thirdParties','trades',
+        'dailyMeetingLogs','businessUnits'];
+
+      const localCount = ARRAY_KEYS.reduce((s,k) => s + (AppState.data[k]||[]).length, 0);
+      const remoteCount = ARRAY_KEYS.reduce((s,k) => s + (remoteData[k]||[]).length, 0);
+
+      console.log('[SP] Auto-init merge: local records=' + localCount + ', remote records=' + remoteCount);
+
+      if (localCount > remoteCount && _spLastWriteTs === 0) {
+        // Local has MORE data and we never pushed to SP — local (Firebase) is more complete
+        // Don't pull — instead push local data to SP to sync it up
+        console.log('[SP] Auto-init: local has more data than SP — pushing local to sync SP');
+        await spPushData(true);
+        showToast('Local data pushed to SharePoint (local was more complete)', 'info', 4000);
+      } else if (remoteCount === 0 && localCount > 0) {
+        // SP is effectively empty (no records) — push local
+        console.log('[SP] Auto-init: SP has no records — pushing local data');
+        await spPushData(true);
+      } else {
+        // SP has equal or more data — merge SP into local (SP wins for existing records)
+        const merged = Object.assign({}, remoteData);
+        ARRAY_KEYS.forEach(key => {
+          merged[key] = _spMergeArrays(
+            AppState.data[key] || [],
+            remoteData[key] || [],
+            false, // remote wins for existing records on auto-init
+            key
+          );
+        });
+        merged.settings = Object.assign({}, AppState.data.settings || {}, remoteData.settings || {});
+        _spLastWriteTs = _ts;
+        localStorage.setItem('shic_sp_lastwritets', String(_spLastWriteTs));
+        _spDataHash = _spHash(remoteData) + _ts;
+        AppState.data = Object.assign(getDefaultData(), merged);
+        if (typeof migrateData === 'function') migrateData();
+        if (typeof _origSaveForFb === 'function') _origSaveForFb();
+        else if (typeof _origSave === 'function') _origSave();
+        _spOfflineQueue = false;
+        localStorage.removeItem('shic_sp_offlinequeue');
+        setTimeout(() => {
+          try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
+          try { buildSidebar(); } catch(e) {}
+        }, 400);
+        const totalMerged = ARRAY_KEYS.reduce((s,k) => s + (merged[k]||[]).length, 0);
+        console.log('[SP] Auto-init merge complete: ' + totalMerged + ' total records');
+        spSetStatus('connected', 'Synced with SharePoint (' + (_by||'') + ')');
+        if (_by && localCount !== remoteCount)
+          showToast('Data merged with SharePoint — ' + totalMerged + ' total records', 'info', 3000);
+      }
     }
   } catch(e) {
     console.warn('[SP] Auto-init sync failed:', e.message);
