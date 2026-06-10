@@ -362,6 +362,7 @@ canvas{display:block}
   <div class="page-content">
     <div id="dashboard" class="page active"></div>
     <div id="projects" class="page"></div>
+    <div id="prospects" class="page"></div>
     <div id="tasks" class="page"></div>
     <div id="gantt" class="page"></div>
     <div id="resources" class="page"></div>
@@ -575,6 +576,7 @@ let ganttZoom=100, ganttFrom='', ganttTo='', ganttProjFilter='all', ganttStatusF
 const NAV_ITEMS=[
 {id:'dashboard',label:'Dashboard',icon:'fas fa-chart-pie',section:'Overview'},
 {id:'projects',label:'Projects',icon:'fas fa-briefcase',section:'Overview'},
+{id:'prospects',label:'Prospects',icon:'fas fa-search-dollar',section:'Overview'},
 {id:'tasks',label:'Task Management',icon:'fas fa-tasks',section:'Planning'},
 {id:'gantt',label:'Gantt Chart',icon:'fas fa-stream',section:'Planning'},
 {id:'resources',label:'Resources',icon:'fas fa-users',section:'Team'},
@@ -607,6 +609,8 @@ function getDefaultData(){
     settings:{companyName:'SHIC',currency:'PHP',timezone:'Asia/Manila'},
     businessUnits:[], // [{id,name,color,description}]
     dailyMeetingLogs:[], // [{id,date,projectId,status,remarks,targetActivity,update,progressSnapshot,flagged,savedBy}]
+    idChangeRequests:[], // [{id,projectId,oldId,newId,requestedBy,requestedAt,reason,status,approvedBy,approvedAt,rejectedAt,rejectionReason}]
+    projectIdHistory:[], // [{projectId(current),oldId,newId,changedBy,changedAt,reason}]
   };
 }
 
@@ -1036,7 +1040,7 @@ AppState.ensureData();
 const map={dashboard:renderDashboard,projects:renderProjects,tasks:renderTasks,gantt:renderGantt,
 resources:renderResources,manpower:renderManpower,materials:renderMaterials,procurement:renderProcurement,
 costs:renderCosts,qaqc:renderQAQC,risks:renderRisks,actions:renderActions,documents:renderDocuments,
-progress:renderProgress,kpi:renderKPI,dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist};
+progress:renderProgress,kpi:renderKPI,dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist,prospects:renderProspects};
 if(map[pid])map[pid]();}
 
 function toggleSidebar(){
@@ -1144,13 +1148,15 @@ return`<div class="stat-card"><div class="stat-icon" style="background:${bg}"><i
 
 function renderDashboard(){
 AppState.ensureData();
-const{projects,tasks,risks,actions,qaqc,manpower}=AppState.data;
+const{tasks,risks,actions,qaqc,manpower}=AppState.data;
+// Exclude prospect projects from dashboard KPIs — they aren't real projects yet
+const projects=(AppState.data.projects||[]).filter(p=>p.status!=='prospect');
 const active=projects.filter(p=>p.status==='active').length;
 const completed=projects.filter(p=>p.status==='completed').length;
 const planned=projects.filter(p=>p.status==='planned').length;
-const avgProg=Math.round(projects.reduce((s,p)=>s+p.progress,0)/projects.length);
-const totalBudget=projects.reduce((s,p)=>s+p.budget,0);
-const totalSpent=projects.reduce((s,p)=>s+p.spent,0);
+const avgProg=projects.length?Math.round(projects.reduce((s,p)=>s+(p.progress||0),0)/projects.length):0;
+const totalBudget=projects.reduce((s,p)=>s+(p.budget||0),0);
+const totalSpent=projects.reduce((s,p)=>s+(p.spent||0),0);
 const openRisks=risks.filter(r=>r.status==='active').length;
 const openActions=actions.filter(a=>a.status!=='closed').length;
 const overdueAct=actions.filter(a=>a.status==='overdue').length;
@@ -1267,7 +1273,7 @@ let projectFilter='all',projectSearch='',projectBUFilter='all';
 function renderProjects(){
 const el=$('#projects');
 el.innerHTML=`<div class="section-header" style="margin-bottom:14px">
-<div><div class="section-title">Project Master List</div><div class="section-sub">${(AppState.data.projects||[]).length} projects</div></div>
+<div><div class="section-title">Project Master List</div><div class="section-sub">${(AppState.data.projects||[]).filter(p=>p.status!=='prospect').length} projects</div></div>
 <div style="display:flex;gap:7px;align-items:center">
 <button class="btn btn-secondary btn-sm" onclick="exportCSV((AppState.data.projects||[]).map(p=>[p.id,p.name,p.client,p.status,p.progress+'%',p.budget,p.spent]),['ID','Name','Client','Status','Progress','Budget','Spent'],'projects.csv')"><i class="fas fa-download"></i> Export</button>
 <button class="btn btn-primary btn-sm" onclick="showProjectForm()"><i class="fas fa-plus"></i> New Project</button>
@@ -1284,7 +1290,7 @@ ${['all','active','completed','planned'].map(f=>`<button class="btn btn-sm ${pro
 <div class="grid grid-3" id="projectsGrid">${renderProjCards()}</div>`;}
 
 function renderProjCards(){
-let ps=AppState.data.projects;
+let ps=(AppState.data.projects||[]).filter(p=>p.status!=='prospect'); // exclude prospects from main list
 if(projectFilter!=='all')ps=ps.filter(p=>p.status===projectFilter);
 if(typeof projectBUFilter!=='undefined'&&projectBUFilter!=='all'){
   ps=ps.filter(p=>(p.businessUnit||'')===(projectBUFilter||'')); 
@@ -1321,7 +1327,7 @@ function showProjectForm(id=null){
 const p=id?(AppState.data.projects||[]).find(x=>x.id===id):null;
 $('#projectModalTitle').textContent=id?'Edit Project':'New Project';
 $('#projectModalBody').innerHTML=`<div class="form-grid">
-<div class="form-group"><label class="form-label">Project ID</label><input class="form-input" id="pId" value="${p?.id||'PRJ-'+((AppState.data.projects||[]).length+1).toString().padStart(3,'0')}" ${id?'readonly':''}></div>
+<div class="form-group"><label class="form-label">Project ID${id&&p?.status==='prospect'?' <span style="font-size:10px;color:var(--accent-amber)">(editable)</span>':id?' <span style="font-size:10px;color:var(--text-muted)">(use Change ID button to modify)</span>':''}</label><input class="form-input" id="pId" value="${p?.id||'PRJ-'+((AppState.data.projects||[]).length+1).toString().padStart(3,'0')}" ${id&&p?.status!=='prospect'?'readonly style="opacity:.6"':''}></div>
 <div class="form-group"><label class="form-label">Project Name *</label><input class="form-input" id="pName" value="${p?.name||''}" placeholder="Enter project name"></div>
 <div class="form-group"><label class="form-label">Client *</label><input class="form-input" id="pClient" value="${p?.client||''}" placeholder="Client name"></div>
 <div class="form-group"><label class="form-label">Location</label><input class="form-input" id="pLoc" value="${p?.location||''}" placeholder="Location"></div>
@@ -1329,7 +1335,7 @@ $('#projectModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">End Date</label><input class="form-input" type="date" id="pEnd" value="${p?.endDate||''}"></div>
 <div class="form-group"><label class="form-label">Budget (${AppState.data.settings?.currency||'PHP'})</label><input class="form-input" type="number" id="pBudget" value="${p?.budget||''}"></div>
 <div class="form-group"><label class="form-label">Project Manager</label><input class="form-input" id="pPM" value="${p?.pm||''}" placeholder="PM name"></div>
-<div class="form-group"><label class="form-label">Status</label><select class="form-select" id="pStatus">${['active','planned','completed','on-hold'].map(s=>`<option value="${s}" ${p?.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+<div class="form-group"><label class="form-label">Status</label><select class="form-select" id="pStatus">${['prospect','planned','active','on-hold','completed','archived'].map(s=>`<option value="${s}" ${p?.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Priority</label><select class="form-select" id="pPri">${['critical','high','medium','low'].map(s=>`<option value="${s}" ${p?.priority===s?'selected':''}>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Discipline</label><input class="form-input" id="pDisc" value="${p?.discipline||''}" placeholder="e.g., Civil/Structural"></div>
 <div class="form-group"><label class="form-label">Progress % (Actual)</label><input class="form-input" type="number" id="pProg" value="${p?.progress||0}" min="0" max="100"></div>
@@ -1347,16 +1353,419 @@ ${(AppState.data.businessUnits||[]).map(bu=>`<option value="${bu.id}" ${p?.busin
 </div>`; openModal('projectModal');}
 
 function saveProject(id){
-const pr={id:$('#pId').value,name:$('#pName').value,client:$('#pClient').value,location:$('#pLoc').value,startDate:$('#pStart').value,endDate:$('#pEnd').value,budget:parseFloat($('#pBudget').value)||0,pm:$('#pPM').value,status:$('#pStatus').value,priority:$('#pPri').value,discipline:$('#pDisc').value,progress:parseInt($('#pProg').value)||0,description:$('#pDesc').value,businessUnit:$('#pBU')?.value||'',plannedProgress:parseInt($('#pPlannedProg')?.value)||0,spent:0,riskLevel:'medium',phase:'Initiation'};
+const newId=$('#pId').value.trim();
+const pr={id:newId,name:$('#pName').value,client:$('#pClient').value,location:$('#pLoc').value,startDate:$('#pStart').value,endDate:$('#pEnd').value,budget:parseFloat($('#pBudget').value)||0,pm:$('#pPM').value,status:$('#pStatus').value,priority:$('#pPri').value,discipline:$('#pDisc').value,progress:parseInt($('#pProg').value)||0,description:$('#pDesc').value,businessUnit:$('#pBU')?.value||'',plannedProgress:parseInt($('#pPlannedProg')?.value)||0,spent:0,riskLevel:'medium',phase:'Initiation'};
 if(!pr.name){showToast('Project name required','error');return;}
-if(id){const idx=(AppState.data.projects||[]).findIndex(p=>p.id===id);AppState.data.projects[idx]={...AppState.data.projects[idx],...pr};}
-else AppState.data.projects.push(pr);
-AppState.save();closeModal('projectModal');renderProjects();showToast(id?'Project updated':'Project created','success');}
+if(!newId){showToast('Project ID required','error');return;}
+if(id){
+  const existing=(AppState.data.projects||[]).find(p=>p.id===id);
+  const idChanged=existing&&existing.id!==newId;
+  // For prospect projects, allow inline ID edit
+  if(idChanged&&existing.status==='prospect'){
+    // Check uniqueness
+    if((AppState.data.projects||[]).some(p=>p.id===newId&&p.id!==id)){showToast('Project ID '+newId+' already exists','error');return;}
+    // Cascade update
+    _cascadeUpdateProjectId(id,newId,_currentUserProfile?.name||'User','Inline edit on prospect');
+    id=newId; // refresh id reference
+  }else if(idChanged){
+    showToast('Cannot change ID directly — use "Change Project ID" button','error',5000);
+    return;
+  }
+  const idx=(AppState.data.projects||[]).findIndex(p=>p.id===id);
+  AppState.data.projects[idx]={...AppState.data.projects[idx],...pr,id};
+}else{
+  // Auto-prefix ID for prospects if user kept the default PRJ- prefix
+  if(pr.status==='prospect'&&newId.startsWith('PRJ-')){
+    pr.id='PROSPECT-'+((AppState.data.projects||[]).filter(p=>p.status==='prospect').length+1).toString().padStart(3,'0');
+  }
+  // Check uniqueness
+  if((AppState.data.projects||[]).some(p=>p.id===pr.id)){showToast('Project ID '+pr.id+' already exists','error');return;}
+  AppState.data.projects.push(pr);
+}
+AppState.save();closeModal('projectModal');
+const isProspect=pr.status==='prospect';
+if(isProspect){renderProspects();navigate('prospects');}else{renderProjects();}
+showToast(id?'Project updated':(isProspect?'Prospect created':'Project created'),'success');}
 
 function deleteProject(id){
 if(!confirm('Delete this project?'))return;
 AppState.data.projects=(AppState.data.projects||[]).filter(p=>p.id!==id);
 AppState.save();showToast('Project deleted','warning');renderProjects();}
+
+// ═══════════════════════════════════════════════════════════
+// ── PROSPECTS MODULE + EDITABLE PROJECT ID ────────────────
+// ═══════════════════════════════════════════════════════════
+
+let prospectSearch = '';
+let prospectBUFilter = 'all';
+
+function renderProspects(){
+  AppState.ensureData();
+  const all = (AppState.data.projects || []).filter(p => p.status === 'prospect');
+  let ps = all;
+  if (prospectBUFilter !== 'all') {
+    ps = ps.filter(p => (p.businessUnit||'') === (prospectBUFilter||''));
+  }
+  if (prospectSearch) {
+    const q = prospectSearch.toLowerCase();
+    ps = ps.filter(p => (p.name||'').toLowerCase().includes(q) || (p.client||'').toLowerCase().includes(q) || p.id.toLowerCase().includes(q));
+  }
+  // Pending ID change requests (admin sees them)
+  const isAdmin = (_currentUserProfile && _currentUserProfile.isAdmin) || false;
+  const pendingRequests = (AppState.data.idChangeRequests || []).filter(r => r.status === 'pending');
+  const myRequests = pendingRequests.filter(r => r.requestedBy === (_currentUserProfile?.name || _currentUser?.email));
+
+  const totalBudget = all.reduce((s,p) => s + (p.budget||0), 0);
+  const totalProspects = all.length;
+  const fmt = (AppState.data.settings?.currency||'PHP') + ' ' + totalBudget.toLocaleString();
+
+  $('#prospects').innerHTML = `
+  <div class="section-header" style="margin-bottom:14px">
+    <div>
+      <div class="section-title"><i class="fas fa-search-dollar" style="color:var(--accent-amber);margin-right:8px"></i>Prospects</div>
+      <div class="section-sub">${totalProspects} prospect${totalProspects!==1?'s':''} · Pipeline value: ${fmt}</div>
+    </div>
+    <div style="display:flex;gap:7px;align-items:center">
+      <button class="btn btn-secondary btn-sm" onclick="exportCSV((AppState.data.projects||[]).filter(p=>p.status==='prospect').map(p=>[p.id,p.name,p.client,p.location,p.budget,p.startDate,p.endDate,p.discipline,p.priority]),['ID','Name','Client','Location','Budget','Start','End','Discipline','Priority'],'prospects.csv')"><i class="fas fa-download"></i> Export</button>
+      <button class="btn btn-primary btn-sm" onclick="showProspectForm()"><i class="fas fa-plus"></i> New Prospect</button>
+    </div>
+  </div>
+
+  ${(isAdmin && pendingRequests.length > 0) ? `
+    <div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent-amber)">
+      <div class="card-title" style="color:var(--accent-amber)"><i class="fas fa-exclamation-circle" style="margin-right:6px"></i>Pending Project ID Change Requests (${pendingRequests.length})</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Old ID</th><th>New ID</th><th>Project</th><th>Requested By</th><th>Reason</th><th>When</th><th>Actions</th></tr></thead>
+        <tbody>${pendingRequests.map(r => {
+          const proj = (AppState.data.projects||[]).find(p => p.id === r.projectId);
+          return `<tr>
+            <td style="font-family:var(--font-mono);font-size:11px"><s>${r.oldId}</s></td>
+            <td style="font-family:var(--font-mono);font-size:11px;color:var(--accent-green);font-weight:700">${r.newId}</td>
+            <td>${proj?.name || '<em>(project not found)</em>'}</td>
+            <td style="font-size:11px">${r.requestedBy}</td>
+            <td style="font-size:11px;max-width:200px">${r.reason || '<em>no reason</em>'}</td>
+            <td style="font-size:10px;color:var(--text-muted)">${new Date(r.requestedAt).toLocaleString()}</td>
+            <td><div style="display:flex;gap:4px">
+              <button class="btn btn-success btn-sm btn-icon" onclick="approveIdChange('${r.id}')" title="Approve"><i class="fas fa-check"></i></button>
+              <button class="btn btn-danger btn-sm btn-icon" onclick="rejectIdChange('${r.id}')" title="Reject"><i class="fas fa-times"></i></button>
+            </div></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    </div>` : ''}
+
+  ${(!isAdmin && myRequests.length > 0) ? `
+    <div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent-blue)">
+      <div class="card-title" style="color:var(--accent-blue)"><i class="fas fa-hourglass-half" style="margin-right:6px"></i>Your Pending ID Change Requests (${myRequests.length})</div>
+      ${myRequests.map(r => `
+        <div style="padding:8px;border-bottom:1px solid var(--border);font-size:12px">
+          <span style="font-family:var(--font-mono)"><s>${r.oldId}</s> → <strong style="color:var(--accent-green)">${r.newId}</strong></span>
+          <span style="margin-left:8px;color:var(--text-muted)">·</span>
+          <span style="margin-left:8px">${r.reason || 'no reason'}</span>
+          <button class="btn btn-secondary btn-sm" style="float:right;font-size:10px" onclick="cancelIdChangeRequest('${r.id}')">Cancel</button>
+        </div>
+      `).join('')}
+    </div>` : ''}
+
+  <div class="filters-bar">
+    <select class="form-select" style="height:30px;width:160px" onchange="prospectBUFilter=this.value;renderProspects()">
+      <option value="all" ${prospectBUFilter==='all'?'selected':''}>All Business Units</option>
+      <option value="" ${prospectBUFilter===''?'selected':''}>Main Company</option>
+      ${(AppState.data.businessUnits||[]).map(bu=>`<option value="${bu.id}" ${prospectBUFilter===bu.id?'selected':''}>${bu.name}</option>`).join('')}
+    </select>
+    <div class="search-bar" style="margin-left:auto"><i class="fas fa-search"></i><input type="text" placeholder="Search prospects..." value="${prospectSearch}" oninput="prospectSearch=this.value;renderProspects()"></div>
+  </div>
+
+  ${ps.length === 0 ? `<div class="empty-state"><i class="fas fa-search-dollar"></i><p>No prospects yet</p><button class="btn btn-primary btn-sm" onclick="showProspectForm()" style="margin-top:8px"><i class="fas fa-plus"></i> Add Your First Prospect</button></div>` :
+  `<div class="grid grid-3">${ps.map(p => {
+    const bu = (AppState.data.businessUnits||[]).find(b => b.id === p.businessUnit);
+    const buBadge = bu ? `<span class="badge" style="background:${bu.color}22;color:${bu.color};border:1px solid ${bu.color}55">${bu.name}</span>` : '';
+    const priColor = {critical:'#f85149',high:'#fb8f44',medium:'#f0a450',low:'#3fb950'}[p.priority]||'#8b949e';
+    return `
+    <div class="card" style="cursor:pointer;position:relative" onclick="showProjectDetail('${p.id}')">
+      <div style="position:absolute;top:8px;right:8px"><span class="badge" style="background:rgba(240,164,80,.15);color:var(--accent-amber);border:1px solid var(--accent-amber);font-size:9px;letter-spacing:1px">PROSPECT</span></div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--accent-amber);font-weight:700">${p.id}</div>
+      <div style="font-weight:700;font-size:14px;margin-top:4px;line-height:1.3;padding-right:80px">${p.name}</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-top:3px">${p.client || '— no client —'}</div>
+      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+        ${buBadge}
+        ${p.priority ? `<span class="badge" style="background:${priColor}22;color:${priColor}">${p.priority}</span>` : ''}
+        ${p.discipline ? `<span class="badge badge-secondary">${p.discipline}</span>` : ''}
+      </div>
+      <div style="margin-top:12px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px;font-size:11px">
+        <div><div style="color:var(--text-muted);font-size:9px">BUDGET</div><div style="font-family:var(--font-mono);font-weight:700">${(AppState.data.settings?.currency||'PHP')} ${(p.budget||0).toLocaleString()}</div></div>
+        <div><div style="color:var(--text-muted);font-size:9px">DURATION</div><div style="font-size:11px">${p.startDate || '—'} → ${p.endDate || '—'}</div></div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:5px" onclick="event.stopPropagation()">
+        <button class="btn btn-secondary btn-sm" style="flex:1" onclick="showProspectForm('${p.id}')"><i class="fas fa-edit"></i> Edit</button>
+        <button class="btn btn-success btn-sm" style="flex:1" onclick="convertProspectToProject('${p.id}')" title="Convert to Project"><i class="fas fa-arrow-right"></i> Convert</button>
+        <button class="btn btn-danger btn-sm btn-icon" onclick="if(confirm('Delete prospect?')){deleteProject('${p.id}');renderProspects();}"><i class="fas fa-trash"></i></button>
+      </div>
+    </div>`;
+  }).join('')}</div>`}
+  `;
+}
+
+function showProspectForm(id=null){
+  // Reuse the project form, but pre-set status to prospect
+  if (!id) {
+    showProjectForm(null);
+    setTimeout(() => {
+      const status = document.getElementById('pStatus');
+      const idField = document.getElementById('pId');
+      if (status) status.value = 'prospect';
+      if (idField) {
+        idField.value = 'PROSPECT-' + ((AppState.data.projects||[]).filter(p=>p.status==='prospect').length + 1).toString().padStart(3,'0');
+      }
+    }, 100);
+  } else {
+    showProjectForm(id);
+  }
+}
+
+function convertProspectToProject(id){
+  const p = (AppState.data.projects||[]).find(x => x.id === id);
+  if (!p) return;
+  const newIdRaw = prompt('Convert prospect "' + p.name + '" to a real project.\n\nEnter the new Project ID (e.g., JO-033-SW-PGPC-26-0129):', p.id.startsWith('PROSPECT-') ? '' : p.id);
+  if (!newIdRaw) return;
+  const newId = newIdRaw.trim();
+  if (!newId) { showToast('ID required', 'error'); return; }
+  // Uniqueness check
+  if ((AppState.data.projects||[]).some(x => x.id === newId && x.id !== id)) {
+    showToast('ID already exists', 'error'); return;
+  }
+  // Update status to planned + cascade ID change
+  const oldId = p.id;
+  if (oldId !== newId) {
+    _cascadeUpdateProjectId(oldId, newId, _currentUserProfile?.name || 'User', 'Converted from prospect');
+  }
+  const proj = (AppState.data.projects||[]).find(x => x.id === newId);
+  if (proj) proj.status = 'planned';
+  AppState.save();
+  showToast('Prospect converted to planned project: ' + newId, 'success');
+  navigate('projects');
+}
+
+// ═══════════════════════════════════════════════════════════
+// ── PROJECT ID CASCADE UPDATE ─────────────────────────────
+// ═══════════════════════════════════════════════════════════
+
+// Atomically update a project ID and all references to it
+function _cascadeUpdateProjectId(oldId, newId, changedBy, reason) {
+  if (oldId === newId) return;
+  console.log('[ID Change] Cascading update:', oldId, '->', newId);
+  const data = AppState.data;
+  let updatedCount = { project: 0, tasks: 0, costs: 0, qaqc: 0, risks: 0, actions: 0,
+    documents: 0, allocations: 0, usageLogs: 0, dailyLogs: 0, procurement: 0,
+    materials: 0, manpower: 0, equipment: 0, tools: 0, vehicles: 0, consumables: 0 };
+
+  // Update project itself
+  const proj = (data.projects||[]).find(p => p.id === oldId);
+  if (proj) { proj.id = newId; updatedCount.project = 1; }
+
+  // Update all references in arrays
+  const arrays = ['tasks','costs','qaqc','risks','actions','documents','resourceAllocations',
+    'resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs','materials',
+    'manpower','equipment','tools','vehicles','consumables'];
+  arrays.forEach(arrKey => {
+    (data[arrKey]||[]).forEach(item => {
+      if (item.projectId === oldId) {
+        item.projectId = newId;
+        const countKey = arrKey === 'resourceAllocations' ? 'allocations'
+          : arrKey === 'resourceUsageLogs' ? 'usageLogs'
+          : arrKey === 'dailyMeetingLogs' ? 'dailyLogs'
+          : arrKey;
+        if (updatedCount[countKey] !== undefined) updatedCount[countKey]++;
+      }
+    });
+  });
+
+  // Update history
+  if (!data.projectIdHistory) data.projectIdHistory = [];
+  data.projectIdHistory.push({
+    projectId: newId, // current id is now newId
+    oldId,
+    newId,
+    changedBy,
+    changedAt: new Date().toISOString(),
+    reason: reason || '',
+    counts: updatedCount,
+  });
+
+  // Save
+  AppState.save();
+  const total = Object.values(updatedCount).reduce((s,n) => s+n, 0);
+  console.log('[ID Change] Updated ' + total + ' record(s):', updatedCount);
+  return updatedCount;
+}
+
+// ── Open the Change ID modal ──────────────────────────────
+function showChangeProjectId(id) {
+  const p = (AppState.data.projects||[]).find(x => x.id === id);
+  if (!p) return;
+  const isAdmin = (_currentUserProfile && _currentUserProfile.isAdmin) || false;
+  const status = p.status;
+  const isLocked = status === 'completed' || status === 'archived';
+  const isInstant = status === 'prospect' || (isAdmin && (status === 'active' || status === 'planned' || status === 'on-hold'));
+  const requiresApproval = !isAdmin && (status === 'active' || status === 'planned' || status === 'on-hold');
+
+  if (isLocked) {
+    showToast('Cannot change ID — project is ' + status, 'error');
+    return;
+  }
+
+  // Count impacted records
+  const counts = _countProjectReferences(id);
+  const totalRefs = Object.values(counts).reduce((s,n) => s+n, 0);
+
+  $('#genericModalTitle').textContent = 'Change Project ID';
+  $('#genericModalBody').innerHTML = `
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--text-muted)">CURRENT ID</div>
+      <div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:var(--accent-blue)">${p.id}</div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-top:3px">${p.name}</div>
+      <div style="margin-top:6px"><span class="badge" style="background:rgba(240,164,80,.15);color:var(--accent-amber)">Status: ${status}</span></div>
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label class="form-label">New Project ID *</label>
+      <input class="form-input" id="newProjId" placeholder="e.g., JO-033-SW-PGPC-26-0129" autofocus>
+    </div>
+    ${requiresApproval ? `
+      <div class="form-group">
+        <label class="form-label">Reason for change *</label>
+        <textarea class="form-textarea" id="idChangeReason" placeholder="Why does this project need a new ID?" rows="3"></textarea>
+      </div>` : ''}
+    <div style="padding:10px;background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.2);border-radius:7px;font-size:11px;color:var(--accent-blue);margin-top:10px">
+      <i class="fas fa-info-circle" style="margin-right:5px"></i>
+      <strong>This change affects ${totalRefs} record(s):</strong><br>
+      ${Object.entries(counts).filter(([,n])=>n>0).map(([k,n])=>`${n} ${k}`).join(', ') || 'no related records'}
+      ${requiresApproval ? '<br><br><strong style="color:var(--accent-amber)"><i class="fas fa-shield-alt" style="margin-right:4px"></i>This change requires admin approval. The request will be submitted for review.</strong>' : ''}
+      ${isInstant && !requiresApproval ? '<br><br><strong style="color:var(--accent-green)"><i class="fas fa-bolt" style="margin-right:4px"></i>You can change this ID instantly (you are admin or this is a prospect).</strong>' : ''}
+    </div>
+  `;
+  $('#genericModalFooter').innerHTML = `
+    <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+    <button class="btn btn-primary" onclick="submitProjectIdChange('${id}')">
+      <i class="fas ${requiresApproval ? 'fa-paper-plane' : 'fa-check'}" style="margin-right:5px"></i>
+      ${requiresApproval ? 'Submit for Approval' : 'Change ID'}
+    </button>
+  `;
+  openModal('genericModal');
+}
+
+function _countProjectReferences(projectId) {
+  const data = AppState.data;
+  return {
+    tasks: (data.tasks||[]).filter(x => x.projectId === projectId).length,
+    costs: (data.costs||[]).filter(x => x.projectId === projectId).length,
+    documents: (data.documents||[]).filter(x => x.projectId === projectId).length,
+    'qa/qc': (data.qaqc||[]).filter(x => x.projectId === projectId).length,
+    risks: (data.risks||[]).filter(x => x.projectId === projectId).length,
+    actions: (data.actions||[]).filter(x => x.projectId === projectId).length,
+    'usage logs': (data.resourceUsageLogs||[]).filter(x => x.projectId === projectId).length,
+    'daily logs': (data.dailyMeetingLogs||[]).filter(x => x.projectId === projectId).length,
+    materials: (data.materials||[]).filter(x => x.projectId === projectId).length,
+    procurement: (data.procurement||[]).filter(x => x.projectId === projectId).length,
+  };
+}
+
+function submitProjectIdChange(id) {
+  const p = (AppState.data.projects||[]).find(x => x.id === id);
+  if (!p) return;
+  const newId = ($('#newProjId').value || '').trim();
+  if (!newId) { showToast('New ID required', 'error'); return; }
+  if (newId === id) { showToast('New ID is the same as current', 'warning'); return; }
+  if ((AppState.data.projects||[]).some(x => x.id === newId)) {
+    showToast('ID ' + newId + ' already exists', 'error'); return;
+  }
+  const isAdmin = (_currentUserProfile && _currentUserProfile.isAdmin) || false;
+  const status = p.status;
+  const requiresApproval = !isAdmin && (status === 'active' || status === 'planned' || status === 'on-hold');
+  const user = _currentUserProfile?.name || _currentUser?.email || 'User';
+
+  if (requiresApproval) {
+    const reason = ($('#idChangeReason').value || '').trim();
+    if (!reason) { showToast('Reason required for approval request', 'error'); return; }
+    if (!AppState.data.idChangeRequests) AppState.data.idChangeRequests = [];
+    const reqId = 'IDC-' + Date.now().toString(36).toUpperCase();
+    AppState.data.idChangeRequests.push({
+      id: reqId, projectId: id, oldId: id, newId, requestedBy: user,
+      requestedAt: new Date().toISOString(), reason, status: 'pending',
+    });
+    // Notify admin
+    if (!AppState.data.notifications) AppState.data.notifications = [];
+    AppState.data.notifications.unshift({
+      id: 'NOTIF-' + Date.now().toString(36).toUpperCase(),
+      type: 'id_change_request',
+      title: 'Project ID change request',
+      message: user + ' requests ' + id + ' → ' + newId + ': ' + reason,
+      createdAt: new Date().toISOString(),
+      read: false, forAdmin: true,
+    });
+    AppState.save();
+    closeModal('genericModal');
+    showToast('ID change request submitted to admin', 'success', 4000);
+  } else {
+    // Instant change (admin or prospect)
+    _cascadeUpdateProjectId(id, newId, user, 'Direct change');
+    closeModal('genericModal');
+    showToast('Project ID changed: ' + id + ' → ' + newId, 'success');
+    // Refresh wherever we are
+    if (AppState.currentPage === 'prospects') renderProspects();
+    else if (AppState.currentPage === 'projects') renderProjects();
+    else if (AppState.currentPage === 'detail') showProjectDetail(newId);
+  }
+}
+
+// ── Admin approves an ID change request ────────────────────
+function approveIdChange(requestId) {
+  const isAdmin = (_currentUserProfile && _currentUserProfile.isAdmin) || false;
+  if (!isAdmin) { showToast('Admin only', 'error'); return; }
+  const req = (AppState.data.idChangeRequests||[]).find(r => r.id === requestId);
+  if (!req || req.status !== 'pending') return;
+  if (!confirm('Approve ID change: ' + req.oldId + ' → ' + req.newId + '?\n\nRequested by: ' + req.requestedBy + '\nReason: ' + req.reason)) return;
+  // Verify the new ID is still unique
+  if ((AppState.data.projects||[]).some(p => p.id === req.newId)) {
+    showToast('Cannot approve — new ID ' + req.newId + ' is now taken', 'error');
+    return;
+  }
+  _cascadeUpdateProjectId(req.oldId, req.newId, _currentUserProfile?.name || 'Admin',
+    'Approved request from ' + req.requestedBy + ': ' + req.reason);
+  req.status = 'approved';
+  req.approvedBy = _currentUserProfile?.name || 'Admin';
+  req.approvedAt = new Date().toISOString();
+  AppState.save();
+  showToast('ID change approved and applied', 'success');
+  renderProspects();
+}
+
+function rejectIdChange(requestId) {
+  const isAdmin = (_currentUserProfile && _currentUserProfile.isAdmin) || false;
+  if (!isAdmin) { showToast('Admin only', 'error'); return; }
+  const req = (AppState.data.idChangeRequests||[]).find(r => r.id === requestId);
+  if (!req || req.status !== 'pending') return;
+  const reason = prompt('Reason for rejection (optional):', '');
+  if (reason === null) return;
+  req.status = 'rejected';
+  req.rejectedBy = _currentUserProfile?.name || 'Admin';
+  req.rejectedAt = new Date().toISOString();
+  req.rejectionReason = reason || '';
+  AppState.save();
+  showToast('ID change rejected', 'warning');
+  renderProspects();
+}
+
+function cancelIdChangeRequest(requestId) {
+  const req = (AppState.data.idChangeRequests||[]).find(r => r.id === requestId);
+  if (!req || req.status !== 'pending') return;
+  if (!confirm('Cancel this ID change request?')) return;
+  AppState.data.idChangeRequests = (AppState.data.idChangeRequests||[]).filter(r => r.id !== requestId);
+  AppState.save();
+  showToast('Request cancelled', 'info');
+  renderProspects();
+}
+
+
 
 let taskView='kanban',taskProjectFilter='all';
 function renderTasks(){
@@ -1939,9 +2348,10 @@ return`<tr>
 <td style="font-size:11px;max-width:120px">${r.cert==='N/A'?'<span style="color:var(--text-muted)">N/A</span>':r.cert}</td>
 <td>${certBadge(r.certExpiry)}</td>
 <td style="font-family:var(--font-mono);font-size:11px">₱${Number(r.dailyRate).toLocaleString()}</td>
-<td><div style="display:flex;gap:3px">
-<button class="btn btn-secondary btn-sm btn-icon" onclick="showEditAsset('${r.id}','${r.type.toLowerCase()}')"><i class="fas fa-edit"></i></button>
-<button class="btn btn-primary btn-sm btn-icon" onclick="logUtilization('${r.id}','${r.name}','${r.type}')"><i class="fas fa-plus-circle"></i></button>
+<td><div style="display:flex;gap:3px;position:relative">
+<button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail('${r.id}','${r.type.toLowerCase()}')" title="View detail & attachments"><i class="fas fa-paperclip"></i>${(r.attachments&&r.attachments.length)?`<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">${r.attachments.length}</span>`:''}</button>
+<button class="btn btn-secondary btn-sm btn-icon" onclick="showEditAsset('${r.id}','${r.type.toLowerCase()}')" title="Edit"><i class="fas fa-edit"></i></button>
+<button class="btn btn-primary btn-sm btn-icon" onclick="logUtilization('${r.id}','${r.name}','${r.type}')" title="Log utilization"><i class="fas fa-plus-circle"></i></button>
 </div></td></tr>`;}
 
 function noData(label,icon){return`<tr><td colspan="14"><div class="empty-state"><i class="fas ${icon}"></i><p>No ${label} records yet</p></div></td></tr>`;}
@@ -2316,7 +2726,290 @@ if(!AppState.data[typeKey])AppState.data[typeKey]=[];
 AppState.data[typeKey].push(item);
 AppState.save();closeModal('genericModal');renderResTab();showToast(typeLabel+' added','success');}
 
-function showEditAsset(id,typeKey){showToast('Editing '+id+' — open Add form for now','info');}
+function showEditAsset(id,typeKey){
+  // Open the asset detail with attachments — full edit panel
+  showAssetDetail(id, typeKey);
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// ── ASSET ATTACHMENTS (MSDS, Certificates, Insurance, etc) ──
+// ═══════════════════════════════════════════════════════════
+
+function showAssetDetail(id, typeKey) {
+  const asset = (AppState.data[typeKey]||[]).find(a => a.id === id);
+  if (!asset) { showToast('Asset not found', 'error'); return; }
+  if (!asset.attachments) asset.attachments = [];
+
+  const typeLabel = {equipment:'Equipment',tools:'Tool',vehicles:'Vehicle',personnel:'Personnel',consumables:'Consumable',materials:'Material'}[typeKey] || 'Asset';
+  const isAdmin = (_currentUserProfile && _currentUserProfile.isAdmin) || false;
+
+  $('#genericModalTitle').textContent = typeLabel + ' Detail: ' + asset.name;
+  $('#genericModalBody').innerHTML = `
+    <!-- Asset summary -->
+    <div style="background:var(--bg-hover);padding:12px;border-radius:8px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div>
+          <div style="font-family:var(--font-mono);font-size:11px;color:var(--accent-blue);font-weight:700">${asset.id}</div>
+          <div style="font-size:15px;font-weight:700;margin-top:3px">${asset.name}</div>
+          <div style="font-size:11px;color:var(--text-muted)">${asset.category || ''} ${asset.make ? '· ' + asset.make : ''} ${asset.model ? asset.model : ''}</div>
+        </div>
+        <div style="text-align:right;font-size:10px;color:var(--text-muted)">
+          ${asset.serialNo ? 'S/N: ' + asset.serialNo + '<br>' : ''}
+          ${asset.location ? '<i class="fas fa-map-marker-alt" style="margin-right:3px"></i>' + asset.location : ''}
+        </div>
+      </div>
+    </div>
+
+    <!-- Attachment categories tabs -->
+    <div style="border-bottom:1px solid var(--border);margin-bottom:14px;padding-bottom:8px">
+      <div style="font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:space-between">
+        <span><i class="fas fa-paperclip" style="margin-right:6px;color:var(--accent-blue)"></i>Attachments (${asset.attachments.length})</span>
+        <button class="btn btn-primary btn-sm" onclick="uploadAssetAttachment('${id}','${typeKey}')">
+          <i class="fas fa-cloud-upload-alt"></i> Add Attachment
+        </button>
+      </div>
+    </div>
+
+    <!-- Quick filter chips by category -->
+    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px">
+      ${['All','MSDS','Calibration','Insurance','Permit','Manual','Photo','Other'].map(cat => `
+        <button onclick="_assetAttachFilter='${cat}';showAssetDetail('${id}','${typeKey}')"
+          style="font-size:10px;padding:4px 10px;border-radius:10px;cursor:pointer;font-weight:600;
+            background:${_assetAttachFilter===cat||(!_assetAttachFilter&&cat==='All')?'var(--accent-blue)':'transparent'};
+            color:${_assetAttachFilter===cat||(!_assetAttachFilter&&cat==='All')?'#fff':'var(--text-secondary)'};
+            border:1px solid ${_assetAttachFilter===cat||(!_assetAttachFilter&&cat==='All')?'var(--accent-blue)':'var(--border)'};">
+          ${cat} ${cat!=='All'?'('+asset.attachments.filter(a=>a.category===cat).length+')':''}
+        </button>
+      `).join('')}
+    </div>
+
+    <!-- Attachment list -->
+    <div id="assetAttachList">${_renderAssetAttachmentList(asset, typeKey)}</div>
+  `;
+  $('#genericModalFooter').innerHTML = `<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
+  openModal('genericModal');
+}
+
+let _assetAttachFilter = 'All';
+
+function _renderAssetAttachmentList(asset, typeKey) {
+  let list = asset.attachments || [];
+  if (_assetAttachFilter && _assetAttachFilter !== 'All') {
+    list = list.filter(a => a.category === _assetAttachFilter);
+  }
+  if (!list.length) {
+    return `<div class="empty-state" style="padding:20px"><i class="fas fa-folder-open" style="font-size:32px;opacity:.3"></i><p style="margin-top:8px">No attachments${_assetAttachFilter!=='All'?' in '+_assetAttachFilter:''} yet</p><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Upload MSDS, calibration certificates, insurance docs, permits, manuals, photos, etc.</div></div>`;
+  }
+  const iconMap = {'MSDS':'fa-flask','Calibration':'fa-balance-scale','Insurance':'fa-shield-alt','Permit':'fa-stamp','Manual':'fa-book','Photo':'fa-camera','Other':'fa-file'};
+  const colorMap = {'MSDS':'#fb8f44','Calibration':'#39d3f2','Insurance':'#3fb950','Permit':'#bc8cff','Manual':'#f0a450','Photo':'#388bfd','Other':'#8b949e'};
+  const isAdmin = (_currentUserProfile && _currentUserProfile.isAdmin) || false;
+  return list.map(att => {
+    const ico = iconMap[att.category] || 'fa-file';
+    const col = colorMap[att.category] || '#8b949e';
+    const isExpired = att.expiryDate && new Date(att.expiryDate) < new Date();
+    const expiresSoon = att.expiryDate && !isExpired && (new Date(att.expiryDate) - new Date()) < 30*86400000;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid ${isExpired?'var(--accent-red)':expiresSoon?'var(--accent-amber)':'var(--border)'};border-radius:7px;margin-bottom:7px;${isExpired?'background:rgba(248,81,73,.05)':expiresSoon?'background:rgba(240,164,80,.05)':''}">
+      <div style="width:34px;height:34px;background:${col}22;color:${col};border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas ${ico}"></i></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;line-height:1.3">${att.name}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:2px">
+          <span class="badge" style="background:${col}22;color:${col};font-size:9px">${att.category}</span>
+          ${att.fileSize?'<span style="margin-left:6px">· '+att.fileSize+'</span>':''}
+          ${att.uploadedBy?'<span style="margin-left:6px">· by '+att.uploadedBy+'</span>':''}
+          ${att.uploadedAt?'<span style="margin-left:6px">· '+new Date(att.uploadedAt).toLocaleDateString()+'</span>':''}
+        </div>
+        ${att.expiryDate ? `<div style="font-size:10px;margin-top:3px;color:${isExpired?'var(--accent-red)':expiresSoon?'var(--accent-amber)':'var(--text-muted)'}"><i class="fas ${isExpired?'fa-exclamation-triangle':'fa-clock'}" style="margin-right:3px"></i>${isExpired?'EXPIRED':'Expires'} ${att.expiryDate}</div>`:''}
+        ${att.notes?`<div style="font-size:10px;color:var(--text-muted);margin-top:3px;font-style:italic">${att.notes}</div>`:''}
+      </div>
+      <div style="display:flex;gap:4px;flex-shrink:0">
+        ${(att.fileWebUrl||att.fileUrl)?`<button class="btn btn-secondary btn-sm btn-icon" onclick="viewAssetAttachment('${asset.id}','${typeKey}','${att.id}')" title="View"><i class="fas fa-eye"></i></button>`:''}
+        ${(att.fileWebUrl||att.fileUrl||att.spDriveId)?`<button class="btn btn-secondary btn-sm btn-icon" onclick="downloadAssetAttachment('${asset.id}','${typeKey}','${att.id}')" title="Download"><i class="fas fa-download"></i></button>`:''}
+        <button class="btn btn-secondary btn-sm btn-icon" onclick="editAssetAttachment('${asset.id}','${typeKey}','${att.id}')" title="Edit metadata"><i class="fas fa-edit"></i></button>
+        ${isAdmin?`<button class="btn btn-danger btn-sm btn-icon" onclick="deleteAssetAttachment('${asset.id}','${typeKey}','${att.id}')" title="Delete"><i class="fas fa-trash"></i></button>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function uploadAssetAttachment(assetId, typeKey) {
+  const asset = (AppState.data[typeKey]||[]).find(a => a.id === assetId);
+  if (!asset) return;
+  // Show category + metadata form first
+  $('#genericModalTitle').textContent = 'Upload Attachment to ' + asset.name;
+  $('#genericModalBody').innerHTML = `
+    <div class="form-grid">
+      <div class="form-group"><label class="form-label">Document Type *</label>
+        <select class="form-select" id="attCat">
+          <option value="MSDS">MSDS (Material Safety Data Sheet)</option>
+          <option value="Calibration">Calibration Certificate</option>
+          <option value="Insurance">Insurance Document</option>
+          <option value="Permit">Permit / Registration</option>
+          <option value="Manual">Manual / Operating Procedure</option>
+          <option value="Photo">Photo</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Expiry Date <span style="font-weight:400;color:var(--text-muted)">(if applicable)</span></label>
+        <input type="date" class="form-input" id="attExpiry">
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Description / Notes</label>
+      <input class="form-input" id="attNotes" placeholder="e.g., Calibration by SGS, valid until next year">
+    </div>
+    <div class="form-group" style="margin-top:14px">
+      <label class="form-label">File *</label>
+      <input type="file" class="form-input" id="attFile" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.txt,.csv">
+      <div style="font-size:10px;color:var(--text-muted);margin-top:4px">Files are uploaded to SharePoint Document Library</div>
+    </div>
+  `;
+  $('#genericModalFooter').innerHTML = `
+    <button class="btn btn-secondary" onclick="showAssetDetail('${assetId}','${typeKey}')">Back</button>
+    <button class="btn btn-primary" onclick="_submitAssetAttachment('${assetId}','${typeKey}')"><i class="fas fa-upload"></i> Upload</button>
+  `;
+}
+
+async function _submitAssetAttachment(assetId, typeKey) {
+  const asset = (AppState.data[typeKey]||[]).find(a => a.id === assetId);
+  if (!asset) return;
+  const fileInput = document.getElementById('attFile');
+  const file = fileInput?.files?.[0];
+  if (!file) { showToast('Please select a file', 'error'); return; }
+  if (file.size > 100 * 1024 * 1024) { showToast('File too large — max 100 MB', 'error'); return; }
+  if (!_spConnected) { showToast('SharePoint not connected — cannot upload', 'error', 5000); return; }
+  const category = document.getElementById('attCat').value;
+  const expiry = document.getElementById('attExpiry').value;
+  const notes = document.getElementById('attNotes').value;
+  const user = _currentUserProfile?.name || _currentUser?.email || 'User';
+
+  showToast('Uploading ' + file.name + '...', 'info', 3000);
+  try {
+    // Upload to SP using asset ID as the folder
+    const result = await spUploadFile(file, 'ASSETS/' + asset.id);
+    const att = {
+      id: 'ATT-' + Date.now().toString(36).toUpperCase(),
+      name: file.name.replace(/\.[^/.]+$/, ''),
+      fileName: file.name,
+      fileType: file.name.split('.').pop().toLowerCase(),
+      fileUrl: result.url,
+      fileWebUrl: result.webUrl,
+      spDriveId: result.driveId,
+      spItemId: result.itemId,
+      fileSize: _formatFileSize(file.size),
+      category,
+      expiryDate: expiry || null,
+      notes: notes || '',
+      uploadedBy: user,
+      uploadedAt: new Date().toISOString(),
+    };
+    if (!asset.attachments) asset.attachments = [];
+    asset.attachments.push(att);
+    AppState.save();
+    showToast('Attachment uploaded: ' + file.name, 'success');
+    showAssetDetail(assetId, typeKey); // refresh
+  } catch (err) {
+    console.error('[Asset Attach] Error:', err);
+    showToast('Upload failed: ' + err.message, 'error', 6000);
+  }
+}
+
+async function viewAssetAttachment(assetId, typeKey, attId) {
+  const asset = (AppState.data[typeKey]||[]).find(a => a.id === assetId);
+  if (!asset) return;
+  const att = (asset.attachments||[]).find(a => a.id === attId);
+  if (!att) return;
+  if (att.fileWebUrl) { window.open(att.fileWebUrl, '_blank'); return; }
+  if (att.spDriveId && att.spItemId) {
+    showToast('Getting view link...', 'info', 2000);
+    const url = await spGetFileDownloadUrl(att.spDriveId, att.spItemId);
+    if (url) { window.open(url, '_blank'); return; }
+  }
+  showToast('Cannot open file', 'error');
+}
+
+async function downloadAssetAttachment(assetId, typeKey, attId) {
+  const asset = (AppState.data[typeKey]||[]).find(a => a.id === assetId);
+  if (!asset) return;
+  const att = (asset.attachments||[]).find(a => a.id === attId);
+  if (!att) return;
+  let url = att.fileUrl;
+  if (att.spDriveId && att.spItemId) {
+    url = await spGetFileDownloadUrl(att.spDriveId, att.spItemId);
+  }
+  if (!url) { showToast('Cannot download file', 'error'); return; }
+  const a = document.createElement('a');
+  a.href = url; a.download = att.fileName || att.name; a.target = '_blank';
+  a.click();
+  showToast('Downloading: ' + (att.fileName || att.name), 'success');
+}
+
+function editAssetAttachment(assetId, typeKey, attId) {
+  const asset = (AppState.data[typeKey]||[]).find(a => a.id === assetId);
+  if (!asset) return;
+  const att = (asset.attachments||[]).find(a => a.id === attId);
+  if (!att) return;
+
+  $('#genericModalTitle').textContent = 'Edit Attachment Metadata';
+  $('#genericModalBody').innerHTML = `
+    <div style="background:var(--bg-hover);padding:8px;border-radius:6px;margin-bottom:12px;font-size:11px">
+      <i class="fas fa-file" style="margin-right:5px"></i>${att.fileName || att.name}
+    </div>
+    <div class="form-grid">
+      <div class="form-group"><label class="form-label">Document Type</label>
+        <select class="form-select" id="attCatE">
+          ${['MSDS','Calibration','Insurance','Permit','Manual','Photo','Other'].map(c=>`<option value="${c}" ${att.category===c?'selected':''}>${c}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Expiry Date</label>
+        <input type="date" class="form-input" id="attExpiryE" value="${att.expiryDate||''}">
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Name / Title</label>
+      <input class="form-input" id="attNameE" value="${att.name||''}">
+    </div>
+    <div class="form-group"><label class="form-label">Notes</label>
+      <input class="form-input" id="attNotesE" value="${att.notes||''}">
+    </div>
+  `;
+  $('#genericModalFooter').innerHTML = `
+    <button class="btn btn-secondary" onclick="showAssetDetail('${assetId}','${typeKey}')">Back</button>
+    <button class="btn btn-primary" onclick="_saveAssetAttachmentMeta('${assetId}','${typeKey}','${attId}')">Save</button>
+  `;
+}
+
+function _saveAssetAttachmentMeta(assetId, typeKey, attId) {
+  const asset = (AppState.data[typeKey]||[]).find(a => a.id === assetId);
+  if (!asset) return;
+  const att = (asset.attachments||[]).find(a => a.id === attId);
+  if (!att) return;
+  att.name = document.getElementById('attNameE').value || att.name;
+  att.category = document.getElementById('attCatE').value;
+  att.expiryDate = document.getElementById('attExpiryE').value || null;
+  att.notes = document.getElementById('attNotesE').value || '';
+  AppState.save();
+  showToast('Attachment updated', 'success');
+  showAssetDetail(assetId, typeKey);
+}
+
+async function deleteAssetAttachment(assetId, typeKey, attId) {
+  const isAdmin = (_currentUserProfile && _currentUserProfile.isAdmin) || false;
+  if (!isAdmin) { showToast('Admin only', 'error'); return; }
+  const asset = (AppState.data[typeKey]||[]).find(a => a.id === assetId);
+  if (!asset) return;
+  const att = (asset.attachments||[]).find(a => a.id === attId);
+  if (!att) return;
+  if (!confirm('Delete attachment "' + (att.name || att.fileName) + '"?\n\nThis will also delete the file from SharePoint.')) return;
+  // Delete from SP
+  if (att.spDriveId && att.spItemId) {
+    try { await spDeleteFile(att.spDriveId, att.spItemId); } catch(e) { console.warn('SP delete:', e.message); }
+  }
+  asset.attachments = (asset.attachments||[]).filter(a => a.id !== attId);
+  AppState.save();
+  showToast('Attachment deleted', 'warning');
+  showAssetDetail(assetId, typeKey);
+}
+
+
 
 function logUtilization(rid,rname,rtype){
 AppState.data._quickLogId=rid;AppState.data._quickLogName=rname;AppState.data._quickLogType=rtype;
@@ -4730,9 +5423,11 @@ ${[['fa-tasks',pt.length,'Tasks','var(--text-primary)'],['fa-check',done,'Done',
 setTimeout(()=>{const c=$('#progTrendChart');if(c){c.width=c.parentElement.offsetWidth-30;drawLine('progTrendChart',[{data:[25,30,35,38,41,45,47,50],color:'#388bfd'},{data:[55,62,70,75,78,82,87,90],color:'#3fb950'},{data:[20,24,27,30,33,36,39,41],color:'#f0a450'}]);}},50);}
 
 function renderKPI(){
-const{projects,tasks,costs,risks}=AppState.data;
+const{tasks,costs,risks}=AppState.data;
+// Exclude prospects from KPI calculations
+const projects=(AppState.data.projects||[]).filter(p=>p.status!=='prospect');
 const totP=costs.reduce((s,c)=>s+c.planned,0),totA=costs.reduce((s,c)=>s+c.actual,0);
-const avgProg=projects.reduce((s,p)=>s+p.progress,0)/projects.length/100;
+const avgProg=projects.length?projects.reduce((s,p)=>s+(p.progress||0),0)/projects.length/100:0;
 const EV=totP*avgProg,CPI=(EV/totA).toFixed(2),SPI=(EV/(totP*.56)).toFixed(2);
 const ph=tasks.reduce((s,t)=>s+t.plannedHrs,0),ah=tasks.reduce((s,t)=>s+t.actualHrs,0);
 const prod=ah>0?(ph/ah).toFixed(2):'1.00';const done=tasks.filter(t=>t.status==='done').length;
@@ -11124,6 +11819,17 @@ showToast('SHIC loaded — Welcome back!','success',2500);
 // ── PROJECT DETAIL VIEW ──────────────────────────────────────
 
 
+// Show ID change history badge if this project had its ID changed
+function _renderProjectIdHistoryBadge(currentId){
+  const history = (AppState.data.projectIdHistory||[]).filter(h => h.projectId === currentId);
+  if (!history.length) return '';
+  return `<div style="margin-bottom:12px;padding:8px 12px;background:rgba(56,139,253,.06);border:1px solid rgba(56,139,253,.2);border-radius:7px;font-size:11px;color:var(--text-secondary)">
+    <i class="fas fa-history" style="margin-right:5px;color:var(--accent-blue)"></i>
+    <strong>ID History:</strong>
+    ${history.map(h => `<span style="margin-left:8px;font-family:var(--font-mono)">${h.oldId} → ${h.newId}</span> <span style="color:var(--text-muted)">(${h.changedBy}, ${new Date(h.changedAt).toLocaleDateString()})</span>`).join(' · ')}
+  </div>`;
+}
+
 function showProjectDetail(id){
   detailProjectId=id;
   detailTab='overview';
@@ -11169,9 +11875,11 @@ function renderProjectDetail(){
     <div style="font-size:11px;color:var(--text-secondary)">${p.id} &rsaquo; Project Detail</div>
     <div style="margin-left:auto;display:flex;gap:7px">
       ${sBadge(p.status)} ${pBadge(p.priority)}
+      ${p.status==='completed'||p.status==='archived'?'':`<button class="btn btn-secondary btn-sm" onclick="showChangeProjectId('${p.id}')" title="Change Project ID"><i class="fas fa-id-card"></i> Change ID</button>`}
       <button class="btn btn-primary btn-sm" onclick="showProjectForm('${p.id}')"><i class="fas fa-edit"></i> Edit Project</button>
     </div>
   </div>
+  ${_renderProjectIdHistoryBadge(p.id)}
 
   <!-- Hero header -->
   <div style="background:linear-gradient(135deg,#0d2147,#112266);border:1px solid rgba(56,139,253,.25);border-radius:var(--radius);padding:20px;margin-bottom:16px">
