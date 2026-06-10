@@ -7628,19 +7628,19 @@ async function connectSharePoint() {
     if(_fbDb){ try{ _fbDb.goOffline(); }catch{} }
     clearTimeout(window._fbIdleTimer);
     clearTimeout(window._fbBatchTimer);
-    // ── Clear any Firebase-originated "pending changes" ──
-    // New user's local data came from Firebase — we don't want it treated
-    // as pending changes that need to be pushed to SharePoint
+    // Preserve local queued changes — push before any pull/merge decision
+    const hadQueuedOnConnect = _spHasLocalEdits();
     _pendingEdits = false;
-    _spOfflineQueue = false;
-    localStorage.removeItem('shic_sp_offlinequeue');
-    _spLastSavedHash = ''; // reset change detection so first SP pull is clean
-    // ── On connect: ALWAYS pull from SharePoint first ────────
-    // New users may have stale Firebase data locally — we must NEVER
-    // auto-push on first connect as it would overwrite the team's real data.
-    // Only push if:
-    //   1. SharePoint is confirmed empty AND this is the admin (first setup)
-    //   2. User explicitly clicks "Push My Changes" after reviewing
+    _spLastSavedHash = _spHash(AppState.data);
+    if (hadQueuedOnConnect) {
+      try {
+        console.log('[SP] Connect: pushing queued local changes first');
+        await spPushData(true);
+      } catch (pe) {
+        console.warn('[SP] Connect-time push failed:', pe.message);
+      }
+    }
+    // ── On connect: pull from SharePoint and merge safely ────────
     spSetStatus('syncing', 'Loading data from SharePoint...');
     try {
       const token2 = await getSpToken();
@@ -7671,7 +7671,7 @@ async function connectSharePoint() {
             console.log('[SP] Non-admin connect: SP empty, skipping push');
           }
         } else {
-          // SharePoint has data — always pull it (overrides any local Firebase data)
+          // SharePoint has data — merge if local edits exist, else pull remote
           console.log('[SP] Pulling from SharePoint on connect — remote _ts:', remote._ts);
           const { _ts, _by, _deletedIds: rd, ...cleanData } = remote;
           if (rd) {
@@ -7681,21 +7681,33 @@ async function connectSharePoint() {
             });
             localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
           }
-          // Full replace — SP is authoritative for new connections
-          _spLastWriteTs = _ts;
-          localStorage.setItem('shic_sp_lastwritets', String(_spLastWriteTs));
-          _spDataHash = _spHash(cleanData) + _ts;
-          AppState.data = Object.assign(getDefaultData(), cleanData);
-          if (typeof migrateData === 'function') migrateData();
-          if (typeof _origSaveForFb === 'function') _origSaveForFb();
-          else if (typeof _origSave === 'function') _origSave();
-          _spOfflineQueue = false;
-          localStorage.removeItem('shic_sp_offlinequeue');
-          setTimeout(() => {
-            try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
-            try { buildSidebar(); } catch(e) {}
-          }, 400);
-          showToast('Data loaded from SharePoint' + (_by ? ' (by ' + _by + ')' : '') + ' ✓', 'success');
+          if (_spHasLocalEdits()) {
+            // Never wipe local unsaved work on connect — merge then push
+            _spApplyRemote(cleanData, _ts, _by);
+            await spPushData(true);
+            showToast('Merged and synced your local changes with SharePoint ✓', 'success');
+          } else if (remote._ts > _spLastWriteTs) {
+            // Remote is newer — safe full replace
+            _spLastWriteTs = _ts;
+            localStorage.setItem('shic_sp_lastwritets', String(_spLastWriteTs));
+            _spDataHash = _spHash(cleanData) + _ts;
+            AppState.data = Object.assign(getDefaultData(), cleanData);
+            if (typeof migrateData === 'function') migrateData();
+            if (typeof _origSaveForFb === 'function') _origSaveForFb();
+            else if (typeof _origSave === 'function') _origSave();
+            _spOfflineQueue = false;
+            localStorage.removeItem('shic_sp_offlinequeue');
+            setTimeout(() => {
+              try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
+              try { buildSidebar(); } catch(e) {}
+            }, 400);
+            showToast('Data loaded from SharePoint' + (_by ? ' (by ' + _by + ')' : '') + ' ✓', 'success');
+          } else {
+            // Local is current — no pull needed
+            _spDataHash = _spHash(cleanData) + _ts;
+            spSetStatus('connected', 'Connected — local data is current');
+            showToast('Connected — your local data is up to date', 'info', 3000);
+          }
         }
       }
     } catch(ce) {
@@ -7714,6 +7726,17 @@ async function connectSharePoint() {
 // ── Disconnect ────────────────────────────────────────────
 async function disconnectSharePoint() {
   if (!confirm('Disconnect SharePoint sync? Your local data will remain.')) return;
+  // Push pending changes before disconnect so nothing is lost
+  if (_spConnected && _spAccount && _spHasLocalEdits()) {
+    clearTimeout(_spSyncTimer);
+    try {
+      showToast('Syncing changes to SharePoint before disconnect...', 'info', 2500);
+      await spPushData(true);
+    } catch (e) {
+      console.warn('[SP] Pre-disconnect push failed:', e.message);
+      showToast('Could not sync before disconnect — changes kept locally and will retry on reconnect', 'warning', 5000);
+    }
+  }
   if (_spMsalApp && _spAccount) { try { await _spMsalApp.logoutPopup({ account: _spAccount }); } catch (e) {} }
   spStopPolling();
   // Re-enable Firebase if it was running before SP took over
@@ -7877,6 +7900,11 @@ function _spMergeArrays(localArr, remoteArr, localEdited, arrayKey) {
   return result;
 }
 
+// ── True when local changes haven't been confirmed on SharePoint ──
+function _spHasLocalEdits() {
+  return !!_spOfflineQueue || (typeof _pendingEdits !== 'undefined' && _pendingEdits);
+}
+
 // ── Apply a remote snapshot safely ───────────────────────
 function _spApplyRemote(data, _ts, _by) {
   const hash = _spHash(data) + _ts;
@@ -7886,7 +7914,7 @@ function _spApplyRemote(data, _ts, _by) {
   localStorage.setItem('shic_sp_lastwritets', String(_spLastWriteTs));
 
   // ── Determine if user has local unsaved edits ──────────
-  const hasLocalEdits = _spOfflineQueue || (typeof _pendingEdits !== 'undefined' && _pendingEdits);
+  const hasLocalEdits = _spHasLocalEdits();
 
   if (hasLocalEdits) {
     // User has local changes — merge instead of replace
@@ -7994,6 +8022,11 @@ async function spPushData(silent = false) {
     spSetStatus('connected', 'Last sync: ' + fmtSyncTime(_spLastSync));
     if (!silent) showToast('Data pushed to SharePoint ✓', 'success');
     spUpdateSyncInfo();
+    // Push succeeded — local is now in sync with SharePoint
+    _spOfflineQueue = false;
+    localStorage.removeItem('shic_sp_offlinequeue');
+    if (typeof _pendingEdits !== 'undefined') _pendingEdits = false;
+    _spLastSavedHash = _spHash(AppState.data);
     // Apply any pending remote that arrived while we were editing
     if (_spPendingRemote) {
       const { data, _ts, _by } = _spPendingRemote;
@@ -8050,7 +8083,7 @@ async function _spRetryPush() {
 async function spPullData() {
   if (_spSyncing) return;
   if (!_spConnected || !_spAccount) { showToast('Not connected to SharePoint', 'error'); return; }
-  const hasLocalEdits = _spOfflineQueue || (typeof _pendingEdits !== 'undefined' && _pendingEdits);
+  const hasLocalEdits = _spHasLocalEdits();
   const msg = hasLocalEdits
     ? '⚠ You have LOCAL UNSAVED CHANGES that will be LOST if you pull now.\n\nPull anyway and discard your changes?\n\n(Click Cancel to push your changes first instead.)'
     : 'Download latest data from SharePoint? This will replace your current local data.';
@@ -8119,8 +8152,8 @@ async function _spPollRemote() {
     const { _ts, _by, ...data } = remote;
     const hash = _spHash(data) + _ts;
     if (hash === _spDataHash) return; // same data
-    // Don't overwrite if user has pending edits
-    if (typeof _pendingEdits !== 'undefined' && _pendingEdits) {
+    // Don't overwrite if user has pending local changes (queued or in-flight)
+    if (_spHasLocalEdits()) {
       _spPendingRemote = { data, _ts, _by };
       if (_by && _by !== _spAccount?.username)
         showToast('⚠ ' + _by + ' updated SharePoint while you have unsaved changes', 'warning', 5000);
@@ -8218,6 +8251,7 @@ AppState.save = function () {
   // Mark that we have unsaved changes regardless of availability
   _spOfflineQueue = true;
   localStorage.setItem('shic_sp_offlinequeue', '1');
+  if (typeof _pendingEdits !== 'undefined') _pendingEdits = true;
   if (!_spAutoSync || _spSyncing) return;
   if (!_spAvailable || !_isOnline) {
     spSetStatus('error', 'Offline — changes queued locally');
@@ -8228,7 +8262,7 @@ AppState.save = function () {
   // Add per-user jitter (0-5s) to spread out pushes from concurrent users
   const jitter = Math.floor(Math.random() * 5000);
   clearTimeout(_spSyncTimer);
-  _spSyncTimer = setTimeout(() => spPushData(true), 8000 + jitter);
+  _spSyncTimer = setTimeout(() => spPushData(true), 3000 + jitter);
 };
 
 // ── UI helpers ────────────────────────────────────────────
@@ -8398,6 +8432,11 @@ async function spAutoInit() {
   if (!initSpMSAL() || !_spAccount) return;
 
   _spConnected = true;
+  // M365 login path never called connectSharePoint — enable auto-sync by default
+  if (!_spAutoSync) {
+    _spAutoSync = true;
+    localStorage.setItem('shic_sp_autosync', 'true');
+  }
   console.log('[SP] Auto-connected as', _spAccount.username);
 
   // Silence Firebase — SP is the primary DB
@@ -8406,15 +8445,20 @@ async function spAutoInit() {
     console.log('[FB] Silenced — SP is primary DB');
   }
 
-  // Clear any Firebase-originated pending changes
+  // Preserve queued changes from a prior session — push them before any pull
+  const hadQueuedChanges = _spHasLocalEdits();
   _pendingEdits = false;
-  _spOfflineQueue = false;
-  localStorage.removeItem('shic_sp_offlinequeue');
-  _spLastSavedHash = '';
+  _spLastSavedHash = _spHash(AppState.data);
 
   await new Promise(r => setTimeout(r, 1500)); // brief delay for app to stabilize
 
   try {
+    // Push local changes that never made it to SharePoint (logout, tab close, offline)
+    if (hadQueuedChanges) {
+      console.log('[SP] Auto-init: pushing queued local changes from previous session');
+      await spPushData(true);
+    }
+
     const token = await getSpToken();
     if (!token) { spStartPolling(); return; }
     const { siteId, listId } = await spResolveSiteAndList(token);
@@ -8873,6 +8917,8 @@ async function doM365Login() {
     // Initialize SP sync MSAL with same credentials
     _spClientId = clientId; _spSiteUrl = siteUrl;
     _spMsalApp = msalApp; _spAccount = _m365Account; _spConnected = true;
+    _spAutoSync = true;
+    localStorage.setItem('shic_sp_autosync', 'true');
     await spResolveSiteAndList(token);
     const siteId = _spSiteId;
     // ── Get user info from MS Graph ──────────────────────
@@ -9237,8 +9283,8 @@ async function handleAuthStateChange(user){
     showAuthOverlay(false);
     updateSidebarUser(profile);
     if(typeof buildSidebar==='function')buildSidebar();
-    // Show loading state on dashboard while Firebase data arrives
-    AppState.data=getDefaultData(); // start empty
+    // Keep localStorage data while Firebase loads — never wipe SP/local edits first
+    AppState.ensureData();
     if(typeof navigate==='function')navigate('dashboard');
     // Show loading indicator on dashboard
     const mc=document.getElementById('mainContent');
@@ -9486,8 +9532,42 @@ async function selfApproveAsAdmin(){
 
 function doLogout(){
   if(!confirm('Sign out of SHIC?'))return;
+  doLogoutAsync().catch(e => console.error('[SHIC] Logout error:', e));
+}
 
-  // ── 1. Stop all timers FIRST to prevent any callbacks firing after logout ──
+async function doLogoutAsync(){
+  // ── 0. Persist local data immediately (always survives sign-out) ──
+  try {
+    if (typeof _origSaveForFb === 'function') _origSaveForFb();
+    else if (typeof _origSaveForOffline === 'function') _origSaveForOffline();
+    else AppState.save();
+  } catch (e) { console.warn('[SHIC] Local save on logout failed:', e); }
+
+  // ── 1. Flush pending SharePoint changes BEFORE tearing down connection ──
+  if (_spConnected && _spAccount && _spHasLocalEdits()) {
+    clearTimeout(_spSyncTimer);
+    try {
+      showToast('Syncing changes to SharePoint before sign out...', 'info', 3000);
+      await spPushData(true);
+    } catch (e) {
+      console.warn('[SHIC] Logout SP push failed:', e);
+      _spOfflineQueue = true;
+      localStorage.setItem('shic_sp_offlinequeue', '1');
+      showToast('Some changes could not sync — they are saved locally and will sync on next login', 'warning', 5000);
+    }
+  }
+
+  // ── 2. Flush pending Firebase changes (legacy path only) ──
+  if (_pendingEdits && _fbConnected && _fbDb && _fbRef && !(_spConnected && _spAccount)) {
+    clearTimeout(window._fbIdleTimer);
+    clearTimeout(window._fbBatchTimer);
+    try {
+      await _fbRef.set({ ...AppState.data, _ts: Date.now(), _by: (_fbUser?.name || 'logout') });
+      _pendingEdits = false;
+    } catch (e) { console.warn('[SHIC] Logout FB push failed:', e); }
+  }
+
+  // ── 3. Stop all timers to prevent callbacks firing after logout ──
   clearTimeout(window._fbIdleTimer);
   clearTimeout(window._fbBatchTimer);
   clearTimeout(_spSyncTimer);
@@ -9497,11 +9577,10 @@ function doLogout(){
   window._fbBatchTimer = null;
   _spPollingTimer = null;
 
-  // ── 2. Stop SP polling ──
+  // ── 4. Stop SP polling ──
   spStopPolling();
 
-  // ── 3. Reset ALL app state BEFORE any async calls ──────
-  // This prevents any in-flight timers/callbacks from using stale state
+  // ── 5. Reset app state (keep _spLastWriteTs / _spDataHash / offline queue if push failed) ──
   _appReady = false;
   _pendingEdits = false;
   _fbConnected = false;
@@ -9513,15 +9592,12 @@ function doLogout(){
   _m365AuthMsal = null;
   _m365LoggedIn = false;
   _usersListId = null;
-  _spOfflineQueue = false;
-  _spLastSavedHash = '';
+  if (!_spOfflineQueue) {
+    _spLastSavedHash = '';
+  }
   _spPrevData = null;
   _spPendingRemote = null;
-  // ── IMPORTANT: DO NOT clear _spLastWriteTs or _spDataHash ──
-  // These persist across logout/login to prevent data loss on reconnect.
-  // If cleared, the auto-init merge would think local data is older than SP
-  // and do a full replace, wiping any data loaded before logout.
-  // _spSiteId/_spListId are safe to clear (will re-resolve on next login)
+  // DO NOT clear _spLastWriteTs or _spDataHash — needed for safe merge on next login
   _spSiteId = ''; _spListId = ''; _spItemId = '';
   localStorage.removeItem('shic_sp_siteid');
   localStorage.removeItem('shic_sp_listid');
@@ -9529,10 +9605,9 @@ function doLogout(){
   if(typeof _currentUser !== 'undefined') _currentUser = null;
   if(typeof _currentUserProfile !== 'undefined') _currentUserProfile = null;
 
-  // ── 4. Silence Firebase completely ─────────────────────
+  // ── 6. Silence Firebase completely ─────────────────────
   if(_fbDb){
     try{ _fbDb.goOffline(); }catch{}
-    // Detach all listeners to stop permission_denied errors
     try{ _fbDb.ref('shic').off(); }catch{}
     try{ _fbDb.ref('shic/presence').off(); }catch{}
     try{ _fbDb.ref('shic/patches').off(); }catch{}
@@ -9540,23 +9615,16 @@ function doLogout(){
     try{ _fbDb.ref('shic/users').off(); }catch{}
   }
 
-  // ── 5. Sign out and show login screen ──────────────────
-  const doSignOut = async () => {
-    // Sign out Firebase Auth if active
-    try{ if(_auth) await _auth.signOut(); }catch(e){}
-    // Sign out M365 (silently — don't show popup)
-    try{
-      if(_m365AuthMsal && _m365Account){
-        await _m365AuthMsal.logoutPopup({ account: _m365Account }).catch(()=>{});
-      }
-    }catch(e){}
-    // ── 6. Show login screen cleanly ────────────────────
-    showAuthOverlay(true);
-    showAuthForm('login');
-    console.log('[SHIC] Signed out — login screen shown');
-  };
-
-  setTimeout(doSignOut, 600);
+  // ── 7. Sign out and show login screen ──────────────────
+  try{ if(_auth) await _auth.signOut(); }catch(e){}
+  try{
+    if(_m365AuthMsal && _m365Account){
+      await _m365AuthMsal.logoutPopup({ account: _m365Account }).catch(()=>{});
+    }
+  }catch(e){}
+  showAuthOverlay(true);
+  showAuthForm('login');
+  console.log('[SHIC] Signed out — login screen shown');
 }
 
 // ── Admin: User Management ────────────────────────────────
@@ -14259,6 +14327,10 @@ window.addEventListener('load',init);
 
 // Push pending edits on page unload (browser close, tab close, navigation)
 window.addEventListener('beforeunload', function(e){
+  // Always persist to localStorage on close
+  try {
+    if (typeof _origSaveForFb === 'function') _origSaveForFb();
+  } catch (e2) {}
   // ── SP: flush pending changes using keepalive fetch (survives tab close) ──
   if (_spConnected && _spAccount && _spOfflineQueue && !_spSyncing) {
     try {
@@ -14295,6 +14367,18 @@ window.addEventListener('beforeunload', function(e){
     fbPushData(true);
     const msg = 'You have unsaved changes that may not be synced yet.';
     e.preventDefault(); e.returnValue = msg; return msg;
+  }
+});
+
+// Push when tab is hidden (switching apps, minimizing) — beforeunload alone is unreliable
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState !== 'hidden') return;
+  try {
+    if (typeof _origSaveForFb === 'function') _origSaveForFb();
+  } catch (e) {}
+  if (_spConnected && _spAccount && _spHasLocalEdits() && !_spSyncing) {
+    clearTimeout(_spSyncTimer);
+    spPushData(true).catch(() => {});
   }
 });
 </script>
