@@ -6733,7 +6733,7 @@ function initFirebase(config){
 }
 
 function fbConnectPresence(){
-  if(!_fbDb)return;
+  if(!_fbDb||!_appReady||!_fbUser)return;
   const presPath=FB_PRESENCE_PATH+'/'+_fbUser.id;
   _fbPresenceRef=_fbDb.ref(presPath);
   const presData={name:_fbUser.name,id:_fbUser.id,online:true,lastSeen:Date.now(),page:AppState.currentPage||'dashboard'};
@@ -6910,7 +6910,7 @@ function showAdminBroadcastBanner(bc){
 }
 
 function fbListenPatches(){
-  if(!_fbDb)return;
+  if(!_fbDb||!_appReady)return;
   _fbDb.ref('shic/patches').once('value',snap=>{ // once() — no persistent listener needed
     if(!snap.exists())return;
     const fbPatches=snap.val()||{};
@@ -7488,10 +7488,18 @@ function initSpMSAL() {
 
 // ── Get Graph API token ───────────────────────────────────
 async function getSpToken() {
-  if (!_spMsalApp || !_spAccount) return null;
+  if (!_spMsalApp || !_spAccount) {
+    // If M365 auth is active, use the auth MSAL app as fallback
+    if (_m365AuthMsal && _m365Account) {
+      _spMsalApp = _m365AuthMsal;
+      _spAccount = _m365Account;
+    } else {
+      return null;
+    }
+  }
   try {
     // MSAL 3.x: ensure initialized before token calls
-    if (_spMsalApp.initialize) {
+    if (_spMsalApp && _spMsalApp.initialize) {
       try { await _spMsalApp.initialize(); } catch(ie) {}
     }
     const res = await _spMsalApp.acquireTokenSilent({ scopes: SP_SCOPES, account: _spAccount });
@@ -9460,27 +9468,21 @@ async function selfApproveAsAdmin(){
 function doLogout(){
   if(!confirm('Sign out of SHIC?'))return;
 
-  // ── 1. Push any pending SP or Firebase edits before signing out ──
+  // ── 1. Stop all timers FIRST to prevent any callbacks firing after logout ──
   clearTimeout(window._fbIdleTimer);
   clearTimeout(window._fbBatchTimer);
   clearTimeout(_spSyncTimer);
   clearTimeout(_spRetryTimer);
+  clearInterval(_spPollingTimer);
+  clearInterval(window._tokenRefreshInterval);
   window._fbBatchTimer = null;
-
-  if(_pendingEdits && _fbConnected && _fbDb && !(_spConnected&&_spAccount)){
-    showToast('Saving changes before sign-out...','info',2000);
-    fbPushData(false);
-    _pendingEdits = false;
-  }
-  if(_spConnected && _spAccount && _spOfflineQueue){
-    showToast('Saving SharePoint changes before sign-out...','info',2000);
-    spPushData(true).catch(()=>{});
-  }
+  _spPollingTimer = null;
 
   // ── 2. Stop SP polling ──
   spStopPolling();
 
-  // ── 3. Reset ALL app state ──────────────────────────────
+  // ── 3. Reset ALL app state BEFORE any async calls ──────
+  // This prevents any in-flight timers/callbacks from using stale state
   _appReady = false;
   _pendingEdits = false;
   _fbConnected = false;
@@ -9488,25 +9490,44 @@ function doLogout(){
   _spConnected = false;
   _spAccount = null;
   _spMsalApp = null;
+  _m365Account = null;
+  _m365AuthMsal = null;
+  _m365LoggedIn = false;
+  _usersListId = null;
   _spOfflineQueue = false;
   _spLastSavedHash = '';
   _spPrevData = null;
+  _spSiteId = ''; _spListId = ''; _spItemId = '';
+  localStorage.removeItem('shic_sp_siteid');
+  localStorage.removeItem('shic_sp_listid');
+  localStorage.removeItem('shic_sp_itemid');
   if(typeof _currentUser !== 'undefined') _currentUser = null;
   if(typeof _currentUserProfile !== 'undefined') _currentUserProfile = null;
 
-  // ── 4. Go offline gracefully ────────────────────────────
-  if(_fbDb){ try{ _fbDb.goOffline(); }catch{} }
+  // ── 4. Silence Firebase completely ─────────────────────
+  if(_fbDb){
+    try{ _fbDb.goOffline(); }catch{}
+    // Detach all listeners to stop permission_denied errors
+    try{ _fbDb.ref('shic').off(); }catch{}
+    try{ _fbDb.ref('shic/presence').off(); }catch{}
+    try{ _fbDb.ref('shic/patches').off(); }catch{}
+    try{ _fbDb.ref('shic/broadcast').off(); }catch{}
+    try{ _fbDb.ref('shic/users').off(); }catch{}
+  }
 
-  // ── 5. Sign out Firebase Auth — then show login screen ──
+  // ── 5. Sign out and show login screen ──────────────────
   const doSignOut = async () => {
+    // Sign out Firebase Auth if active
+    try{ if(_auth) await _auth.signOut(); }catch(e){}
+    // Sign out M365 (silently — don't show popup)
     try{
-      if(_auth) await _auth.signOut();
-    }catch(e){ console.warn('[Logout] Firebase signOut error:', e.message); }
+      if(_m365AuthMsal && _m365Account){
+        await _m365AuthMsal.logoutPopup({ account: _m365Account }).catch(()=>{});
+      }
+    }catch(e){}
     // ── 6. Show login screen cleanly ────────────────────
     showAuthOverlay(true);
     showAuthForm('login');
-    // Re-enable Firebase networking for next login
-    if(_fbDb){ try{ _fbDb.goOnline(); }catch{} }
     console.log('[SHIC] Signed out — login screen shown');
   };
 
