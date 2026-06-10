@@ -4347,8 +4347,12 @@ function renderDocTable(){
       const ext=(d.fileType||d.name?.split('.').pop()||'').toLowerCase();
       const icon=iconMap[ext]||'fa-file-alt';
       const color=colorMap[ext]||'var(--text-secondary)';
-      const hasFile=!!d.fileData;
-      return`<tr onclick="showDocDetail('${d.id}')" style="cursor:pointer">
+      // Has file if either legacy fileData OR new SP file reference
+      const hasFile=!!(d.fileData||d.fileUrl||d.fileWebUrl||(d.spDriveId&&d.spItemId));
+      const isLegacy=!!d.legacyFile;
+      const isAdmin=(_currentUserProfile&&_currentUserProfile.isAdmin)||false;
+      const hasPendingDeletion=!!d.deletionRequested;
+      return`<tr onclick="showDocDetail('${d.id}')" style="cursor:pointer${hasPendingDeletion?';background:rgba(240,164,80,.05)':''}">
         <td style="font-family:var(--font-mono);font-size:10px;font-weight:700;color:var(--accent-blue)">${d.number||d.id}</td>
         <td><span class="badge badge-gray">Rev ${d.rev||'A'}</span></td>
         <td>
@@ -4370,13 +4374,25 @@ function renderDocTable(){
         </td>
         <td style="font-size:11px;font-family:var(--font-mono)">${d.date||'—'}</td>
         <td style="font-size:11px;color:var(--text-secondary)">${d.size||'—'}</td>
-        <td onclick="event.stopPropagation()">${sBadge(d.status)}</td>
+        <td onclick="event.stopPropagation()">${sBadge(d.status)}${hasPendingDeletion?`<div style="font-size:9px;color:var(--accent-amber);margin-top:3px"><i class="fas fa-clock" style="margin-right:3px"></i>Delete pending</div>`:''}${isLegacy?`<div style="font-size:9px;color:var(--accent-amber);margin-top:3px"><i class="fas fa-exclamation-triangle" style="margin-right:3px"></i>Re-upload needed</div>`:''}</td>
         <td onclick="event.stopPropagation()">
-          <div style="display:flex;gap:4px">
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm btn-icon" onclick="showDocDetail('${d.id}')" title="Edit details"><i class="fas fa-edit"></i></button>
-            ${hasFile?`<button class="btn btn-success btn-sm btn-icon" onclick="downloadDoc('${d.id}')" title="Download"><i class="fas fa-download"></i></button>`:'<button class="btn btn-secondary btn-sm btn-icon" disabled title="No file attached" style="opacity:.4"><i class="fas fa-download"></i></button>'}
-            ${hasFile?`<button class="btn btn-secondary btn-sm btn-icon" onclick="viewDoc('${d.id}')" title="View file"><i class="fas fa-eye"></i></button>`:''}
-            <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDoc('${d.id}')" title="Delete"><i class="fas fa-trash"></i></button>
+            ${hasFile?`
+              <button class="btn btn-success btn-sm btn-icon" onclick="downloadDoc('${d.id}')" title="Download"><i class="fas fa-download"></i></button>
+              <button class="btn btn-secondary btn-sm btn-icon" onclick="viewDoc('${d.id}')" title="View file"><i class="fas fa-eye"></i></button>
+            `:isLegacy?`
+              <button class="btn btn-warning btn-sm btn-icon" onclick="attachFileToDoc('${d.id}')" title="Re-upload file (legacy)"><i class="fas fa-cloud-upload-alt"></i></button>
+            `:`
+              <button class="btn btn-secondary btn-sm btn-icon" onclick="attachFileToDoc('${d.id}')" title="Attach file"><i class="fas fa-paperclip"></i></button>
+            `}
+            ${isAdmin?`
+              <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDoc('${d.id}')" title="Delete document (Admin)"><i class="fas fa-trash"></i></button>
+            `:hasPendingDeletion?`
+              <button class="btn btn-warning btn-sm btn-icon" onclick="cancelDeletionRequest('${d.id}')" title="Cancel deletion request"><i class="fas fa-undo"></i></button>
+            `:`
+              <button class="btn btn-secondary btn-sm btn-icon" onclick="requestDocDeletion('${d.id}')" title="Request deletion"><i class="fas fa-flag"></i></button>
+            `}
           </div>
         </td>
       </tr>`;}).join('')}
@@ -4544,14 +4560,73 @@ async function viewDoc(id){
 }
 
 async function deleteDoc(id){
-  if(!confirm('Delete this document? This cannot be undone.'))return;
+  // ── Permission check: only admin can delete ──
+  const isAdmin=(_currentUserProfile&&_currentUserProfile.isAdmin)||false;
+  if(!isAdmin){
+    showToast('Only admins can delete documents. Use "Request Deletion" instead.','error',4000);
+    return;
+  }
   const d=(AppState.data.documents||[]).find(x=>x.id===id);
+  if(!d){showToast('Document not found','error');return;}
+  const wasRequested=d.deletionRequested?(' (requested by '+d.deletionRequestedBy+')'):'';
+  if(!confirm('Delete this document'+wasRequested+'?\n\nThis cannot be undone.\nDocument: '+d.name))return;
   // Try to delete file from SharePoint if it exists there
-  if(d&&d.spDriveId&&d.spItemId){
+  if(d.spDriveId&&d.spItemId){
     try{ await spDeleteFile(d.spDriveId,d.spItemId); }catch(e){console.warn('SP delete:',e.message);}
   }
   AppState.data.documents=(AppState.data.documents||[]).filter(x=>x.id!==id);
   AppState.save();renderDocuments();showToast('Document deleted','warning');
+}
+
+// ── Request document deletion (non-admin users) ─────────────
+function requestDocDeletion(id){
+  const d=(AppState.data.documents||[]).find(x=>x.id===id);
+  if(!d){showToast('Document not found','error');return;}
+  if(d.deletionRequested){showToast('Deletion already requested for this document','warning');return;}
+  const reason=prompt('Reason for deletion request:\n(this will be sent to the admin)','');
+  if(reason===null)return;
+  const user=_currentUserProfile?.name||_currentUser?.email||'Unknown';
+  d.deletionRequested=true;
+  d.deletionRequestedBy=user;
+  d.deletionRequestedAt=new Date().toISOString();
+  d.deletionReason=(reason||'').trim()||'(no reason given)';
+  AppState.save();
+  renderDocuments();
+  showToast('Deletion request submitted to admin','success',4000);
+  // Add to notifications if present
+  if(!AppState.data.notifications)AppState.data.notifications=[];
+  AppState.data.notifications.unshift({
+    id:'NOTIF-'+Date.now().toString(36).toUpperCase(),
+    type:'deletion_request',
+    title:'Document deletion request',
+    message:user+' requested deletion of "'+d.name+'": '+d.deletionReason,
+    docId:id,
+    createdAt:new Date().toISOString(),
+    read:false,
+    forAdmin:true
+  });
+  AppState.save();
+}
+
+// ── Cancel a deletion request ───────────────────────────────
+function cancelDeletionRequest(id){
+  const d=(AppState.data.documents||[]).find(x=>x.id===id);
+  if(!d||!d.deletionRequested){showToast('No deletion request to cancel','warning');return;}
+  const user=_currentUserProfile?.name||_currentUser?.email||'Unknown';
+  // Only requestor or admin can cancel
+  const isAdmin=(_currentUserProfile&&_currentUserProfile.isAdmin)||false;
+  if(!isAdmin && d.deletionRequestedBy!==user){
+    showToast('Only the requestor or an admin can cancel this request','error');
+    return;
+  }
+  if(!confirm('Cancel the deletion request for this document?'))return;
+  delete d.deletionRequested;
+  delete d.deletionRequestedBy;
+  delete d.deletionRequestedAt;
+  delete d.deletionReason;
+  AppState.save();
+  renderDocuments();
+  showToast('Deletion request cancelled','info');
 }
 
 function uploadDoc(){
@@ -11757,7 +11832,13 @@ function renderDetailDocRows(docs){
       `:`
         <button class="btn btn-primary btn-sm btn-icon" title="Attach file" onclick="attachFileToProjectDoc('${d.id}')"><i class="fas fa-paperclip"></i></button>
       `}
-      <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDetailDoc('${d.id}')"><i class="fas fa-trash"></i></button>
+      ${(_currentUserProfile&&_currentUserProfile.isAdmin)?`
+        <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDetailDoc('${d.id}')" title="Delete (Admin)"><i class="fas fa-trash"></i></button>
+      `:d.deletionRequested?`
+        <button class="btn btn-warning btn-sm btn-icon" onclick="cancelDeletionRequest('${d.id}');renderDetailDocs()" title="Cancel deletion request"><i class="fas fa-undo"></i></button>
+      `:`
+        <button class="btn btn-secondary btn-sm btn-icon" onclick="deleteDetailDoc('${d.id}')" title="Request deletion"><i class="fas fa-flag"></i></button>
+      `}
     </div></td>
   </tr>`).join('');
 }
@@ -11795,7 +11876,23 @@ function attachFileToProjectDoc(id){
 }
 
 function updateDocField(id,field,val){const d=(AppState.data.documents||[]).find(d=>d.id===id);if(d){d[field]=val;AppState.save();}}
-function deleteDetailDoc(id){if(!confirm('Delete document?'))return;AppState.data.documents=(AppState.data.documents||[]).filter(d=>d.id!==id);AppState.save();renderDetailDocs();showToast('Document deleted','warning');}
+async function deleteDetailDoc(id){
+  const isAdmin=(_currentUserProfile&&_currentUserProfile.isAdmin)||false;
+  if(!isAdmin){
+    // Non-admin: route to deletion request
+    requestDocDeletion(id);
+    renderDetailDocs();
+    return;
+  }
+  const d=(AppState.data.documents||[]).find(x=>x.id===id);
+  if(!d)return;
+  if(!confirm('Delete this document? This cannot be undone.\nDocument: '+d.name))return;
+  if(d.spDriveId&&d.spItemId){
+    try{ await spDeleteFile(d.spDriveId,d.spItemId); }catch(e){console.warn('SP delete:',e.message);}
+  }
+  AppState.data.documents=(AppState.data.documents||[]).filter(x=>x.id!==id);
+  AppState.save();renderDetailDocs();showToast('Document deleted','warning');
+}
 function filterDetailDocs(v){const docs=(AppState.data.documents||[]).filter(d=>d.projectId===detailProjectId&&(!v||d.name.toLowerCase().includes(v.toLowerCase())||d.number.toLowerCase().includes(v.toLowerCase())));if($('#detailDocBody'))$('#detailDocBody').innerHTML=renderDetailDocRows(docs);}
 
 function uploadDocForProject(pid){
