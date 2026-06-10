@@ -221,7 +221,7 @@ canvas{display:block}
 <div id="syncStatusBadge" style="display:none;position:fixed;top:8px;right:62px;z-index:9998;padding:3px 11px;border-radius:20px;font-size:10px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25);transition:opacity .3s" onclick="if(window.fbPushNow)fbPushNow()" title="Click to push to Firebase now"></div>
 <!-- ── AUTH OVERLAY ────────────────────────────────────── -->
 <div id="authOverlay" style="position:fixed;inset:0;z-index:99999;background:var(--bg-primary,#0d1117);display:flex;align-items:center;justify-content:center;font-family:var(--font-primary,'Inter',sans-serif)">
-  <div style="width:100%;max-width:420px;padding:16px">
+  <div style="width:100%;max-width:440px;padding:16px">
     <!-- Logo -->
     <div style="text-align:center;margin-bottom:28px">
       <div style="width:60px;height:60px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:28px;font-weight:900;color:#fff;box-shadow:0 8px 24px rgba(245,158,11,.4)">S</div>
@@ -229,77 +229,40 @@ canvas{display:block}
       <div style="font-size:12px;color:#8b949e;margin-top:3px">Enterprise PM Suite</div>
     </div>
 
-    <!-- Login Form -->
     <div id="authCard" style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px">
+
+      <!-- M365 Login -->
       <div id="authFormLogin">
-        <div style="font-size:16px;font-weight:700;color:#e6edf3;margin-bottom:18px;text-align:center">Sign in to your account</div>
+        <div style="font-size:16px;font-weight:700;color:#e6edf3;margin-bottom:6px;text-align:center">Sign in to your account</div>
+        <div style="font-size:11px;color:#8b949e;text-align:center;margin-bottom:20px">Use your Microsoft 365 work account</div>
         <div id="authAlert" style="display:none;padding:10px 14px;border-radius:7px;font-size:12px;margin-bottom:14px"></div>
-        <div style="margin-bottom:14px">
-          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Email address</label>
-          <input id="loginEmail" type="email" placeholder="you@company.com" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#30363d'">
+        <!-- M365 Sign In Button -->
+        <button onclick="doM365Login()" id="loginBtn"
+          style="width:100%;padding:12px;background:#0078d4;border:none;border-radius:7px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;transition:opacity .2s;display:flex;align-items:center;justify-content:center;gap:10px">
+          <i class="fab fa-microsoft" style="font-size:16px"></i>Sign in with Microsoft 365
+        </button>
+        <div style="margin:16px 0;display:flex;align-items:center;gap:8px">
+          <div style="flex:1;height:1px;background:#30363d"></div>
+          <span style="font-size:10px;color:#484f58">or</span>
+          <div style="flex:1;height:1px;background:#30363d"></div>
         </div>
-        <div style="margin-bottom:8px">
-          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Password</label>
-          <div style="position:relative">
-            <input id="loginPass" type="password" placeholder="Enter your password" style="width:100%;padding:9px 40px 9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#30363d'" onkeydown="if(event.key==='Enter')doLogin()">
+        <!-- Fallback: Firebase login (shown only if Firebase configured) -->
+        <div id="firebaseLoginSection" style="display:none">
+          <div style="font-size:11px;color:#8b949e;text-align:center;margin-bottom:12px">Legacy login (Firebase)</div>
+          <div style="margin-bottom:10px">
+            <input id="loginEmail" type="email" placeholder="Email address" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#30363d'">
+          </div>
+          <div style="margin-bottom:10px;position:relative">
+            <input id="loginPass" type="password" placeholder="Password" style="width:100%;padding:9px 40px 9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#30363d'" onkeydown="if(event.key==='Enter')doLogin()">
             <i class="fas fa-eye" id="passToggleIcon" onclick="togglePassView('loginPass','passToggleIcon')" style="position:absolute;right:11px;top:50%;transform:translateY(-50%);color:#8b949e;cursor:pointer;font-size:13px"></i>
           </div>
+          <button onclick="doLogin()" style="width:100%;padding:9px;background:linear-gradient(135deg,#f59e0b,#d97706);border:none;border-radius:7px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">Sign in with Email</button>
+          <div style="text-align:right;margin-top:6px"><a href="#" onclick="showAuthForm('forgot')" style="font-size:10px;color:#8b949e;text-decoration:none">Forgot password?</a></div>
         </div>
-        <div style="text-align:right;margin-bottom:18px">
-          <a href="#" onclick="showAuthForm('forgot')" style="font-size:11px;color:#f59e0b;text-decoration:none">Forgot password?</a>
-        </div>
-        <button onclick="doLogin()" id="loginBtn" style="width:100%;padding:10px;background:linear-gradient(135deg,#f59e0b,#d97706);border:none;border-radius:7px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;transition:opacity .2s">Sign in</button>
-        <div style="text-align:center;margin-top:16px;font-size:12px;color:#8b949e">
-          Don't have an account? <a href="#" onclick="showAuthForm('register')" style="color:#f59e0b;text-decoration:none;font-weight:600">Request access</a>
-        </div>
-      </div>
-
-      <!-- Register Form -->
-      <div id="authFormRegister" style="display:none">
-        <div style="font-size:16px;font-weight:700;color:#e6edf3;margin-bottom:6px;text-align:center">Request Account Access</div>
-        <div style="font-size:11px;color:#8b949e;text-align:center;margin-bottom:18px">Your account will require admin approval before you can sign in.</div>
-        <div id="authAlertReg" style="display:none;padding:10px 14px;border-radius:7px;font-size:12px;margin-bottom:14px"></div>
-        <div style="margin-bottom:12px">
-          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Full Name *</label>
-          <input id="regName" type="text" placeholder="Your full name" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#30363d'">
-        </div>
-        <div style="margin-bottom:12px">
-          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Email Address *</label>
-          <input id="regEmail" type="email" placeholder="you@company.com" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#30363d'">
-        </div>
-        <div style="margin-bottom:12px">
-          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Department / Role</label>
-          <input id="regDept" type="text" placeholder="e.g., Engineering, QA/QC, Finance" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#30363d'">
-        </div>
-        <div style="margin-bottom:12px">
-          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Password *</label>
-          <div style="position:relative">
-            <input id="regPass" type="password" placeholder="At least 8 characters" style="width:100%;padding:9px 40px 9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#30363d'">
-            <i class="fas fa-eye" id="regPassIcon" onclick="togglePassView('regPass','regPassIcon')" style="position:absolute;right:11px;top:50%;transform:translateY(-50%);color:#8b949e;cursor:pointer;font-size:13px"></i>
-          </div>
-        </div>
-        <div style="margin-bottom:18px">
-          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Confirm Password *</label>
-          <input id="regPass2" type="password" placeholder="Repeat password" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#30363d'">
-        </div>
-        <button onclick="doRegister()" style="width:100%;padding:10px;background:linear-gradient(135deg,#f59e0b,#d97706);border:none;border-radius:7px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">Submit Request</button>
-        <div style="text-align:center;margin-top:14px;font-size:12px;color:#8b949e">
-          Already have an account? <a href="#" onclick="showAuthForm('login')" style="color:#f59e0b;text-decoration:none;font-weight:600">Sign in</a>
-        </div>
-      </div>
-
-      <!-- Forgot Password Form -->
-      <div id="authFormForgot" style="display:none">
-        <div style="font-size:16px;font-weight:700;color:#e6edf3;margin-bottom:6px;text-align:center">Reset Password</div>
-        <div style="font-size:11px;color:#8b949e;text-align:center;margin-bottom:18px">Enter your email and we'll send you a reset link.</div>
-        <div id="authAlertForgot" style="display:none;padding:10px 14px;border-radius:7px;font-size:12px;margin-bottom:14px"></div>
-        <div style="margin-bottom:18px">
-          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Email Address</label>
-          <input id="forgotEmail" type="email" placeholder="you@company.com" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#30363d'">
-        </div>
-        <button onclick="doForgotPassword()" style="width:100%;padding:10px;background:linear-gradient(135deg,#f59e0b,#d97706);border:none;border-radius:7px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">Send Reset Link</button>
-        <div style="text-align:center;margin-top:14px;font-size:12px;color:#8b949e">
-          <a href="#" onclick="showAuthForm('login')" style="color:#f59e0b;text-decoration:none;font-weight:600">← Back to Sign in</a>
+        <!-- Setup prompt if SP not configured -->
+        <div id="authSetupPrompt" style="display:none;padding:10px 14px;background:rgba(240,164,80,.08);border:1px solid rgba(240,164,80,.2);border-radius:7px;font-size:11px;color:#f0a450;text-align:center">
+          <i class="fas fa-exclamation-triangle" style="margin-right:5px"></i>
+          SharePoint not configured. <a href="#" onclick="showAuthForm('setup')" style="color:#f59e0b;font-weight:600">Set up first</a>
         </div>
       </div>
 
@@ -307,54 +270,62 @@ canvas{display:block}
       <div id="authFormPending" style="display:none;text-align:center">
         <div style="font-size:40px;margin-bottom:14px">⏳</div>
         <div style="font-size:16px;font-weight:700;color:#e6edf3;margin-bottom:8px">Awaiting Admin Approval</div>
-        <div style="font-size:12px;color:#8b949e;line-height:1.7;margin-bottom:18px">Your account request has been submitted.<br>An administrator will review and approve your access.<br>You'll be able to sign in once approved.</div>
-        <!-- Self-approve button for first/only user stuck as pending -->
+        <div id="pendingUserInfo" style="font-size:12px;color:#8b949e;line-height:1.7;margin-bottom:18px">Your Microsoft 365 account has been registered.<br>An administrator will review and approve your access.<br>You will be able to access the app once approved.</div>
         <div id="pendingSelfApprove" style="display:none;margin-bottom:14px;padding:12px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:8px">
-          <div style="font-size:11px;color:#f59e0b;margin-bottom:8px"><i class="fas fa-exclamation-triangle" style="margin-right:5px"></i>Are you the first user / admin? Use this if there is no one to approve you.</div>
+          <div style="font-size:11px;color:#f59e0b;margin-bottom:8px"><i class="fas fa-exclamation-triangle" style="margin-right:5px"></i>Are you the first admin? Use this only if no admin exists yet.</div>
           <button onclick="selfApproveAsAdmin()" style="padding:8px 16px;background:linear-gradient(135deg,#f59e0b,#d97706);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;cursor:pointer"><i class="fas fa-shield-alt" style="margin-right:6px"></i>Approve Myself as Admin</button>
         </div>
         <button onclick="doLogout()" style="padding:9px 20px;background:#21262d;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;cursor:pointer">Sign out</button>
       </div>
 
-      <!-- First-time Setup / Connect Firebase -->
-      <div id="authFormSetup" style="display:none">
-        <div style="font-size:16px;font-weight:700;color:#e6edf3;margin-bottom:6px;text-align:center">
-          <i class="fas fa-plug" style="color:#f59e0b;margin-right:8px"></i>Connect to Firebase First
-        </div>
-        <div style="font-size:11px;color:#8b949e;text-align:center;margin-bottom:16px;line-height:1.7">
-          Paste your Firebase config below to connect.<br>
-          <span style="color:#f59e0b">First person to register becomes the Admin automatically.</span>
-        </div>
-        <div id="authAlertSetup" style="display:none;padding:10px 14px;border-radius:7px;font-size:12px;margin-bottom:14px"></div>
+      <!-- Rejected -->
+      <div id="authFormRejected" style="display:none;text-align:center">
+        <div style="font-size:40px;margin-bottom:14px">🚫</div>
+        <div style="font-size:16px;font-weight:700;color:#f85149;margin-bottom:8px">Access Denied</div>
+        <div style="font-size:12px;color:#8b949e;line-height:1.7;margin-bottom:18px">Your account has been rejected or suspended.<br>Contact your administrator for assistance.</div>
+        <button onclick="doLogout()" style="padding:9px 20px;background:#21262d;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;cursor:pointer">Sign out</button>
+      </div>
 
-        <!-- Quick steps -->
-        <div style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:12px;margin-bottom:14px;font-size:10px;color:#8b949e;line-height:1.9">
-          <div style="font-size:11px;font-weight:700;color:#e6edf3;margin-bottom:6px">Don't have a Firebase config yet?</div>
-          1. Go to <a href="#" onclick="window.open('https://console.firebase.google.com');return false" style="color:#f59e0b">console.firebase.google.com</a><br>
-          2. Create a project → <strong style="color:#e6edf3">Build → Realtime Database</strong> → Enable (Test mode)<br>
-          3. Go to <strong style="color:#e6edf3">Project settings ⚙ → Your apps → &lt;/&gt; Web</strong> → Copy config<br>
-          4. Enable <strong style="color:#e6edf3">Authentication → Email/Password</strong><br>
-          5. Paste config below and click Connect
+      <!-- Forgot Password (Firebase fallback) -->
+      <div id="authFormForgot" style="display:none">
+        <div style="font-size:16px;font-weight:700;color:#e6edf3;margin-bottom:6px;text-align:center">Reset Password</div>
+        <div style="font-size:11px;color:#8b949e;text-align:center;margin-bottom:18px">Enter your email and we will send you a reset link.</div>
+        <div id="authAlertForgot" style="display:none;padding:10px 14px;border-radius:7px;font-size:12px;margin-bottom:14px"></div>
+        <div style="margin-bottom:18px">
+          <input id="forgotEmail" type="email" placeholder="you@company.com" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#30363d'">
         </div>
-
-        <div style="margin-bottom:12px">
-          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Your Display Name</label>
-          <input id="setupName" type="text" placeholder="Your name" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#30363d'">
-        </div>
-        <div style="margin-bottom:14px">
-          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Firebase Config (JSON or JS object) *</label>
-          <textarea id="setupConfig" rows="7" placeholder='{&#10;  apiKey: "AIzaSy...",&#10;  authDomain: "your-project.firebaseapp.com",&#10;  databaseURL: "https://your-project-default-rtdb...",&#10;  projectId: "your-project",&#10;  ...&#10;}' style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:11px;font-family:monospace;outline:none;box-sizing:border-box;resize:vertical" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='#30363d'"></textarea>
-        </div>
-        <button onclick="connectFromLoginPage()" style="width:100%;padding:10px;background:linear-gradient(135deg,#f59e0b,#d97706);border:none;border-radius:7px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:10px">
-          <i class="fas fa-plug" style="margin-right:7px"></i>Connect &amp; Continue
-        </button>
-        <div style="text-align:center;font-size:11px;color:#8b949e">
-          Already configured? <a href="#" onclick="showAuthForm('login')" style="color:#f59e0b;text-decoration:none">Sign in</a>
+        <button onclick="doForgotPassword()" style="width:100%;padding:10px;background:linear-gradient(135deg,#f59e0b,#d97706);border:none;border-radius:7px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">Send Reset Link</button>
+        <div style="text-align:center;margin-top:14px;font-size:12px;color:#8b949e">
+          <a href="#" onclick="showAuthForm('login')" style="color:#f59e0b;text-decoration:none;font-weight:600">Back to Sign in</a>
         </div>
       </div>
-    </div>
 
-    <div style="text-align:center;margin-top:14px;font-size:10px;color:#484f58">SHIC Enterprise PM Suite &nbsp;·&nbsp; Secure Login</div>
+      <!-- Setup (SP not configured yet) -->
+      <div id="authFormSetup" style="display:none">
+        <div style="font-size:16px;font-weight:700;color:#e6edf3;margin-bottom:6px;text-align:center">
+          <i class="fab fa-microsoft" style="color:#0078d4;margin-right:8px"></i>Setup Required
+        </div>
+        <div style="font-size:11px;color:#8b949e;text-align:center;margin-bottom:16px;line-height:1.7">
+          Enter your Azure App Client ID and SharePoint site URL to get started.
+        </div>
+        <div style="margin-bottom:12px">
+          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Azure App Client ID *</label>
+          <input id="setupClientId" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:12px;font-family:monospace;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#0078d4'" onblur="this.style.borderColor='#30363d'" value="${localStorage.getItem('shic_sp_clientid')||''}">
+        </div>
+        <div style="margin-bottom:14px">
+          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">SharePoint Site URL *</label>
+          <input id="setupSiteUrl" type="text" placeholder="https://company.sharepoint.com/sites/yoursite" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:12px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#0078d4'" onblur="this.style.borderColor='#30363d'" value="${localStorage.getItem('shic_sp_siteurl')||''}">
+        </div>
+        <button onclick="setupAndLogin()" style="width:100%;padding:10px;background:#0078d4;border:none;border-radius:7px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:10px">
+          <i class="fab fa-microsoft" style="margin-right:7px"></i>Save & Sign in with Microsoft
+        </button>
+        <div style="text-align:center;font-size:11px;color:#8b949e">
+          Already configured? <a href="#" onclick="showAuthForm('login')" style="color:#f59e0b;text-decoration:none">Back to Sign in</a>
+        </div>
+      </div>
+
+    </div>
+    <div style="text-align:center;margin-top:14px;font-size:10px;color:#484f58">SHIC Enterprise PM Suite &nbsp;·&nbsp; Microsoft 365 Secured</div>
   </div>
 </div>
 <!-- ── END AUTH OVERLAY ──────────────────────────────────── -->
@@ -547,6 +518,12 @@ ensureData(){if(!this.data)this.load();if(!this.data)this.data=getDefaultData();
 // ── All global state declared early to prevent TDZ errors ──
 // Auth
 let _auth=null, _currentUser=null, _currentUserProfile=null, _authRetried=false;
+// ── M365 Auth state ──────────────────────────────────────
+let _m365Account = null;     // MSAL account after M365 login
+let _m365AuthMsal = null;    // Dedicated MSAL app for auth (separate from SP sync)
+let _m365LoggedIn = false;   // True when M365 auth completed
+const M365_AUTH_SCOPES = ['User.Read', 'https://graph.microsoft.com/Sites.ReadWrite.All'];
+const SHIC_USERS_LIST = 'SHIC_Users'; // SharePoint list for user profiles
 // Firebase
 let _fbApp=null, _fbDb=null, _fbRef=null, _fbPresenceRef=null;
 let _fbConnected=false, _fbListening=false, _fbIgnoreNext=false;
@@ -8606,8 +8583,438 @@ function isAdminEmail(email){
 }
 
 // ── UI helpers ────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// ── M365 / MICROSOFT 365 AUTHENTICATION ENGINE ────────────
+// ═══════════════════════════════════════════════════════════
+
+// ── Initialize MSAL for auth (uses same clientId as SP sync) ──
+function initM365AuthMsal() {
+  const clientId = _spClientId || localStorage.getItem('shic_sp_clientid') || '';
+  if (!clientId) return null;
+  if (_m365AuthMsal) return _m365AuthMsal;
+  try {
+    const authority = _spTenantId && _spTenantId !== 'common'
+      ? 'https://login.microsoftonline.com/' + _spTenantId
+      : 'https://login.microsoftonline.com/organizations';
+    _m365AuthMsal = new msal.PublicClientApplication({
+      auth: {
+        clientId,
+        authority,
+        redirectUri: window.location.href.split('#')[0].split('?')[0],
+      },
+      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
+    });
+    if (_m365AuthMsal.initialize) _m365AuthMsal.initialize().catch(()=>{});
+    return _m365AuthMsal;
+  } catch(e) { console.error('[M365 Auth] MSAL init error:', e); return null; }
+}
+
+// ── Get auth token for Graph API ────────────────────────────
+async function getM365AuthToken() {
+  const msalApp = initM365AuthMsal();
+  if (!msalApp || !_m365Account) return null;
+  try {
+    if (msalApp.initialize) await msalApp.initialize().catch(()=>{});
+    const res = await msalApp.acquireTokenSilent({ scopes: M365_AUTH_SCOPES, account: _m365Account });
+    return res.accessToken;
+  } catch(e) {
+    try {
+      if (msalApp.initialize) await msalApp.initialize().catch(()=>{});
+      const res = await msalApp.acquireTokenPopup({ scopes: M365_AUTH_SCOPES, account: _m365Account });
+      return res.accessToken;
+    } catch(e2) { return null; }
+  }
+}
+
+// ── Ensure SHIC_Users list exists in SharePoint ─────────────
+async function ensureUsersListExists(token, siteId) {
+  // Try to find the list
+  const listRes = await fetch(
+    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists?$top=100`,
+    { headers: { Authorization: 'Bearer ' + token } }
+  );
+  const listData = await listRes.json();
+  const found = (listData.value||[]).find(l => l.displayName === SHIC_USERS_LIST || l.name === SHIC_USERS_LIST);
+  if (found) return found.id;
+  // Create the list
+  const createRes = await fetch(
+    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists`,
+    {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName: SHIC_USERS_LIST,
+        list: { template: 'genericList' },
+        columns: [
+          { name: 'UserEmail', text: {} },
+          { name: 'UserUID', text: {} },
+          { name: 'Status', text: {} },
+          { name: 'IsAdmin', text: {} },
+          { name: 'Role', text: {} },
+          { name: 'Department', text: {} },
+          { name: 'RegisteredAt', dateTime: {} },
+          { name: 'ApprovedBy', text: {} },
+          { name: 'LastLogin', dateTime: {} },
+        ]
+      })
+    }
+  );
+  if (!createRes.ok && createRes.status !== 409) {
+    const err = await createRes.json().catch(()=>({}));
+    throw new Error('Could not create SHIC_Users list: ' + (err.error?.message || createRes.status));
+  }
+  if (createRes.status === 409) {
+    // Already exists — fetch again
+    const retry = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists?$top=100`, { headers: { Authorization: 'Bearer ' + token } });
+    const retryData = await retry.json();
+    const retryFound = (retryData.value||[]).find(l => l.displayName === SHIC_USERS_LIST);
+    return retryFound?.id;
+  }
+  const created = await createRes.json();
+  return created.id;
+}
+
+// ── Get user profile from SharePoint ────────────────────────
+async function m365GetUserProfile(token, siteId, email) {
+  const { listId } = await _getOrCreateUsersListId(token, siteId);
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=999`,
+    { headers: { Authorization: 'Bearer ' + token } }
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  return (data.value||[]).find(i => (i.fields?.UserEmail||'').toLowerCase() === email.toLowerCase()) || null;
+}
+
+// ── Save/update user profile in SharePoint ───────────────────
+async function m365SaveUserProfile(token, siteId, profile, itemId) {
+  const { listId } = await _getOrCreateUsersListId(token, siteId);
+  const body = JSON.stringify({
+    fields: {
+      Title: profile.name || profile.email,
+      UserEmail: profile.email,
+      UserUID: profile.uid,
+      Status: profile.status,
+      IsAdmin: String(profile.isAdmin || false),
+      Role: profile.role || 'User',
+      Department: profile.department || '',
+      RegisteredAt: profile.registeredAt || new Date().toISOString(),
+      ApprovedBy: profile.approvedBy || '',
+      LastLogin: new Date().toISOString(),
+    }
+  });
+  if (itemId) {
+    await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}`,
+      { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body }
+    );
+  } else {
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`,
+      { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body }
+    );
+    return res.ok ? (await res.json()).id : null;
+  }
+}
+
+let _usersListId = null;
+async function _getOrCreateUsersListId(token, siteId) {
+  if (!_usersListId) {
+    _usersListId = await ensureUsersListExists(token, siteId);
+  }
+  return { listId: _usersListId };
+}
+
+// ── Get all users (for admin panel) ────────────────────────
+async function m365GetAllUsers() {
+  try {
+    const token = await getM365AuthToken();
+    if (!token) return [];
+    const { siteId } = await spResolveSiteAndList(token);
+    const { listId } = await _getOrCreateUsersListId(token, siteId);
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=999`,
+      { headers: { Authorization: 'Bearer ' + token } }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.value||[]).map(i => ({
+      uid: i.fields?.UserUID || i.id,
+      itemId: i.id,
+      name: i.fields?.Title || i.fields?.UserEmail || '',
+      email: i.fields?.UserEmail || '',
+      status: i.fields?.Status || 'pending',
+      isAdmin: i.fields?.IsAdmin === 'true',
+      role: i.fields?.Role || 'User',
+      department: i.fields?.Department || '',
+      registeredAt: i.fields?.RegisteredAt || '',
+      approvedBy: i.fields?.ApprovedBy || '',
+      lastLogin: i.fields?.LastLogin || '',
+    }));
+  } catch(e) { console.error('[M365 Auth] getAllUsers error:', e); return []; }
+}
+
+// ── Approve/Reject user (admin action) ─────────────────────
+async function m365ApproveUser(uid, approve) {
+  try {
+    const token = await getM365AuthToken();
+    if (!token) { showToast('Could not get auth token', 'error'); return; }
+    const { siteId } = await spResolveSiteAndList(token);
+    const { listId } = await _getOrCreateUsersListId(token, siteId);
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=999`,
+      { headers: { Authorization: 'Bearer ' + token } }
+    );
+    const data = await res.json();
+    const item = (data.value||[]).find(i => i.fields?.UserUID === uid);
+    if (!item) { showToast('User not found', 'error'); return; }
+    const adminName = _currentUserProfile?.name || _m365Account?.name || 'Admin';
+    await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${item.id}`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: {
+          Status: approve ? 'approved' : 'rejected',
+          IsAdmin: item.fields?.IsAdmin || 'false',
+          ApprovedBy: approve ? adminName : '',
+        }})
+      }
+    );
+    showToast((approve ? 'User approved' : 'User rejected') + ' successfully', approve ? 'success' : 'warning');
+    renderSettings();
+  } catch(e) { showToast('Action failed: ' + e.message, 'error'); }
+}
+
+// ── Set admin status ────────────────────────────────────────
+async function m365SetAdmin(uid, isAdmin) {
+  try {
+    const token = await getM365AuthToken();
+    if (!token) return;
+    const { siteId } = await spResolveSiteAndList(token);
+    const { listId } = await _getOrCreateUsersListId(token, siteId);
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=999`,
+      { headers: { Authorization: 'Bearer ' + token } }
+    );
+    const data = await res.json();
+    const item = (data.value||[]).find(i => i.fields?.UserUID === uid);
+    if (!item) return;
+    await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${item.id}`,
+      { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: { IsAdmin: String(isAdmin) }}) }
+    );
+    showToast('Admin status updated', 'success');
+    renderSettings();
+  } catch(e) { showToast('Failed: ' + e.message, 'error'); }
+}
+
+// ── Main M365 Login function ────────────────────────────────
+async function doM365Login() {
+  const clientId = _spClientId || localStorage.getItem('shic_sp_clientid') || '';
+  const siteUrl = _spSiteUrl || localStorage.getItem('shic_sp_siteurl') || '';
+  if (!clientId || !siteUrl) {
+    showAuthForm('setup');
+    return;
+  }
+  const btn = document.getElementById('loginBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:8px"></i>Signing in...'; }
+  const alertEl = document.getElementById('authAlert');
+  if (alertEl) alertEl.style.display = 'none';
+  try {
+    const msalApp = initM365AuthMsal();
+    if (!msalApp) throw new Error('MSAL not initialized — check Client ID');
+    if (msalApp.initialize) await msalApp.initialize().catch(()=>{});
+    // Try silent first (returning user)
+    let authResult;
+    const accounts = msalApp.getAllAccounts ? msalApp.getAllAccounts() : [];
+    if (accounts.length > 0) {
+      try {
+        authResult = await msalApp.acquireTokenSilent({ scopes: M365_AUTH_SCOPES, account: accounts[0] });
+        _m365Account = accounts[0];
+      } catch(e) {
+        authResult = await msalApp.loginPopup({ scopes: M365_AUTH_SCOPES, prompt: 'select_account' });
+        _m365Account = authResult.account;
+      }
+    } else {
+      authResult = await msalApp.loginPopup({ scopes: M365_AUTH_SCOPES, prompt: 'select_account' });
+      _m365Account = authResult.account;
+    }
+    const token = authResult.accessToken;
+    // ── Resolve SP site ──────────────────────────────────
+    // Initialize SP sync MSAL with same credentials
+    _spClientId = clientId; _spSiteUrl = siteUrl;
+    _spMsalApp = msalApp; _spAccount = _m365Account; _spConnected = true;
+    await spResolveSiteAndList(token);
+    const siteId = _spSiteId;
+    // ── Get user info from MS Graph ──────────────────────
+    const meRes = await fetch('https://graph.microsoft.com/v1.0/me', { headers: { Authorization: 'Bearer ' + token } });
+    const me = await meRes.json();
+    const email = me.mail || me.userPrincipalName || _m365Account.username;
+    const name = me.displayName || _m365Account.name || email.split('@')[0];
+    const uid = me.id || _m365Account.localAccountId;
+    // ── Check/create user profile in SharePoint ──────────
+    const existingItem = await m365GetUserProfile(token, siteId, email);
+    let profile;
+    if (!existingItem) {
+      // New user — check if this is the very first user (make them admin)
+      const allUsers = await m365GetAllUsers();
+      const hasApprovedAdmin = allUsers.some(u => u.isAdmin && u.status === 'approved' && u.uid !== uid);
+      const isFirstUser = allUsers.length === 0;
+      profile = {
+        uid, email, name,
+        status: isFirstUser ? 'approved' : 'pending',
+        isAdmin: isFirstUser,
+        role: isFirstUser ? 'Admin' : 'User',
+        department: '',
+        registeredAt: new Date().toISOString(),
+        approvedBy: isFirstUser ? 'system (first user)' : '',
+      };
+      await m365SaveUserProfile(token, siteId, profile, null);
+      if (isFirstUser) showToast('Welcome ' + name + '! You are the first user and have been set as Admin.', 'success', 5000);
+    } else {
+      profile = {
+        uid: existingItem.fields?.UserUID || uid,
+        itemId: existingItem.id,
+        name: existingItem.fields?.Title || name,
+        email: existingItem.fields?.UserEmail || email,
+        status: existingItem.fields?.Status || 'pending',
+        isAdmin: existingItem.fields?.IsAdmin === 'true',
+        role: existingItem.fields?.Role || 'User',
+        department: existingItem.fields?.Department || '',
+        registeredAt: existingItem.fields?.RegisteredAt || '',
+        approvedBy: existingItem.fields?.ApprovedBy || '',
+      };
+      // Update last login
+      await m365SaveUserProfile(token, siteId, profile, existingItem.id);
+    }
+    // ── Handle access based on status ───────────────────
+    if (profile.status === 'rejected' || profile.status === 'suspended') {
+      showAuthForm('rejected');
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fab fa-microsoft" style="font-size:16px"></i>Sign in with Microsoft 365'; }
+      return;
+    }
+    if (profile.status === 'pending') {
+      // Check if no admin exists — show self-approve button
+      const allUsers2 = await m365GetAllUsers();
+      const hasAdmin = allUsers2.some(u => u.isAdmin && u.status === 'approved' && u.uid !== uid);
+      showAuthForm('pending');
+      const pendingInfo = document.getElementById('pendingUserInfo');
+      if (pendingInfo) pendingInfo.innerHTML = `Signed in as <strong>${email}</strong>.<br>Your account is pending admin approval.<br>An administrator will review and approve your access.`;
+      const selfApproveBtn = document.getElementById('pendingSelfApprove');
+      if (selfApproveBtn) selfApproveBtn.style.display = hasAdmin ? 'none' : 'block';
+      // Store temp profile for self-approve
+      window._m365PendingProfile = { profile, itemId: existingItem?.id || null, siteId, token };
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fab fa-microsoft" style="font-size:16px"></i>Sign in with Microsoft 365'; }
+      return;
+    }
+    // ── Approved — enter the app ─────────────────────────
+    _currentUser = { uid, email, displayName: name };
+    _currentUserProfile = { ...profile, name, email, uid };
+    _m365LoggedIn = true;
+    // Update sidebar
+    const sidebarLabel = document.getElementById('sidebarUserLabel');
+    if (sidebarLabel) sidebarLabel.textContent = name + (profile.isAdmin ? ' · Admin' : '');
+    showAuthOverlay(false);
+    // Boot the app
+    AppState.ensureData();
+    if (typeof migrateData === 'function') migrateData();
+    if (typeof buildSidebar === 'function') buildSidebar();
+    _appReady = true;
+    navigate(AppState.currentPage || 'dashboard');
+    showToast('Welcome, ' + name + '!', 'success', 3000);
+    // Initialize SharePoint sync
+    if (typeof spAutoInit === 'function') spAutoInit().catch(e => console.warn('[SP] Auto-init error:', e.message));
+    // Keep Firebase for data sync if configured (but auth is now M365)
+    if (_fbDb) {
+      try { _fbDb.goOffline(); } catch{}
+    }
+  } catch(e) {
+    console.error('[M365 Auth] Login error:', e);
+    if (e.errorCode === 'user_cancelled' || e.message?.includes('cancelled')) {
+      // User closed popup — silent fail
+    } else {
+      if (alertEl) {
+        alertEl.style.display = 'block';
+        alertEl.style.cssText += ';background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);color:#f85149';
+        alertEl.innerHTML = '<i class="fas fa-exclamation-triangle" style="margin-right:5px"></i>' + (e.message || 'Sign-in failed. Try again.');
+      }
+    }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fab fa-microsoft" style="font-size:16px"></i>Sign in with Microsoft 365'; }
+  }
+}
+
+// ── Setup & Login (first time) ──────────────────────────────
+function setupAndLogin() {
+  const clientId = (document.getElementById('setupClientId')?.value || '').trim();
+  const siteUrl = (document.getElementById('setupSiteUrl')?.value || '').trim();
+  if (!clientId) { showToast('Client ID is required', 'error'); return; }
+  if (!siteUrl) { showToast('SharePoint Site URL is required', 'error'); return; }
+  _spClientId = clientId; _spSiteUrl = siteUrl;
+  localStorage.setItem('shic_sp_clientid', clientId);
+  localStorage.setItem('shic_sp_siteurl', siteUrl);
+  _spSiteId = ''; _spListId = ''; _spItemId = ''; _usersListId = null;
+  localStorage.removeItem('shic_sp_siteid'); localStorage.removeItem('shic_sp_listid'); localStorage.removeItem('shic_sp_itemid');
+  _spMsalApp = null; _m365AuthMsal = null;
+  showToast('Settings saved — opening Microsoft login...', 'success', 2000);
+  setTimeout(doM365Login, 500);
+}
+
+// ── Self-approve as admin (M365 version) ────────────────────
+async function selfApproveAsAdmin() {
+  const pending = window._m365PendingProfile;
+  if (!pending) { showToast('Session expired — please sign in again', 'error'); return; }
+  if (!confirm('Approve yourself as Admin? Only do this if you are the FIRST user and no admin exists yet.')) return;
+  try {
+    // Double-check no admin exists
+    const allUsers = await m365GetAllUsers();
+    const hasAdmin = allUsers.some(u => u.isAdmin && u.status === 'approved' && u.uid !== pending.profile.uid);
+    if (hasAdmin) {
+      showToast('An admin already exists — contact them for approval.', 'error', 5000);
+      document.getElementById('pendingSelfApprove').style.display = 'none';
+      return;
+    }
+    const updatedProfile = { ...pending.profile, status: 'approved', isAdmin: true, role: 'Admin', approvedBy: 'self (first admin)' };
+    await m365SaveUserProfile(pending.token, pending.siteId, updatedProfile, pending.itemId);
+    window._m365PendingProfile = null;
+    showToast('Approved as Admin! Entering app...', 'success');
+    // Re-run login flow
+    setTimeout(doM365Login, 800);
+  } catch(e) { showToast('Self-approve failed: ' + e.message, 'error'); }
+}
+
+// ── Auto-login on page load (silent token) ──────────────────
+async function m365AutoLogin() {
+  const clientId = _spClientId || localStorage.getItem('shic_sp_clientid') || '';
+  const siteUrl = _spSiteUrl || localStorage.getItem('shic_sp_siteurl') || '';
+  if (!clientId || !siteUrl) {
+    // No SP configured — show setup prompt on login screen
+    const setupPrompt = document.getElementById('authSetupPrompt');
+    if (setupPrompt) setupPrompt.style.display = 'block';
+    showAuthOverlay(true);
+    showAuthForm('login');
+    return;
+  }
+  try {
+    const msalApp = initM365AuthMsal();
+    if (!msalApp) { showAuthOverlay(true); showAuthForm('login'); return; }
+    if (msalApp.initialize) await msalApp.initialize().catch(()=>{});
+    const accounts = msalApp.getAllAccounts ? msalApp.getAllAccounts() : [];
+    if (accounts.length === 0) { showAuthOverlay(true); showAuthForm('login'); return; }
+    // Has a saved session — try silent login
+    _m365Account = accounts[0];
+    console.log('[M365 Auth] Attempting silent login as', _m365Account.username);
+    await doM365Login();
+  } catch(e) {
+    console.warn('[M365 Auth] Auto-login failed:', e.message);
+    showAuthOverlay(true);
+    showAuthForm('login');
+  }
+}
+
 function showAuthForm(form){
-  ['login','register','forgot','pending','setup'].forEach(f=>{
+  ['login','register','forgot','pending','setup','rejected'].forEach(f=>{
     const el=document.getElementById('authForm'+f.charAt(0).toUpperCase()+f.slice(1));
     if(el)el.style.display=f===form?'block':'none';
   });
@@ -8615,6 +9022,16 @@ function showAuthForm(form){
     const el=document.getElementById(id);
     if(el)el.style.display='none';
   });
+  // Show Firebase section only if Firebase is configured and connected
+  if(form==='login'){
+    const fbSection=document.getElementById('firebaseLoginSection');
+    if(fbSection)fbSection.style.display=(_fbDb&&_fbConnected)?'block':'none';
+    const setupPrompt=document.getElementById('authSetupPrompt');
+    if(setupPrompt){
+      const hasSetup=!!((_spClientId||localStorage.getItem('shic_sp_clientid'))&&(_spSiteUrl||localStorage.getItem('shic_sp_siteurl')));
+      setupPrompt.style.display=hasSetup?'none':'block';
+    }
+  }
 }
 
 function showAuthOverlay(show){
@@ -9042,17 +9459,58 @@ async function selfApproveAsAdmin(){
 
 function doLogout(){
   if(!confirm('Sign out of SHIC?'))return;
-  // Push any pending edits before signing out
+
+  // ── 1. Push any pending SP or Firebase edits before signing out ──
   clearTimeout(window._fbIdleTimer);
   clearTimeout(window._fbBatchTimer);
+  clearTimeout(_spSyncTimer);
+  clearTimeout(_spRetryTimer);
   window._fbBatchTimer = null;
-  if(_pendingEdits && _fbConnected && _fbDb){
+
+  if(_pendingEdits && _fbConnected && _fbDb && !(_spConnected&&_spAccount)){
     showToast('Saving changes before sign-out...','info',2000);
-    fbPushData(false); // synchronous intent — Firebase queues it
+    fbPushData(false);
     _pendingEdits = false;
   }
-  // Small delay to let Firebase queue the write before auth invalidates the token
-  setTimeout(()=>{ if(_auth) _auth.signOut(); }, 800);
+  if(_spConnected && _spAccount && _spOfflineQueue){
+    showToast('Saving SharePoint changes before sign-out...','info',2000);
+    spPushData(true).catch(()=>{});
+  }
+
+  // ── 2. Stop SP polling ──
+  spStopPolling();
+
+  // ── 3. Reset ALL app state ──────────────────────────────
+  _appReady = false;
+  _pendingEdits = false;
+  _fbConnected = false;
+  _fbListening = false;
+  _spConnected = false;
+  _spAccount = null;
+  _spMsalApp = null;
+  _spOfflineQueue = false;
+  _spLastSavedHash = '';
+  _spPrevData = null;
+  if(typeof _currentUser !== 'undefined') _currentUser = null;
+  if(typeof _currentUserProfile !== 'undefined') _currentUserProfile = null;
+
+  // ── 4. Go offline gracefully ────────────────────────────
+  if(_fbDb){ try{ _fbDb.goOffline(); }catch{} }
+
+  // ── 5. Sign out Firebase Auth — then show login screen ──
+  const doSignOut = async () => {
+    try{
+      if(_auth) await _auth.signOut();
+    }catch(e){ console.warn('[Logout] Firebase signOut error:', e.message); }
+    // ── 6. Show login screen cleanly ────────────────────
+    showAuthOverlay(true);
+    showAuthForm('login');
+    // Re-enable Firebase networking for next login
+    if(_fbDb){ try{ _fbDb.goOnline(); }catch{} }
+    console.log('[SHIC] Signed out — login screen shown');
+  };
+
+  setTimeout(doSignOut, 600);
 }
 
 // ── Admin: User Management ────────────────────────────────
@@ -9119,65 +9577,33 @@ let _userMgmtCache=null,_userMgmtHash='',_userMgmtBusy=false;
 function _hashUsers(users){return users.map(u=>u.uid+'|'+u.status+'|'+u.isAdmin+'|'+(u.lastLogin||0)).join(',');}
 
 async function renderUserManagement(){
-  if(!_fbDb){
-    const c=$('#userMgmtContent');
-    if(c)c.innerHTML='<div class="empty-state"><i class="fas fa-plug" style="font-size:24px;opacity:.4;display:block;margin-bottom:8px"></i><p>Firebase not connected.</p></div>';
-    return;
-  }
-  if(_userMgmtBusy)return; // prevent concurrent fetches
+  if(_userMgmtBusy)return;
   _userMgmtBusy=true;
   const container=$('#userMgmtContent');
   if(!container){_userMgmtBusy=false;return;}
-  // Restore cache immediately — no spinner flash on re-renders
-  if(_userMgmtCache&&!container.querySelector('table')){
-    container.innerHTML=_userMgmtCache;
-  }else if(!_userMgmtCache&&!container.querySelector('table')){
-    container.innerHTML='<div style="padding:20px;text-align:center;color:var(--text-muted)"><i class="fas fa-spinner fa-spin" style="font-size:20px;margin-bottom:8px;display:block"></i>Loading users...</div>';
-  }
+  container.innerHTML='<div style="padding:20px;text-align:center;color:var(--text-muted)"><i class="fas fa-spinner fa-spin" style="font-size:20px;margin-bottom:8px;display:block"></i>Loading users from SharePoint...</div>';
   try{
-    const snap=await _fbDb.ref('shic/users').once('value');
-    const users=[];snap.forEach(c=>{const u=c.val();if(u&&u.uid)users.push(u);});
-    users.sort((a,b)=>b.createdAt-a.createdAt);
-    const hash=_hashUsers(users);
-    if(hash===_userMgmtHash&&_userMgmtCache){_userMgmtBusy=false;return;} // no change
-    _userMgmtHash=hash;
+    const users = await m365GetAllUsers();
+    users.sort((a,b)=>new Date(b.registeredAt||0)-new Date(a.registeredAt||0));
     _renderUserTable(users);
     _userMgmtCache=container.innerHTML;
   }catch(e){
     container.innerHTML=`<div class="empty-state"><p>Error: ${e.message}</p><button class="btn btn-secondary btn-sm" onclick="renderUserManagement()"><i class="fas fa-redo"></i> Retry</button></div>`;
-    _userMgmtBusy=false;return;
   }
   _userMgmtBusy=false;
-  if(!window._umListenerActive){
-    window._umListenerActive=true;
-    _fbDb.ref('shic/users').on('value',snap=>{
-      const pending=[];
-      snap.forEach(c=>{const u=c.val();if(u&&u.status==='pending')pending.push(u);});
-      if(pending.length>0&&AppState.currentPage==='settings')
-        showToast(pending.length+' user(s) waiting for approval — click Refresh','warning',4000);
-      _userMgmtHash=''; // invalidate cache so next Refresh picks up changes
-    });
-  }
 }
 
 async function approveUser(uid,name,email){
-  if(!confirm(`Approve ${name}?`))return;
-  await _fbDb.ref('shic/users/'+uid).update({
-    status:'approved',approvedAt:Date.now(),approvedBy:_currentUser?.email||'admin'
-  });
-  // Notify user via presence check
-  await _fbDb.ref('shic/notifications/appr_'+Date.now()).set({
-    type:'approved',uid,name,email,
-    message:`${name} (${email}) has been approved.`,createdAt:Date.now(),read:false
-  });
+  if(!confirm(`Approve ${name} (${email})?`))return;
+  await m365ApproveUser(uid,true);
   showToast(name+' approved','success');
   _userMgmtCache=null;_userMgmtHash='';
   renderUserManagement();
 }
 
 async function rejectUser(uid,name){
-  const reason=prompt(`Reason for rejecting ${name} (optional):`)||'';
-  await _fbDb.ref('shic/users/'+uid).update({status:'rejected',rejectedAt:Date.now(),rejectReason:reason});
+  if(!confirm(`Reject ${name}?`))return;
+  await m365ApproveUser(uid,false);
   showToast(name+' rejected','warning');
   _userMgmtCache=null;_userMgmtHash='';
   renderUserManagement();
@@ -9272,27 +9698,32 @@ function authFirebaseNotReady(alertId){
 }
 
 
-// initFirebase now calls initFirebaseAuth directly (above) — no wrapper needed
-// initFirebaseFromStorage also calls initFirebaseAuth via initFirebase
+// ── Boot sequence ───────────────────────────────────────────
+// M365 handles authentication. Firebase is optional (data sync only).
 
-// Hide main app until logged in
-document.addEventListener('DOMContentLoaded',()=>{
-  const cfg=fbGetConfig();
-  if(!cfg){
-    // No Firebase config — show setup panel on login page
-    showAuthForm('setup');
+document.addEventListener('DOMContentLoaded', () => {
+  // Restore Firebase for data sync if configured (but NOT for auth)
+  const cfg = fbGetConfig();
+  if (cfg) {
+    try {
+      initFirebase(cfg);
+      console.log('[SHIC] Firebase restored from saved config (data sync only)');
+    } catch(e) { console.warn('[SHIC] Firebase restore failed:', e.message); }
   }
+  // Always boot with M365 auth
+  m365AutoLogin();
 });
-
 
 function initFirebaseFromStorage(){
   const cfg=fbGetConfig();
   if(cfg){
     try{
-      initFirebase(cfg); // initFirebaseAuth is called inside initFirebase
+      initFirebase(cfg);
       console.log('SHIC: Firebase restored from saved config');
     }catch(e){console.warn('Firebase restore failed:',e);}
   }
+  // M365 auth
+  m365AutoLogin();
 }
 
 function initOneDriveSync(){
@@ -9891,7 +10322,7 @@ if(_hasFbCfg){
 migrateData();
 runVersionedMigrations();
 initOneDriveSync();
-initFirebaseFromStorage();
+// Boot is handled by DOMContentLoaded above
 initOfflineSupport();
 // Re-run persistent patches LAST so overrides apply after all functions are defined
 setTimeout(runPersistentPatches,200);
