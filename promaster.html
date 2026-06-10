@@ -8405,68 +8405,69 @@ function renderSpPanel() {
   </div>`;
 }
 
-// Initialize SharePoint MSAL on load if credentials saved
-(function spAutoInit() {
-  if (_spClientId && _spSiteUrl) {
-    setTimeout(async () => {
-      if (initSpMSAL() && _spAccount) {
-        _spConnected = true;
-        console.log('[SP] Auto-connected as', _spAccount.username);
-        // Silence Firebase immediately since SP is taking over
-        if(typeof _fbDb !== 'undefined' && _fbDb){
-          try{ _fbDb.goOffline(); }catch{}
-          console.log('[FB] Silenced — SP is primary DB');
-        }
-        setTimeout(async () => {
-          // Smart sync on reload: check timestamps before deciding direction
-          try {
-            const token = await getSpToken();
-            if (!token) { spStartPolling(); return; }
-            const { siteId, listId } = await spResolveSiteAndList(token);
-            const remote = await _spFetchRemote(token, siteId, listId);
-            if (!remote || !remote._ts) {
-              // SP empty on page reload — only push if we have a prior SP sync history
-              // (_spLastWriteTs > 0 means this user has pushed to SP before)
-              // Otherwise local data may be stale Firebase data from another user
-              if (_spLastWriteTs > 0) {
-                console.log('[SP] Auto-init: SP empty but has prior sync history — pushing');
-                await spPushData(true);
-              } else {
-                console.log('[SP] Auto-init: SP empty, no prior SP sync — skipping auto-push');
-                spSetStatus('connected', 'Connected — SharePoint empty. Use Push My Changes to upload.');
-              }
-            } else if (_spOfflineQueue) {
-              // We have queued local changes — but verify they weren't just Firebase data
-              // Only push if _spLastWriteTs > 0 meaning we previously synced with SP
-              if (_spLastWriteTs > 0) {
-                console.log('[SP] Auto-init: queued local changes from previous SP session, pushing with merge');
-                await spPushData(true);
-              } else {
-                // Never synced with SP before — local data is from Firebase, don't push
-                console.log('[SP] Auto-init: local data is from Firebase (no prior SP sync) — pulling instead');
-                const { _ts, _by, ...cleanData } = remote;
-                _spApplyRemote(cleanData, _ts, _by);
-                _spOfflineQueue = false;
-                localStorage.removeItem('shic_sp_offlinequeue');
-              }
-            } else if (remote._ts > _spLastWriteTs) {
-              // Remote is strictly newer than what we last synced — safe to apply
-              console.log('[SP] Auto-init: remote is newer, applying');
-              const { _ts, _by, ...cleanData } = remote;
-              _spApplyRemote(cleanData, _ts, _by);
-            } else {
-              // Local is current — no action needed
-              console.log('[SP] Auto-init: local is current, no sync needed');
-            }
-          } catch(e) {
-            console.warn('[SP] Auto-init sync failed:', e.message);
-          }
-          spStartPolling();
-        }, 2000);
-      }
-    }, 500);
+// ── spAutoInit: called AFTER login, not at page load ─────
+// This prevents pushing stale pre-login data to SharePoint
+async function spAutoInit() {
+  if (!_spClientId || !_spSiteUrl) return;
+  if (!initSpMSAL() || !_spAccount) return;
+
+  _spConnected = true;
+  console.log('[SP] Auto-connected as', _spAccount.username);
+
+  // Silence Firebase — SP is the primary DB
+  if (typeof _fbDb !== 'undefined' && _fbDb) {
+    try { _fbDb.goOffline(); } catch {}
+    console.log('[FB] Silenced — SP is primary DB');
   }
-})();
+
+  // Clear any Firebase-originated pending changes
+  _pendingEdits = false;
+  _spOfflineQueue = false;
+  localStorage.removeItem('shic_sp_offlinequeue');
+  _spLastSavedHash = '';
+
+  await new Promise(r => setTimeout(r, 1500)); // brief delay for app to stabilize
+
+  try {
+    const token = await getSpToken();
+    if (!token) { spStartPolling(); return; }
+    const { siteId, listId } = await spResolveSiteAndList(token);
+    const remote = await _spFetchRemote(token, siteId, listId);
+
+    if (!remote || !remote._ts) {
+      // SP is empty
+      if (_spLastWriteTs > 0) {
+        console.log('[SP] Auto-init: SP empty but has prior sync history — pushing');
+        await spPushData(true);
+      } else {
+        console.log('[SP] Auto-init: SP empty, no prior SP sync — skipping auto-push');
+        spSetStatus('connected', 'SharePoint empty — use Push My Changes to upload data');
+      }
+    } else if (_spLastWriteTs > 0 && remote._ts <= _spLastWriteTs) {
+      // We were the last writer or local is current — no pull needed
+      console.log('[SP] Auto-init: local is current or we were last writer — no sync needed');
+      spSetStatus('connected', 'Connected — data is current');
+    } else {
+      // Remote is newer OR first time connecting — always pull
+      console.log('[SP] Auto-init: pulling from SharePoint (remote _ts:', remote._ts, ')');
+      const { _ts, _by, _deletedIds: rd, ...cleanData } = remote;
+      if (rd) {
+        Object.keys(rd).forEach(k => {
+          if (!_spDeletedIds[k]) _spDeletedIds[k] = {};
+          Object.assign(_spDeletedIds[k], rd[k]);
+        });
+        localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
+      }
+      _spApplyRemote(cleanData, _ts, _by);
+    }
+  } catch(e) {
+    console.warn('[SP] Auto-init sync failed:', e.message);
+    spSetStatus('connected', 'Connected — sync check failed, use Pull Latest');
+  }
+
+  spStartPolling();
+}
+// NOTE: spAutoInit() is called from handleAuthStateChange after login
 
 // Initialize on load
 function fbConnectFromUI(){
@@ -8787,6 +8788,8 @@ async function handleAuthStateChange(user){
       if(typeof fbListenBroadcast==='function')fbListenBroadcast();
       if(typeof fbListenPatches==='function')fbListenPatches();
       if(typeof fbConnectPresence==='function')fbConnectPresence();
+      // ── Initialize SharePoint AFTER login (safe — user is authenticated) ──
+      if(typeof spAutoInit==='function') spAutoInit().catch(e=>console.warn('[SP] Auto-init error:',e.message));
     }).catch(e=>{
       console.error('[SHIC] Firebase data load failed:',e.message);
       // ── CRITICAL: Do NOT reset to empty data on Firebase error ──
