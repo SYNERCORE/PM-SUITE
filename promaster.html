@@ -8298,17 +8298,23 @@ async function spPushData(silent = false) {
       dataForPush.activities = dataForPush.activities.slice(-200);
     if ((dataForPush.notifications || []).length > 100)
       dataForPush.notifications = dataForPush.notifications.slice(-100);
-    // ── Strip embedded base64 file data from documents (files live in SP library now) ──
-    // This keeps the JSON blob small and prevents 400 errors
+    // ── ALWAYS strip embedded base64 file data from documents ──────
+    // Files belong in the SP library, NEVER in the JSON blob.
+    // This protects against 400 Bad Request errors due to oversized payload.
     if (dataForPush.documents && dataForPush.documents.length) {
       dataForPush.documents = dataForPush.documents.map(d => {
         const copy = { ...d };
-        // If document has a SharePoint file reference, strip any legacy base64 fileData
-        if (copy.spDriveId && copy.spItemId && copy.fileData) {
-          delete copy.fileData; // file is in SP library, don't push base64
+        // Strip base64 fileData no matter what — files belong in SP library
+        if (copy.fileData) {
+          delete copy.fileData;
         }
         return copy;
       });
+    }
+    // Safety: check the final payload size before pushing
+    const payloadStr = JSON.stringify(dataForPush);
+    if (payloadStr.length > 4 * 1024 * 1024) {
+      console.warn('[SP] Payload size:', (payloadStr.length / 1024 / 1024).toFixed(2) + ' MB — may hit SP limits');
     }
     // Include deletion tracking so other users' merges respect our deletes
     dataForPush._deletedIds = _spDeletedIds;
@@ -9266,6 +9272,8 @@ async function doM365Login() {
     _currentUser = { uid, email, displayName: name };
     _currentUserProfile = { ...profile, name, email, uid };
     _m365LoggedIn = true;
+    // One-time cleanup of legacy base64 file data
+    try { _cleanupLegacyFileData(); } catch(e) { console.warn('Cleanup error:', e); }
     // Update sidebar
     const sidebarLabel = document.getElementById('sidebarUserLabel');
     if (sidebarLabel) sidebarLabel.textContent = name + (profile.isAdmin ? ' · Admin' : '');
@@ -10454,6 +10462,33 @@ function clearAllData(){
   location.reload();
 }
 
+
+// ── One-time cleanup: strip legacy base64 fileData from documents ──
+// This permanently removes oversized base64 strings from the local data
+// so they never get pushed to SP again. Files in the SP library are unaffected.
+function _cleanupLegacyFileData() {
+  const docs = AppState.data.documents || [];
+  let cleaned = 0;
+  let totalSize = 0;
+  docs.forEach(d => {
+    if (d.fileData) {
+      totalSize += (d.fileData.length || 0);
+      // Mark as legacy so we can warn user
+      d.legacyFile = true;
+      d.legacyFileName = d.fileName || d.name || 'unknown';
+      delete d.fileData; // remove base64 from local data
+      cleaned++;
+    }
+  });
+  if (cleaned > 0) {
+    const sizeMB = (totalSize / 1024 / 1024).toFixed(2);
+    console.log(`[SHIC] Cleaned ${cleaned} legacy file(s), freed ${sizeMB} MB from data`);
+    AppState.save();
+    setTimeout(() => {
+      showToast(`Cleaned ${cleaned} legacy file(s) from data (${sizeMB} MB freed). Re-upload these documents to make them shareable.`, 'warning', 8000);
+    }, 1500);
+  }
+}
 
 function migrateData(){
   AppState.ensureData();
@@ -11713,9 +11748,12 @@ function renderDetailDocRows(docs){
     <td style="font-size:11px;color:var(--text-secondary)">${d.size}</td>
     <td><select class="form-select" style="height:30px;font-size:11px" onchange="updateDocField('${d.id}','status',this.value)">${['review','approved','issued','superseded'].map(s=>`<option value="${s}" ${d.status===s?'selected':''}>${s}</option>`).join('')}</select></td>
     <td><div style="display:flex;gap:3px">
-      ${(d.fileUrl||d.fileWebUrl||d.fileData)?`
+      ${(d.fileUrl||d.fileWebUrl)?`
         <button class="btn btn-secondary btn-sm btn-icon" title="View" onclick="viewDoc('${d.id}')"><i class="fas fa-eye"></i></button>
         <button class="btn btn-secondary btn-sm btn-icon" title="Download" onclick="downloadDoc('${d.id}')"><i class="fas fa-download"></i></button>
+      `:d.legacyFile?`
+        <button class="btn btn-warning btn-sm btn-icon" title="Re-upload required (legacy file: ${d.legacyFileName||''})" onclick="attachFileToProjectDoc('${d.id}')"><i class="fas fa-exclamation-triangle"></i></button>
+        <span style="font-size:9px;color:var(--accent-amber);align-self:center">Re-upload</span>
       `:`
         <button class="btn btn-primary btn-sm btn-icon" title="Attach file" onclick="attachFileToProjectDoc('${d.id}')"><i class="fas fa-paperclip"></i></button>
       `}
