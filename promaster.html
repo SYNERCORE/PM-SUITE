@@ -4458,52 +4458,98 @@ function saveDocDetail(id){
 function attachFileToDoc(id){
   const inp=document.createElement('input');inp.type='file';
   inp.accept='.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.dwg,.dxf,.jpg,.jpeg,.png,.txt,.csv,.zip';
-  inp.onchange=e=>{
+  inp.onchange=async e=>{
     const file=e.target.files[0];if(!file)return;
-    if(file.size>10*1024*1024){showToast('File too large — max 10 MB for browser storage','error');return;}
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      const d=(AppState.data.documents||[]).find(x=>x.id===id);
-      if(!d)return;
-      d.fileData=ev.target.result;
+    if(file.size>100*1024*1024){showToast('File too large — max 100 MB','error');return;}
+    if(!_spConnected){showToast('SharePoint not connected — cannot upload files','error',5000);return;}
+    const d=(AppState.data.documents||[]).find(x=>x.id===id);
+    if(!d)return;
+    showToast('Uploading '+file.name+'...','info',3000);
+    try{
+      const result=await spUploadFile(file, d.projectId||'General');
+      d.fileUrl=result.url;
+      d.fileWebUrl=result.webUrl;
+      d.spDriveId=result.driveId;
+      d.spItemId=result.itemId;
       d.fileName=file.name;
       d.fileType=file.name.split('.').pop().toLowerCase();
-      d.size=file.size>=1048576?(file.size/1048576).toFixed(1)+' MB':(file.size/1024).toFixed(0)+' KB';
+      d.size=_formatFileSize(file.size);
+      d.fileData=null; // clear any old base64 data
       AppState.save();
-      showDocDetail(id); // refresh modal
-      showToast('File attached: '+file.name,'success');
-    };
-    reader.readAsDataURL(file);
+      showDocDetail(id);
+      showToast('File uploaded to SharePoint: '+file.name,'success');
+    }catch(err){
+      console.error('[Upload] Error:',err);
+      showToast('Upload failed: '+err.message,'error',6000);
+    }
   };
   inp.click();
 }
 
-function downloadDoc(id){
+async function downloadDoc(id){
   const d=(AppState.data.documents||[]).find(x=>x.id===id);
-  if(!d||!d.fileData){showToast('No file attached to this document','warning');return;}
-  const a=document.createElement('a');
-  a.href=d.fileData;
-  a.download=d.fileName||d.name;
-  a.click();
-  showToast('Downloading: '+a.download,'success');
-}
-
-function viewDoc(id){
-  const d=(AppState.data.documents||[]).find(x=>x.id===id);
-  if(!d||!d.fileData){showToast('No file attached to this document','warning');return;}
-  const win=window.open('','_blank');
-  if(!win){showToast('Pop-up blocked — please allow pop-ups for this file','warning');return;}
-  if(d.fileType==='pdf'||d.fileData.startsWith('data:application/pdf')){
-    win.document.write(`<html><body style="margin:0"><embed src="${d.fileData}" type="application/pdf" width="100%" height="100%"></body></html>`);
-  }else if(['jpg','jpeg','png','gif','webp'].includes(d.fileType||'')){
-    win.document.write(`<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="${d.fileData}" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>`);
-  }else{
-    win.document.write(`<html><body><p>Preview not available for this file type. <a href="${d.fileData}" download="${d.fileName||d.name}">Click here to download</a>.</p></body></html>`);
+  if(!d){showToast('Document not found','warning');return;}
+  // Modern: SharePoint-stored file
+  if(d.spDriveId&&d.spItemId){
+    showToast('Getting download link...','info',2000);
+    const url=await spGetFileDownloadUrl(d.spDriveId,d.spItemId);
+    if(!url){showToast('Could not get download URL — try opening in SharePoint','error');return;}
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=d.fileName||d.name;
+    a.target='_blank';
+    a.click();
+    showToast('Downloading: '+(d.fileName||d.name),'success');
+    return;
   }
+  // Legacy: base64 data
+  if(d.fileData){
+    const a=document.createElement('a');
+    a.href=d.fileData;
+    a.download=d.fileName||d.name;
+    a.click();
+    showToast('Downloading: '+a.download,'success');
+    return;
+  }
+  showToast('No file attached to this document','warning');
 }
 
-function deleteDoc(id){
+async function viewDoc(id){
+  const d=(AppState.data.documents||[]).find(x=>x.id===id);
+  if(!d){showToast('Document not found','warning');return;}
+  // Modern: SharePoint-stored file — open SharePoint web view
+  if(d.fileWebUrl){
+    window.open(d.fileWebUrl,'_blank');
+    return;
+  }
+  if(d.spDriveId&&d.spItemId){
+    showToast('Getting view link...','info',2000);
+    const url=await spGetFileDownloadUrl(d.spDriveId,d.spItemId);
+    if(url){window.open(url,'_blank');return;}
+  }
+  // Legacy: base64 data
+  if(d.fileData){
+    const win=window.open('','_blank');
+    if(!win){showToast('Pop-up blocked — please allow pop-ups for this file','warning');return;}
+    if(d.fileType==='pdf'||d.fileData.startsWith('data:application/pdf')){
+      win.document.write(`<html><body style="margin:0"><embed src="${d.fileData}" type="application/pdf" width="100%" height="100%"></body></html>`);
+    }else if(['jpg','jpeg','png','gif','webp'].includes(d.fileType||'')){
+      win.document.write(`<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="${d.fileData}" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>`);
+    }else{
+      win.document.write(`<html><body><p>Preview not available for this file type. <a href="${d.fileData}" download="${d.fileName||d.name}">Click here to download</a>.</p></body></html>`);
+    }
+    return;
+  }
+  showToast('No file attached to this document','warning');
+}
+
+async function deleteDoc(id){
   if(!confirm('Delete this document? This cannot be undone.'))return;
+  const d=(AppState.data.documents||[]).find(x=>x.id===id);
+  // Try to delete file from SharePoint if it exists there
+  if(d&&d.spDriveId&&d.spItemId){
+    try{ await spDeleteFile(d.spDriveId,d.spItemId); }catch(e){console.warn('SP delete:',e.message);}
+  }
   AppState.data.documents=(AppState.data.documents||[]).filter(x=>x.id!==id);
   AppState.save();renderDocuments();showToast('Document deleted','warning');
 }
@@ -4511,36 +4557,44 @@ function deleteDoc(id){
 function uploadDoc(){
   const inp=document.createElement('input');inp.type='file';
   inp.accept='.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.dwg,.dxf,.jpg,.jpeg,.png,.txt,.csv,.zip';
-  inp.onchange=e=>{
+  inp.onchange=async e=>{
     const file=e.target.files[0];if(!file)return;
-    if(file.size>10*1024*1024){showToast('File too large — max 10 MB','error');return;}
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      const sizeStr=file.size>=1048576?(file.size/1048576).toFixed(1)+' MB':(file.size/1024).toFixed(0)+' KB';
-      const ext=file.name.split('.').pop().toLowerCase();
-      const catMap={pdf:'Engineering',doc:'Management',docx:'Management',xls:'Finance',xlsx:'Finance',
-        ppt:'Management',pptx:'Management',dwg:'Engineering',dxf:'Engineering',jpg:'Photos',jpeg:'Photos',png:'Photos'};
-      const docs=AppState.data.documents||[];
-      const nextNum='DOC-'+String(docs.length+1).padStart(3,'0');
-      const user=_currentUserProfile?.name||_fbUser?.name||'Admin';
+    if(file.size>100*1024*1024){showToast('File too large — max 100 MB','error');return;}
+    if(!_spConnected){showToast('SharePoint not connected — cannot upload files','error',5000);return;}
+    const ext=file.name.split('.').pop().toLowerCase();
+    const catMap={pdf:'Engineering',doc:'Management',docx:'Management',xls:'Finance',xlsx:'Finance',
+      ppt:'Management',pptx:'Management',dwg:'Engineering',dxf:'Engineering',jpg:'Photos',jpeg:'Photos',png:'Photos'};
+    const docs=AppState.data.documents||[];
+    const nextNum='DOC-'+String(docs.length+1).padStart(3,'0');
+    const user=_currentUserProfile?.name||_fbUser?.name||'Admin';
+    const projectId=(AppState.data.projects||[])[0]?.id||'';
+    showToast('Uploading '+file.name+'...','info',3000);
+    try{
+      const result=await spUploadFile(file,projectId||'General');
       const d={
         id:'DOC-'+Date.now().toString(36).toUpperCase(),
         number:nextNum,rev:'A',
         name:file.name.replace(/\.[^/.]+$/,''),
         fileName:file.name,fileType:ext,
-        projectId:(AppState.data.projects||[])[0]?.id||'',
+        fileUrl:result.url,
+        fileWebUrl:result.webUrl,
+        spDriveId:result.driveId,
+        spItemId:result.itemId,
+        projectId:projectId,
         category:catMap[ext]||'General',
         status:'review',author:user,
         date:new Date().toISOString().split('T')[0],
-        size:sizeStr,fileData:ev.target.result,
+        size:_formatFileSize(file.size),
         description:'',tags:[]
       };
       if(!AppState.data.documents)AppState.data.documents=[];
       AppState.data.documents.push(d);
       AppState.save();renderDocuments();
-      showToast('Uploaded: '+file.name+' ('+sizeStr+') — click the row to edit details','success',4000);
-    };
-    reader.readAsDataURL(file);
+      showToast('Uploaded to SharePoint: '+file.name+' ('+_formatFileSize(file.size)+')','success',4000);
+    }catch(err){
+      console.error('[Upload] Error:',err);
+      showToast('Upload failed: '+err.message,'error',6000);
+    }
   };
   inp.click();
 }
@@ -7529,6 +7583,192 @@ function initSpMSAL() {
 }
 
 // ── Get Graph API token ───────────────────────────────────
+
+// ═══════════════════════════════════════════════════════════
+// ── SHAREPOINT DOCUMENT LIBRARY — FILE STORAGE ───────────
+// ═══════════════════════════════════════════════════════════
+const SHIC_DOCS_LIBRARY = 'SHIC_Documents';
+let _spDocsLibraryId = null; // cached drive ID
+
+// ── Get/create SharePoint Document Library drive ID ─────────
+async function _spGetDocsLibrary(token) {
+  if (_spDocsLibraryId) return _spDocsLibraryId;
+  if (!_spSiteId) await spResolveSiteAndList(token);
+  if (!_spSiteId) throw new Error('SharePoint site not connected');
+
+  // List all drives (document libraries) on the site
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/drives?$top=100`,
+    { headers: { Authorization: 'Bearer ' + token } }
+  );
+  if (!res.ok) throw new Error('Could not list document libraries: ' + res.status);
+  const data = await res.json();
+  const found = (data.value || []).find(d =>
+    d.name === SHIC_DOCS_LIBRARY || d.name === SHIC_DOCS_LIBRARY.toLowerCase()
+  );
+  if (found) {
+    _spDocsLibraryId = found.id;
+    return _spDocsLibraryId;
+  }
+  // Try to create the library via Lists API (template:documentLibrary)
+  try {
+    const createRes = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists`,
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          displayName: SHIC_DOCS_LIBRARY,
+          list: { template: 'documentLibrary' }
+        })
+      }
+    );
+    if (createRes.ok || createRes.status === 409) {
+      // Created or already exists — fetch the drive again
+      const retry = await fetch(
+        `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/drives?$top=100`,
+        { headers: { Authorization: 'Bearer ' + token } }
+      );
+      const retryData = await retry.json();
+      const retryFound = (retryData.value || []).find(d => d.name === SHIC_DOCS_LIBRARY);
+      if (retryFound) {
+        _spDocsLibraryId = retryFound.id;
+        return _spDocsLibraryId;
+      }
+    }
+    const errText = await createRes.text().catch(() => '');
+    throw new Error('Library auto-create failed. Please create it manually in SharePoint (Site Contents → New → Document Library → Name: ' + SHIC_DOCS_LIBRARY + ')');
+  } catch (e) {
+    throw new Error('SHIC_Documents library not found. ' + e.message);
+  }
+}
+
+// ── Upload file to SP Document Library ─────────────────────
+// Returns { url, webUrl, id, name, size }
+async function spUploadFile(file, projectId) {
+  if (!file) throw new Error('No file provided');
+  if (!_spConnected) throw new Error('SharePoint not connected — cannot upload file');
+  const token = await getSpToken();
+  if (!token) throw new Error('Could not get SharePoint token');
+  const driveId = await _spGetDocsLibrary(token);
+  // Sanitize filename and build folder path
+  const safeName = file.name.replace(/[<>:"/\\|?*]/g, '_');
+  const folder = projectId ? (projectId.replace(/[<>:"/\\|?*]/g, '_')) : 'General';
+  const timestamp = Date.now().toString(36);
+  const finalName = timestamp + '_' + safeName;
+  const filePath = folder + '/' + finalName;
+  // For files <= 4 MB use simple upload
+  if (file.size <= 4 * 1024 * 1024) {
+    const uploadRes = await fetch(
+      `https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${encodeURIComponent(filePath)}:/content`,
+      {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': file.type || 'application/octet-stream' },
+        body: file,
+      }
+    );
+    if (!uploadRes.ok) {
+      const err = await uploadRes.text().catch(() => '');
+      throw new Error('Upload failed: ' + uploadRes.status + ' ' + err.slice(0, 200));
+    }
+    const result = await uploadRes.json();
+    return {
+      url: result['@microsoft.graph.downloadUrl'] || result.webUrl,
+      webUrl: result.webUrl,
+      id: result.id,
+      name: file.name,
+      size: file.size,
+      driveId: driveId,
+      itemId: result.id,
+    };
+  }
+  // For larger files use resumable upload session
+  const sessionRes = await fetch(
+    `https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${encodeURIComponent(filePath)}:/createUploadSession`,
+    {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'rename' } }),
+    }
+  );
+  if (!sessionRes.ok) throw new Error('Could not create upload session: ' + sessionRes.status);
+  const session = await sessionRes.json();
+  const uploadUrl = session.uploadUrl;
+  // Upload in chunks of 5 MB
+  const CHUNK_SIZE = 5 * 1024 * 1024;
+  let offset = 0;
+  let lastResult = null;
+  while (offset < file.size) {
+    const chunkEnd = Math.min(offset + CHUNK_SIZE, file.size);
+    const chunk = file.slice(offset, chunkEnd);
+    const chunkRes = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Length': String(chunk.size),
+        'Content-Range': `bytes ${offset}-${chunkEnd - 1}/${file.size}`,
+      },
+      body: chunk,
+    });
+    if (chunkRes.status === 201 || chunkRes.status === 200) {
+      lastResult = await chunkRes.json();
+      break;
+    }
+    if (chunkRes.status === 202) {
+      // continue uploading
+      offset = chunkEnd;
+      continue;
+    }
+    throw new Error('Chunk upload failed: ' + chunkRes.status);
+  }
+  if (!lastResult) throw new Error('Upload completed but no response received');
+  return {
+    url: lastResult['@microsoft.graph.downloadUrl'] || lastResult.webUrl,
+    webUrl: lastResult.webUrl,
+    id: lastResult.id,
+    name: file.name,
+    size: file.size,
+    driveId: driveId,
+    itemId: lastResult.id,
+  };
+}
+
+// ── Get a fresh download URL for a stored file ─────────────
+async function spGetFileDownloadUrl(driveId, itemId) {
+  if (!driveId || !itemId) return null;
+  const token = await getSpToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}?$select=@microsoft.graph.downloadUrl,webUrl`,
+      { headers: { Authorization: 'Bearer ' + token } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data['@microsoft.graph.downloadUrl'] || data.webUrl || null;
+  } catch (e) { return null; }
+}
+
+// ── Delete file from SP Document Library ───────────────────
+async function spDeleteFile(driveId, itemId) {
+  if (!driveId || !itemId) return false;
+  const token = await getSpToken();
+  if (!token) return false;
+  try {
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}`,
+      { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } }
+    );
+    return res.ok || res.status === 404;
+  } catch (e) { return false; }
+}
+
+// ── Format file size helper ────────────────────────────────
+function _formatFileSize(bytes) {
+  if (!bytes) return '0 KB';
+  if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+  return (bytes / 1024).toFixed(0) + ' KB';
+}
+
 async function getSpToken() {
   if (!_spMsalApp || !_spAccount) {
     // If M365 auth is active, use the auth MSAL app as fallback
@@ -8058,6 +8298,18 @@ async function spPushData(silent = false) {
       dataForPush.activities = dataForPush.activities.slice(-200);
     if ((dataForPush.notifications || []).length > 100)
       dataForPush.notifications = dataForPush.notifications.slice(-100);
+    // ── Strip embedded base64 file data from documents (files live in SP library now) ──
+    // This keeps the JSON blob small and prevents 400 errors
+    if (dataForPush.documents && dataForPush.documents.length) {
+      dataForPush.documents = dataForPush.documents.map(d => {
+        const copy = { ...d };
+        // If document has a SharePoint file reference, strip any legacy base64 fileData
+        if (copy.spDriveId && copy.spItemId && copy.fileData) {
+          delete copy.fileData; // file is in SP library, don't push base64
+        }
+        return copy;
+      });
+    }
     // Include deletion tracking so other users' merges respect our deletes
     dataForPush._deletedIds = _spDeletedIds;
     const payload = { ...dataForPush, _ts: nowTs, _by: _spAccount.username };
@@ -11461,10 +11713,47 @@ function renderDetailDocRows(docs){
     <td style="font-size:11px;color:var(--text-secondary)">${d.size}</td>
     <td><select class="form-select" style="height:30px;font-size:11px" onchange="updateDocField('${d.id}','status',this.value)">${['review','approved','issued','superseded'].map(s=>`<option value="${s}" ${d.status===s?'selected':''}>${s}</option>`).join('')}</select></td>
     <td><div style="display:flex;gap:3px">
-      <button class="btn btn-secondary btn-sm btn-icon" title="Download"><i class="fas fa-download"></i></button>
+      ${(d.fileUrl||d.fileWebUrl||d.fileData)?`
+        <button class="btn btn-secondary btn-sm btn-icon" title="View" onclick="viewDoc('${d.id}')"><i class="fas fa-eye"></i></button>
+        <button class="btn btn-secondary btn-sm btn-icon" title="Download" onclick="downloadDoc('${d.id}')"><i class="fas fa-download"></i></button>
+      `:`
+        <button class="btn btn-primary btn-sm btn-icon" title="Attach file" onclick="attachFileToProjectDoc('${d.id}')"><i class="fas fa-paperclip"></i></button>
+      `}
       <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDetailDoc('${d.id}')"><i class="fas fa-trash"></i></button>
     </div></td>
   </tr>`).join('');
+}
+
+// ── Attach file to existing project document ───────────────
+function attachFileToProjectDoc(id){
+  const inp=document.createElement('input');inp.type='file';
+  inp.accept='.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.dwg,.dxf,.jpg,.jpeg,.png,.txt,.csv,.zip';
+  inp.onchange=async e=>{
+    const file=e.target.files[0];if(!file)return;
+    if(file.size>100*1024*1024){showToast('File too large — max 100 MB','error');return;}
+    if(!_spConnected){showToast('SharePoint not connected — cannot upload files','error',5000);return;}
+    const d=(AppState.data.documents||[]).find(x=>x.id===id);
+    if(!d)return;
+    showToast('Uploading '+file.name+'...','info',3000);
+    try{
+      const result=await spUploadFile(file, d.projectId||'General');
+      d.fileUrl=result.url;
+      d.fileWebUrl=result.webUrl;
+      d.spDriveId=result.driveId;
+      d.spItemId=result.itemId;
+      d.fileName=file.name;
+      d.fileType=file.name.split('.').pop().toLowerCase();
+      d.size=_formatFileSize(file.size);
+      d.fileData=null;
+      AppState.save();
+      renderDetailDocs();
+      showToast('File uploaded: '+file.name,'success');
+    }catch(err){
+      console.error('[Upload] Error:',err);
+      showToast('Upload failed: '+err.message,'error',6000);
+    }
+  };
+  inp.click();
 }
 
 function updateDocField(id,field,val){const d=(AppState.data.documents||[]).find(d=>d.id===id);if(d){d[field]=val;AppState.save();}}
@@ -11474,17 +11763,42 @@ function filterDetailDocs(v){const docs=(AppState.data.documents||[]).filter(d=>
 function uploadDocForProject(pid){
   const inp=document.createElement('input');inp.type='file';
   inp.accept='.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.dwg,.dxf,.jpg,.jpeg,.png,.txt,.csv,.zip';
-  inp.onchange=e=>{
+  inp.onchange=async e=>{
     const file=e.target.files[0];if(!file)return;
-    const sizeStr=file.size>=1048576?(file.size/1048576).toFixed(1)+' MB':(file.size/1024).toFixed(0)+' KB';
+    if(file.size>100*1024*1024){showToast('File too large — max 100 MB','error');return;}
+    if(!_spConnected){showToast('SharePoint not connected — cannot upload files','error',5000);return;}
     const ext=file.name.split('.').pop().toLowerCase();
     const catMap={pdf:'Engineering',doc:'Management',docx:'Management',xls:'Finance',xlsx:'Finance',dwg:'Engineering',dxf:'Engineering',jpg:'Photos',jpeg:'Photos',png:'Photos'};
-    const d={id:'DOC-'+((AppState.data.documents||[]).length+1).toString().padStart(3,'0'),projectId:pid,
-    name:file.name.replace(/\.[^/.]+$/,''),number:pid+'-DOC-'+Date.now().toString().slice(-4),
-    rev:'A',category:catMap[ext]||'General',status:'review',author:'Admin User',
-    date:new Date().toISOString().split('T')[0],size:sizeStr};
-    AppState.data.documents.push(d);AppState.save();renderDetailDocs();
-    showToast('Uploaded: '+file.name+' ('+sizeStr+')','success');
+    const user=_currentUserProfile?.name||_fbUser?.name||'Admin';
+    showToast('Uploading '+file.name+' to SharePoint...','info',3000);
+    try{
+      const result=await spUploadFile(file,pid);
+      const d={
+        id:'DOC-'+Date.now().toString(36).toUpperCase(),
+        projectId:pid,
+        name:file.name.replace(/\.[^/.]+$/,''),
+        number:pid+'-DOC-'+Date.now().toString().slice(-4),
+        fileName:file.name,
+        fileType:ext,
+        fileUrl:result.url,
+        fileWebUrl:result.webUrl,
+        spDriveId:result.driveId,
+        spItemId:result.itemId,
+        rev:'A',
+        category:catMap[ext]||'General',
+        status:'review',
+        author:user,
+        date:new Date().toISOString().split('T')[0],
+        size:_formatFileSize(file.size)
+      };
+      if(!AppState.data.documents)AppState.data.documents=[];
+      AppState.data.documents.push(d);
+      AppState.save();renderDetailDocs();
+      showToast('Uploaded: '+file.name+' ('+_formatFileSize(file.size)+')','success',4000);
+    }catch(err){
+      console.error('[Upload] Error:',err);
+      showToast('Upload failed: '+err.message,'error',6000);
+    }
   };
   inp.click();
 }
