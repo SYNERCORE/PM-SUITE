@@ -14794,6 +14794,7 @@ function renderMlPersonnel(){
     <td style="font-family:var(--font-mono);font-size:11px;font-weight:600">₱${Number((r.hourlyRate||0)*8).toLocaleString()}</td>
     <td><div style="display:flex;flex-direction:column;gap:3px">
       <button class="btn btn-secondary btn-sm btn-icon" onclick="showEditPersonnel('${r.id}')" title="Edit all details"><i class="fas fa-edit"></i></button>
+      <button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail('${r.id}','resources')" title="View attachments"><i class="fas fa-paperclip"></i>${(r.attachments&&r.attachments.length)?`<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">${r.attachments.length}</span>`:''}</button>
       <button class="btn btn-danger btn-sm btn-icon" onclick="deletePersonnel('${r.id}')" title="Delete"><i class="fas fa-trash"></i></button>
     </div></td>
   </tr>`).join(''):mlEmpty('personnel')}
@@ -14911,7 +14912,10 @@ function renderMlEquipment(){
     <td><div>${mlCB(r.certExpiry)}</div>${mlDateInput(r.id,'equipment','certExpiry',r.certExpiry!=='N/A'?r.certExpiry:'','min-width:110px;margin-top:2px')}</td>
     <td>${mlNumInput(r.id,'equipment','dailyRate',r.dailyRate,'width:90px')}</td>
     <td>${mlInput(r.id,'equipment','notes',r.notes||'','min-width:120px')}</td>
-    <td><button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlAsset('${r.id}','equipment');renderMlEquipment()" title="Delete"><i class="fas fa-trash"></i></button></td>
+    <td><div style="display:flex;gap:3px;position:relative">
+      <button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail('${r.id}','equipment')" title="View attachments"><i class="fas fa-paperclip"></i>${(r.attachments&&r.attachments.length)?`<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">${r.attachments.length}</span>`:''}</button>
+      <button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlAsset('${r.id}','equipment');renderMlEquipment()" title="Delete"><i class="fas fa-trash"></i></button>
+    </div></td>
   </tr>`;}).join(''):mlEmpty('equipment')}
   </tbody></table>${_pgNavN('ml_equipment',data,typeof renderMlEquipment==='function'?renderMlEquipment:null,20)}</div></div>`;
 }
@@ -14950,7 +14954,10 @@ function renderMlTools(){
     <td><div>${mlCB(r.certExpiry)}</div>${mlDateInput(r.id,'tools','certExpiry',r.certExpiry!=='N/A'?r.certExpiry:'','min-width:110px;margin-top:2px')}</td>
     <td>${mlNumInput(r.id,'tools','dailyRate',r.dailyRate,'width:90px')}</td>
     <td>${mlInput(r.id,'tools','notes',r.notes||'','min-width:120px')}</td>
-    <td><button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlAsset('${r.id}','tools');renderMlTools()"><i class="fas fa-trash"></i></button></td>
+    <td><div style="display:flex;gap:3px;position:relative">
+      <button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail('${r.id}','tools')" title="View attachments"><i class="fas fa-paperclip"></i>${(r.attachments&&r.attachments.length)?`<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">${r.attachments.length}</span>`:''}</button>
+      <button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlAsset('${r.id}','tools');renderMlTools()" title="Delete"><i class="fas fa-trash"></i></button>
+    </div></td>
   </tr>`;}).join(''):mlEmpty('tools')}
   </tbody></table>${_pgNavN('ml_tools',data,typeof renderMlTools==='function'?renderMlTools:null,20)}</div></div>`;
 }
@@ -14990,7 +14997,10 @@ function renderMlVehicles(){
     <td><div>${mlCB(r.certExpiry)}</div>${mlDateInput(r.id,'vehicles','certExpiry',r.certExpiry!=='N/A'?r.certExpiry:'','min-width:110px;margin-top:2px')}</td>
     <td>${mlNumInput(r.id,'vehicles','dailyRate',r.dailyRate,'width:90px')}</td>
     <td>${mlInput(r.id,'vehicles','notes',r.notes||'','min-width:120px')}</td>
-    <td><button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlAsset('${r.id}','vehicles');renderMlVehicles()"><i class="fas fa-trash"></i></button></td>
+    <td><div style="display:flex;gap:3px;position:relative">
+      <button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail('${r.id}','vehicles')" title="View attachments"><i class="fas fa-paperclip"></i>${(r.attachments&&r.attachments.length)?`<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">${r.attachments.length}</span>`:''}</button>
+      <button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlAsset('${r.id}','vehicles');renderMlVehicles()" title="Delete"><i class="fas fa-trash"></i></button>
+    </div></td>
   </tr>`;}).join(''):mlEmpty('vehicles')}
   </tbody></table>${_pgNavN('ml_vehicles',data,typeof renderMlVehicles==='function'?renderMlVehicles:null,20)}</div></div>`;
 }
@@ -15069,6 +15079,7 @@ function renderMlWarehouse(){
       +'<td>'+mlSB(low?'low-stock':'in-stock')+'</td>'
       +'<td><div style="display:flex;flex-direction:column;gap:3px">'
         +'<button class="btn btn-secondary btn-sm btn-icon" onclick="showEditConsumable(\''+c.id+'\')" title="Edit"><i class="fas fa-edit"></i></button>'
+        +'<button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail(\''+c.id+'\',\'consumables\')" title="View attachments" style="position:relative"><i class="fas fa-paperclip"></i>'+(c.attachments&&c.attachments.length?'<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">'+c.attachments.length+'</span>':'')+'</button> '
         +'<button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlConsumable(\''+c.id+'\')"><i class="fas fa-trash"></i></button>'
       +'</div></td>'
       +'</tr>';
@@ -15100,7 +15111,10 @@ function renderMlWarehouse(){
       +'<td><input class="form-input" type="date" value="'+(m.deliveryDate||'')+'" style="height:26px;font-size:11px;'+(isOverdue(m.deliveryDate)&&m.status!=='delivered'?'border-color:var(--accent-red);color:var(--accent-red)':'')+'" onchange="mlSaveMaterial(\''+m.id+'\',\'deliveryDate\',this.value)"></td>'
       +'<td><select class="form-select" style="height:30px;font-size:11px;min-width:90px" onchange="mlSaveMaterial(\''+m.id+'\',\'status\',this.value);setTimeout(renderMlWarehouse,700)">'+statOpts(m.status,['pending','ordered','partial','delivered'])+'</select></td>'
       +'<td><label class="toggle" style="width:36px;height:18px"><input type="checkbox" '+(m.critical?'checked':'')+' onchange="mlSaveMaterial(\''+m.id+'\',\'critical\',this.checked)"><span class="toggle-slider"></span></label> '+(m.critical?'<span class="badge badge-amber" style="font-size:9px">Critical</span>':'')+'</td>'
-      +'<td><button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlMaterial(\''+m.id+'\')"><i class="fas fa-trash"></i></button></td>'
+      +'<td><div style="display:flex;gap:3px;position:relative">'
+      +'<button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail(\''+m.id+'\',\'materials\')" title="View attachments"><i class="fas fa-paperclip"></i>'+(m.attachments&&m.attachments.length?'<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">'+m.attachments.length+'</span>':'')+'</button>'
+      +'<button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlMaterial(\''+m.id+'\')"><i class="fas fa-trash"></i></button>'
+      +'</div></td>'
       +'</tr>').join(''):mlEmpty('materials')}
     </tbody></table>${_pgNavN('wh_mats',mats,typeof renderMlWarehouse==='function'?renderMlWarehouse:null,20)}</div></div>`;
   }
@@ -15147,6 +15161,7 @@ function renderMlConsumables(){
     <td>${mlInput(c.id,'consumables','notes',c.notes||'','min-width:110px')}</td>
     <td><div style="display:flex;flex-direction:column;gap:3px">
       <button class="btn btn-secondary btn-sm btn-icon" onclick="showEditConsumable('${c.id}')" title="Edit all fields"><i class="fas fa-edit"></i></button>
+      <button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail('${c.id}','consumables')" title="View attachments"><i class="fas fa-paperclip"></i>${(c.attachments&&c.attachments.length)?`<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">${c.attachments.length}</span>`:''}</button>
       <button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlConsumable('${c.id}')" title="Delete"><i class="fas fa-trash"></i></button>
     </div></td>
   </tr>`;}).join(''):mlEmpty('consumables')}
@@ -15187,7 +15202,10 @@ function renderMlMaterials(){
     <td><input class="form-input" type="date" value="${m.deliveryDate||''}" style="height:26px;font-size:11px;${isOverdue(m.deliveryDate)&&m.status!=='delivered'?'border-color:var(--accent-red);color:var(--accent-red)':''}" onchange="mlSaveMaterial('${m.id}','deliveryDate',this.value)"></td>
     <td><select class="form-select" style="height:30px;font-size:11px;min-width:90px" onchange="mlSaveMaterial('${m.id}','status',this.value);setTimeout(renderMlMaterials,700)">${statOpts(m.status,['pending','ordered','partial','delivered'])}</select></td>
     <td><label class="toggle" style="width:36px;height:18px"><input type="checkbox" ${m.critical?'checked':''} onchange="mlSaveMaterial('${m.id}','critical',this.checked)"><span class="toggle-slider"></span></label> ${m.critical?'<span class="badge badge-amber" style="font-size:9px">Critical</span>':''}</td>
-    <td><button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlMaterial('${m.id}')"><i class="fas fa-trash"></i></button></td>
+    <td><div style="display:flex;gap:3px;position:relative">
+      <button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail('${m.id}','materials')" title="View attachments"><i class="fas fa-paperclip"></i>${(m.attachments&&m.attachments.length)?`<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">${m.attachments.length}</span>`:''}</button>
+      <button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlMaterial('${m.id}')" title="Delete"><i class="fas fa-trash"></i></button>
+    </div></td>
   </tr>`).join(''):mlEmpty('materials')}
   </tbody></table></div></div>`;
 }
