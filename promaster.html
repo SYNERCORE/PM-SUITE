@@ -2370,7 +2370,7 @@ ${sc('fas fa-dollar-sign','Total Value',fmtNum(cons.reduce((s,c)=>s+c.qtyOnHand*
 <div class="section-title">Consumables Register</div>
 <button class="btn btn-primary btn-sm" onclick="showAddConsumable()"><i class="fas fa-plus"></i> Add Item</button></div>
 <div class="card"><div class="table-wrap"><table>
-<thead><tr><th>ID</th><th>Name</th><th>Category</th><th>Unit</th><th>On Hand</th><th>Min Stock</th><th>Stock Level</th><th>Unit Cost (₱)</th><th>Total Value</th><th>Project</th><th>Supplier</th><th>Status</th><th></th></tr></thead>
+<thead><tr><th>ID</th><th>Name</th><th>Category</th><th>Unit</th><th>On Hand</th><th>Min Stock</th><th>Stock Level</th><th>Unit Cost (₱)</th><th>Total Value</th><th>Project</th><th>Supplier</th><th>Status</th><th>Actions</th></tr></thead>
 <tbody>${cons.map(c=>{
 const pct=Math.min(100,Math.round((c.qtyOnHand/Math.max(c.minStock*2,1))*100));
 const low=c.qtyOnHand<=c.minStock;
@@ -2387,7 +2387,10 @@ return`<tr>
 <td><span class="badge badge-blue">${c.projectId}</span></td>
 <td style="font-size:11px">${c.supplier}</td>
 <td>${resourceStatusBadge(c.status||(c.qtyOnHand<=c.minStock?'low-stock':'in-stock'))}</td>
-<td><button class="btn btn-secondary btn-sm btn-icon" onclick="showEditConsumable('${c.id}')"><i class="fas fa-edit"></i></button></td>
+<td><div style="display:flex;gap:3px;position:relative">
+<button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail('${c.id}','consumables')" title="View detail & attachments"><i class="fas fa-paperclip"></i>${(c.attachments&&c.attachments.length)?`<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">${c.attachments.length}</span>`:''}</button>
+<button class="btn btn-secondary btn-sm btn-icon" onclick="showEditConsumable('${c.id}')" title="Edit"><i class="fas fa-edit"></i></button>
+</div></td>
 </tr>`;}).join('')||`<tr><td colspan="13"><div class="empty-state"><i class="fas fa-boxes"></i><p>No consumables yet</p></div></td></tr>`}
 </tbody></table></div></div>`;}
 
@@ -3647,7 +3650,7 @@ ${sc('fas fa-exclamation-circle','Critical',materials.filter(m=>m.critical).leng
 </div>
 <div class="card"><div class="section-header" style="margin-bottom:12px"><div class="section-title">Material Status Register</div><span style="font-size:11px;color:var(--text-secondary)">Total Value: ${fmtCur(totVal)}</span></div>
 <div class="table-wrap"><table>
-<thead><tr><th>ID</th><th>Project</th><th>Material</th><th>Qty</th><th>Unit</th><th>Unit Cost</th><th>Total Value</th><th>Supplier</th><th>Delivery</th><th>Status</th><th>Critical</th></tr></thead>
+<thead><tr><th>ID</th><th>Project</th><th>Material</th><th>Qty</th><th>Unit</th><th>Unit Cost</th><th>Total Value</th><th>Supplier</th><th>Delivery</th><th>Status</th><th>Critical</th><th>Actions</th></tr></thead>
 <tbody>${_pgSlice("materials_mod",materials).map(m=>`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${m.id}</td>
 <td><span class="badge badge-blue">${m.projectId}</span></td>
@@ -3660,6 +3663,9 @@ ${sc('fas fa-exclamation-circle','Critical',materials.filter(m=>m.critical).leng
 <td style="font-size:11px;font-family:var(--font-mono);color:${isOverdue(m.deliveryDate)?'var(--accent-red)':'inherit'}">${m.deliveryDate}</td>
 <td>${sBadge(m.status)}</td>
 <td>${m.critical?'<span class="badge badge-red">&#9888; Critical</span>':'<span style="color:var(--text-muted)">-</span>'}</td>
+<td><div style="display:flex;gap:3px;position:relative">
+<button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail('${m.id}','materials')" title="View detail & attachments"><i class="fas fa-paperclip"></i>${(m.attachments&&m.attachments.length)?`<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">${m.attachments.length}</span>`:''}</button>
+</div></td>
 </tr>`).join('')}</tbody></table>${_pgNav("materials_mod",materials,typeof renderMaterials==="function"?renderMaterials:null)}</div></div>`;}
 
 
