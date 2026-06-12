@@ -348,7 +348,11 @@ canvas{display:block}
   <header class="topbar">
     <button class="sidebar-toggle" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
     <div class="topbar-title" id="topbarTitle">Dashboard</div>
-    <div class="topbar-search"><i class="fas fa-search" style="color:var(--text-muted);font-size:11px"></i><input type="text" placeholder="Search..." id="globalSearch"></div>
+    <div id="saveIndicator" style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);margin-right:14px;opacity:0;transition:opacity .3s">
+      <i class="fas fa-check-circle" style="color:var(--accent-green)" id="saveIndicatorIcon"></i>
+      <span id="saveIndicatorText">Saved</span>
+    </div>
+    <div class="topbar-search" onclick="openCmdPalette()" style="cursor:pointer" title="Search everything (Ctrl+K)"><i class="fas fa-search" style="color:var(--text-muted);font-size:11px"></i><input type="text" placeholder="Search... (Ctrl+K)" id="globalSearch" readonly style="cursor:pointer;pointer-events:none"><kbd style="font-size:9px;padding:1px 5px;background:var(--bg-hover);border:1px solid var(--border);border-radius:3px;color:var(--text-muted);flex-shrink:0">⌘K</kbd></div>
     <div class="topbar-actions">
       <button class="btn btn-primary btn-sm" onclick="showQuickAdd()"><i class="fas fa-plus"></i> New</button>
       <div style="position:relative">
@@ -374,6 +378,7 @@ canvas{display:block}
     <div id="risks" class="page"></div>
     <div id="actions" class="page"></div>
     <div id="documents" class="page"></div>
+    <div id="library" class="page"></div>
     <div id="progress" class="page"></div>
     <div id="kpi" class="page"></div>
     <div id="dailymeeting" class="page"></div>
@@ -397,6 +402,36 @@ canvas{display:block}
     <div id="taskModalBody"></div>
   </div>
 </div>
+<!-- ── COMMAND PALETTE (Cmd+K) ────────────────────────────── -->
+<div id="cmdPalette" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.5);backdrop-filter:blur(2px)" onclick="if(event.target===this)closeCmdPalette()">
+  <div style="max-width:560px;margin:12vh auto 0;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;box-shadow:0 24px 64px rgba(0,0,0,.5);overflow:hidden">
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)">
+      <i class="fas fa-search" style="color:var(--text-muted);font-size:14px"></i>
+      <input id="cmdPaletteInput" type="text" placeholder="Search pages, projects, actions... (Esc to close)"
+        style="flex:1;background:transparent;border:none;outline:none;color:var(--text-primary);font-size:15px;font-family:var(--font-primary)"
+        oninput="renderCmdResults(this.value)" onkeydown="cmdPaletteKeyNav(event)">
+      <kbd style="font-size:10px;padding:2px 6px;background:var(--bg-hover);border:1px solid var(--border);border-radius:4px;color:var(--text-muted)">ESC</kbd>
+    </div>
+    <div id="cmdPaletteResults" style="max-height:380px;overflow-y:auto;padding:6px"></div>
+    <div style="padding:8px 16px;border-top:1px solid var(--border);display:flex;gap:14px;font-size:10px;color:var(--text-muted)">
+      <span><kbd style="padding:1px 5px;background:var(--bg-hover);border:1px solid var(--border);border-radius:3px">↑↓</kbd> Navigate</span>
+      <span><kbd style="padding:1px 5px;background:var(--bg-hover);border:1px solid var(--border);border-radius:3px">↵</kbd> Open</span>
+      <span><kbd style="padding:1px 5px;background:var(--bg-hover);border:1px solid var(--border);border-radius:3px">Esc</kbd> Close</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── KEYBOARD SHORTCUTS HELP (press ?) ──────────────────── -->
+<div id="kbdHelp" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.5);backdrop-filter:blur(2px)" onclick="if(event.target===this)this.style.display='none'">
+  <div style="max-width:480px;margin:10vh auto 0;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;box-shadow:0 24px 64px rgba(0,0,0,.5);padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="font-size:16px;font-weight:700"><i class="fas fa-keyboard" style="margin-right:8px;color:var(--accent-blue)"></i>Keyboard Shortcuts</div>
+      <button onclick="document.getElementById('kbdHelp').style.display='none'" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px"><i class="fas fa-times"></i></button>
+    </div>
+    <div style="display:grid;gap:8px;font-size:13px" id="kbdHelpList"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="genericModal">
   <div class="modal">
     <div class="modal-header"><div class="modal-title" id="genericModalTitle">Add Item</div><button class="modal-close" onclick="closeModal('genericModal')"><i class="fas fa-times"></i></button></div>
@@ -588,6 +623,7 @@ const NAV_ITEMS=[
 {id:'risks',label:'Risk Register',icon:'fas fa-exclamation-triangle',section:'Quality'},
 {id:'actions',label:'Action Items',icon:'fas fa-clipboard-list',section:'Control'},
 {id:'documents',label:'Documents',icon:'fas fa-folder-open',section:'Control'},
+{id:'library',label:'Reference Library',icon:'fas fa-book',section:'Control'},
 {id:'progress',label:'Progress',icon:'fas fa-chart-line',section:'Control'},
 {id:'kpi',label:'KPI Analytics',icon:'fas fa-tachometer-alt',section:'Analytics'},
 {id:'dailymeeting',label:'Daily Meeting',icon:'fas fa-clipboard-check',section:'Analytics'},
@@ -610,6 +646,7 @@ function getDefaultData(){
     businessUnits:[], // [{id,name,color,description}]
     dailyMeetingLogs:[], // [{id,date,projectId,status,remarks,targetActivity,update,progressSnapshot,flagged,savedBy}]
     idChangeRequests:[], // [{id,projectId,oldId,newId,requestedBy,requestedAt,reason,status,approvedBy,approvedAt,rejectedAt,rejectionReason}]
+    libraryDocs:[], // [{id,name,number,rev,category,description,tags,fileName,fileType,fileUrl,fileWebUrl,spDriveId,spItemId,size,status,uploadedBy,uploadedAt,supersededBy,revisionOf}]
     projectIdHistory:[], // [{projectId(current),oldId,newId,changedBy,changedAt,reason}]
   };
 }
@@ -1040,7 +1077,7 @@ AppState.ensureData();
 const map={dashboard:renderDashboard,projects:renderProjects,tasks:renderTasks,gantt:renderGantt,
 resources:renderResources,manpower:renderManpower,materials:renderMaterials,procurement:renderProcurement,
 costs:renderCosts,qaqc:renderQAQC,risks:renderRisks,actions:renderActions,documents:renderDocuments,
-progress:renderProgress,kpi:renderKPI,dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist,prospects:renderProspects};
+progress:renderProgress,kpi:renderKPI,dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist,prospects:renderProspects,library:renderLibrary};
 if(map[pid])map[pid]();}
 
 function toggleSidebar(){
@@ -1146,6 +1183,24 @@ function sc(icon,label,value,sub,color,bg){
 return`<div class="stat-card"><div class="stat-icon" style="background:${bg}"><i class="${icon}" style="color:${color}"></i></div>
 <div class="stat-info"><div class="label">${label}</div><div class="value" style="color:${color}">${value}</div><div class="change">${sub}</div></div></div>`;}
 
+// ── Recently Viewed strip for dashboard ─────────────────────
+function _renderRecentStrip(){
+  const recent = (typeof _getRecentItems === 'function') ? _getRecentItems() : [];
+  if (!recent.length) return '';
+  const typeIcons = { project:'fa-briefcase', page:'fa-file', document:'fa-file-alt', asset:'fa-toolbox' };
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;overflow-x:auto;padding:2px">
+    <span style="font-size:10px;color:var(--text-muted);font-weight:700;letter-spacing:1px;flex-shrink:0"><i class="fas fa-history" style="margin-right:4px"></i>RECENT</span>
+    ${recent.slice(0,6).map(r => `
+      <button onclick='_openRecentItem(${JSON.stringify(r).replace(/'/g,"&#39;")})'
+        style="display:flex;align-items:center;gap:7px;padding:6px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:18px;cursor:pointer;flex-shrink:0;color:var(--text-primary);transition:border-color .15s"
+        onmouseenter="this.style.borderColor='var(--accent-blue)'" onmouseleave="this.style.borderColor='var(--border)'">
+        <i class="fas ${typeIcons[r.type]||'fa-file'}" style="font-size:10px;color:var(--accent-blue)"></i>
+        <span style="font-size:11px;font-weight:600;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis">${r.label}</span>
+      </button>
+    `).join('')}
+  </div>`;
+}
+
 function renderDashboard(){
 AppState.ensureData();
 const{tasks,risks,actions,qaqc,manpower}=AppState.data;
@@ -1172,6 +1227,7 @@ $('#dashboard').innerHTML=`
 <div class="welcome-banner">
 <div><div class="banner-title">Project Control Center</div><div class="banner-sub">${dateStr} &middot; ${AppState.data.settings.companyName}</div></div>
 <div style="text-align:right"><div class="banner-time" id="dashClock">${timeStr}</div><div style="font-size:10px;color:rgba(255,255,255,.6)">Local Time</div></div></div>
+${_renderRecentStrip()}
 <div class="grid grid-4" style="margin-bottom:14px">
 ${sc('fas fa-briefcase','Total Projects',projects.length,`${active} active`,'#388bfd','rgba(56,139,253,.15)')}
 ${sc('fas fa-chart-line','Avg Progress',avgProg+'%',`${completed} completed`,'#3fb950','rgba(63,185,80,.15)')}
@@ -4972,6 +5028,247 @@ function closeAction(id){const a=(AppState.data.actions||[]).find(a=>a.id===id);
 
 // ── DOCUMENTS MODULE ─────────────────────────────────────
 
+
+// ═══════════════════════════════════════════════════════════
+// ── REFERENCE LIBRARY — company-wide documents ────────────
+// ── (Work Methodology, ITP, SOW, Procedures, etc.) ────────
+// ═══════════════════════════════════════════════════════════
+
+const LIB_CATEGORIES = [
+  { id: 'Work Methodology', icon: 'fa-diagram-project', color: '#388bfd' },
+  { id: 'ITP', icon: 'fa-clipboard-check', color: '#3fb950', full: 'Inspection Test Plan' },
+  { id: 'Scope of Works', icon: 'fa-list-check', color: '#f0a450' },
+  { id: 'Procedure', icon: 'fa-route', color: '#bc8cff' },
+  { id: 'Template', icon: 'fa-file-lines', color: '#39d3f2' },
+  { id: 'Standard', icon: 'fa-certificate', color: '#fb8f44' },
+  { id: 'Policy', icon: 'fa-scale-balanced', color: '#f85149' },
+  { id: 'Manual', icon: 'fa-book-open', color: '#8b949e' },
+  { id: 'Form', icon: 'fa-file-pen', color: '#d97706' },
+  { id: 'Other', icon: 'fa-file', color: '#6e7681' },
+];
+let _libFilter = 'all';
+let _libSearch = '';
+let _libShowSuperseded = false;
+
+function renderLibrary(){
+  AppState.ensureData();
+  if (!AppState.data.libraryDocs) AppState.data.libraryDocs = [];
+  const all = AppState.data.libraryDocs;
+  const active = all.filter(d => d.status !== 'superseded');
+  let docs = _libShowSuperseded ? all : active;
+  if (_libFilter !== 'all') docs = docs.filter(d => d.category === _libFilter);
+  if (_libSearch) {
+    const q = _libSearch.toLowerCase();
+    docs = docs.filter(d => (d.name||'').toLowerCase().includes(q) || (d.number||'').toLowerCase().includes(q) || (d.description||'').toLowerCase().includes(q) || (d.tags||[]).join(' ').toLowerCase().includes(q));
+  }
+  docs = [...docs].sort((a,b) => (b.uploadedAt||'').localeCompare(a.uploadedAt||''));
+  const isAdmin = (_currentUserProfile && _currentUserProfile.isAdmin) || false;
+
+  const catCount = cat => active.filter(d => d.category === cat).length;
+
+  $('#library').innerHTML = `
+  <div class="section-header" style="margin-bottom:14px">
+    <div>
+      <div class="section-title"><i class="fas fa-book" style="color:var(--accent-blue);margin-right:8px"></i>Reference Library</div>
+      <div class="section-sub">${active.length} active document${active.length!==1?'s':''} · Company-wide methodologies, ITPs, procedures &amp; standards</div>
+    </div>
+    <div style="display:flex;gap:7px">
+      <button class="btn btn-secondary btn-sm" onclick="exportCSV((AppState.data.libraryDocs||[]).map(d=>[d.number,d.rev,d.name,d.category,d.status,d.uploadedBy,d.uploadedAt?d.uploadedAt.split('T')[0]:'']),['Number','Rev','Name','Category','Status','Uploaded By','Date'],'reference_library.csv')"><i class="fas fa-download"></i> Export</button>
+      <button class="btn btn-primary btn-sm" onclick="showLibraryUpload()"><i class="fas fa-cloud-upload-alt"></i> Upload Document</button>
+    </div>
+  </div>
+
+  <!-- Category chips -->
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
+    <button onclick="_libFilter='all';renderLibrary()" style="font-size:11px;padding:6px 14px;border-radius:16px;cursor:pointer;font-weight:600;border:1px solid ${_libFilter==='all'?'var(--accent-blue)':'var(--border)'};background:${_libFilter==='all'?'var(--accent-blue)':'transparent'};color:${_libFilter==='all'?'#fff':'var(--text-secondary)'}">All <span style="opacity:.7">(${active.length})</span></button>
+    ${LIB_CATEGORIES.map(c => `
+      <button onclick="_libFilter='${c.id}';renderLibrary()" title="${c.full||c.id}"
+        style="font-size:11px;padding:6px 14px;border-radius:16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px;
+          border:1px solid ${_libFilter===c.id?c.color:'var(--border)'};
+          background:${_libFilter===c.id?c.color:'transparent'};
+          color:${_libFilter===c.id?'#fff':c.color}">
+        <i class="fas ${c.icon}" style="font-size:10px"></i>${c.id} <span style="opacity:.7">(${catCount(c.id)})</span>
+      </button>`).join('')}
+  </div>
+
+  <div class="filters-bar">
+    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer">
+      <input type="checkbox" ${_libShowSuperseded?'checked':''} onchange="_libShowSuperseded=this.checked;renderLibrary()"> Show superseded revisions
+    </label>
+    <div class="search-bar" style="margin-left:auto"><i class="fas fa-search"></i><input type="text" placeholder="Search library..." value="${_libSearch}" oninput="_libSearch=this.value;renderLibrary()"></div>
+  </div>
+
+  ${docs.length === 0 ? `<div class="empty-state"><i class="fas fa-book"></i><p>No documents${_libFilter!=='all'?' in '+_libFilter:''} yet</p><button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="showLibraryUpload()"><i class="fas fa-cloud-upload-alt"></i> Upload First Document</button></div>`
+  : `<div class="card"><div class="table-wrap"><table>
+    <thead><tr><th>Doc No.</th><th>Rev</th><th>Document Name</th><th>Category</th><th>Description</th><th>Uploaded By</th><th>Date</th><th>Size</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody>${docs.map(d => {
+      const cat = LIB_CATEGORIES.find(c => c.id === d.category) || LIB_CATEGORIES[LIB_CATEGORIES.length-1];
+      const isSuperseded = d.status === 'superseded';
+      return `<tr style="${isSuperseded?'opacity:.5':''}">
+        <td style="font-family:var(--font-mono);font-size:11px;color:var(--accent-blue);font-weight:700">${d.number||'—'}</td>
+        <td><span class="badge badge-gray">Rev ${d.rev||'A'}</span></td>
+        <td style="font-weight:600;font-size:12px">${d.name}</td>
+        <td><span class="badge" style="background:${cat.color}22;color:${cat.color}"><i class="fas ${cat.icon}" style="margin-right:4px;font-size:9px"></i>${d.category}</span></td>
+        <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${d.description||''}">${d.description||'—'}</td>
+        <td style="font-size:11px">${(d.uploadedBy||'').split('@')[0]}</td>
+        <td style="font-size:11px;font-family:var(--font-mono)">${d.uploadedAt?d.uploadedAt.split('T')[0]:'—'}</td>
+        <td style="font-size:11px;color:var(--text-muted)">${d.size||'—'}</td>
+        <td>${isSuperseded?'<span class="badge badge-gray">Superseded</span>':'<span class="badge badge-green">Active</span>'}</td>
+        <td><div style="display:flex;gap:3px">
+          ${(d.fileWebUrl||d.fileUrl)?`
+            <button class="btn btn-secondary btn-sm btn-icon" onclick="viewLibraryDoc('${d.id}')" title="View"><i class="fas fa-eye"></i></button>
+            <button class="btn btn-secondary btn-sm btn-icon" onclick="downloadLibraryDoc('${d.id}')" title="Download"><i class="fas fa-download"></i></button>
+          `:''}
+          ${!isSuperseded?`<button class="btn btn-secondary btn-sm btn-icon" onclick="showLibraryNewRevision('${d.id}')" title="Upload new revision"><i class="fas fa-code-branch"></i></button>`:''}
+          ${isAdmin?`<button class="btn btn-danger btn-sm btn-icon" onclick="deleteLibraryDoc('${d.id}')" title="Delete (Admin)"><i class="fas fa-trash"></i></button>`:''}
+        </div></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div></div>`}`;
+}
+
+// ── Upload new library document ─────────────────────────────
+function showLibraryUpload(presetDocId){
+  const preset = presetDocId ? (AppState.data.libraryDocs||[]).find(d => d.id === presetDocId) : null;
+  $('#genericModalTitle').textContent = preset ? 'Upload New Revision: ' + preset.name : 'Upload Library Document';
+  $('#genericModalBody').innerHTML = `
+    <div class="form-grid">
+      <div class="form-group"><label class="form-label">Category *</label>
+        <select class="form-select" id="libCat" ${preset?'disabled':''}>
+          ${LIB_CATEGORIES.map(c=>`<option value="${c.id}" ${preset&&preset.category===c.id?'selected':''}>${c.full||c.id}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Document Number ${preset?'':'<span style="font-weight:400;color:var(--text-muted)">(auto if blank)</span>'}</label>
+        <input class="form-input" id="libNum" value="${preset?preset.number:''}" ${preset?'readonly style="opacity:.6"':''} placeholder="e.g., SHIC-WM-001">
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Document Name *</label>
+      <input class="form-input" id="libName" value="${preset?preset.name:''}" placeholder="e.g., Welding Methodology for Pressure Vessels">
+    </div>
+    <div class="form-group"><label class="form-label">Description</label>
+      <input class="form-input" id="libDesc" value="${preset?(preset.description||''):''}" placeholder="Short description of the document">
+    </div>
+    <div class="form-group"><label class="form-label">Tags <span style="font-weight:400;color:var(--text-muted)">(comma-separated)</span></label>
+      <input class="form-input" id="libTags" value="${preset?(preset.tags||[]).join(', '):''}" placeholder="welding, pressure vessel, ASME">
+    </div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">File *</label>
+      <input type="file" class="form-input" id="libFile" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.dwg,.dxf,.jpg,.jpeg,.png,.txt,.csv,.zip">
+      <div style="font-size:10px;color:var(--text-muted);margin-top:4px">Stored in SharePoint → SHIC_Documents/LIBRARY/. Max 100 MB.</div>
+    </div>
+    ${preset?`<div style="padding:8px 12px;background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.2);border-radius:7px;font-size:11px;color:var(--accent-blue)"><i class="fas fa-code-branch" style="margin-right:5px"></i>This will create <strong>Rev ${_nextRev(preset.rev)}</strong> and mark Rev ${preset.rev} as superseded.</div>`:''}
+  `;
+  $('#genericModalFooter').innerHTML = `
+    <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+    <button class="btn btn-primary" onclick="_submitLibraryUpload(${preset?`'${preset.id}'`:'null'})"><i class="fas fa-cloud-upload-alt"></i> Upload</button>
+  `;
+  openModal('genericModal');
+}
+
+function showLibraryNewRevision(id){ showLibraryUpload(id); }
+
+function _nextRev(rev){
+  if (!rev) return 'B';
+  const c = rev.toUpperCase().charCodeAt(rev.length-1);
+  return rev.slice(0,-1) + String.fromCharCode(c >= 90 ? 65 : c + 1) + (c >= 90 ? 'A' : '');
+}
+
+async function _submitLibraryUpload(revisionOfId){
+  const fileInput = document.getElementById('libFile');
+  const file = fileInput?.files?.[0];
+  const name = (document.getElementById('libName').value||'').trim();
+  if (!name) { showToast('Document name required','error'); return; }
+  if (!file) { showToast('Please select a file','error'); return; }
+  if (file.size > 100*1024*1024) { showToast('File too large — max 100 MB','error'); return; }
+  if (!_spConnected) { showToast('SharePoint not connected — cannot upload','error',5000); return; }
+
+  const category = document.getElementById('libCat').value;
+  const desc = document.getElementById('libDesc').value||'';
+  const tags = (document.getElementById('libTags').value||'').split(',').map(t=>t.trim()).filter(Boolean);
+  const user = _currentUserProfile?.name || _currentUser?.email || 'User';
+  const prev = revisionOfId ? (AppState.data.libraryDocs||[]).find(d => d.id === revisionOfId) : null;
+
+  // Doc number: keep from prev revision, use typed, or auto-generate per category
+  let number = (document.getElementById('libNum').value||'').trim();
+  if (prev) number = prev.number;
+  if (!number) {
+    const prefix = 'SHIC-' + ({'Work Methodology':'WM','ITP':'ITP','Scope of Works':'SOW','Procedure':'PRC','Template':'TPL','Standard':'STD','Policy':'POL','Manual':'MAN','Form':'FRM','Other':'DOC'}[category]||'DOC') + '-';
+    const existing = (AppState.data.libraryDocs||[]).filter(d => (d.number||'').startsWith(prefix)).length;
+    number = prefix + String(existing+1).padStart(3,'0');
+  }
+
+  showToast('Uploading ' + file.name + '...','info',3000);
+  try {
+    const result = await spUploadFile(file, 'LIBRARY/' + category.replace(/[<>:"/\\|?*]/g,'_'));
+    const doc = {
+      id: 'LIB-' + Date.now().toString(36).toUpperCase(),
+      name, number,
+      rev: prev ? _nextRev(prev.rev) : 'A',
+      category, description: desc, tags,
+      fileName: file.name,
+      fileType: file.name.split('.').pop().toLowerCase(),
+      fileUrl: result.url, fileWebUrl: result.webUrl,
+      spDriveId: result.driveId, spItemId: result.itemId,
+      size: _formatFileSize(file.size),
+      status: 'active',
+      uploadedBy: user,
+      uploadedAt: new Date().toISOString(),
+      revisionOf: prev ? prev.id : null,
+    };
+    if (!AppState.data.libraryDocs) AppState.data.libraryDocs = [];
+    AppState.data.libraryDocs.push(doc);
+    if (prev) { prev.status = 'superseded'; prev.supersededBy = doc.id; }
+    AppState.save();
+    closeModal('genericModal');
+    renderLibrary();
+    showToast(prev ? 'Rev ' + doc.rev + ' uploaded — Rev ' + prev.rev + ' superseded' : 'Document uploaded: ' + number, 'success', 4000);
+  } catch(err) {
+    console.error('[Library] Upload error:', err);
+    showToast('Upload failed: ' + err.message, 'error', 6000);
+  }
+}
+
+async function viewLibraryDoc(id){
+  const d = (AppState.data.libraryDocs||[]).find(x => x.id === id);
+  if (!d) return;
+  if (d.fileWebUrl) { window.open(d.fileWebUrl,'_blank'); return; }
+  if (d.spDriveId && d.spItemId) {
+    const url = await spGetFileDownloadUrl(d.spDriveId, d.spItemId);
+    if (url) { window.open(url,'_blank'); return; }
+  }
+  showToast('Cannot open file','error');
+}
+
+async function downloadLibraryDoc(id){
+  const d = (AppState.data.libraryDocs||[]).find(x => x.id === id);
+  if (!d) return;
+  let url = d.fileUrl;
+  if (d.spDriveId && d.spItemId) url = await spGetFileDownloadUrl(d.spDriveId, d.spItemId) || url;
+  if (!url) { showToast('Cannot download file','error'); return; }
+  const a = document.createElement('a');
+  a.href = url; a.download = d.fileName || d.name; a.target = '_blank'; a.click();
+  showToast('Downloading: ' + (d.fileName||d.name), 'success');
+}
+
+async function deleteLibraryDoc(id){
+  const isAdmin = (_currentUserProfile && _currentUserProfile.isAdmin) || false;
+  if (!isAdmin) { showToast('Only admins can delete library documents','error'); return; }
+  const d = (AppState.data.libraryDocs||[]).find(x => x.id === id);
+  if (!d) return;
+  if (!confirm('Delete "' + d.name + '" (Rev ' + d.rev + ')?\n\nThis also deletes the file from SharePoint and cannot be undone.')) return;
+  if (d.spDriveId && d.spItemId) {
+    try { await spDeleteFile(d.spDriveId, d.spItemId); } catch(e){ console.warn('SP delete:', e.message); }
+  }
+  // If this doc superseded another, reactivate the previous revision
+  if (d.revisionOf) {
+    const prev = (AppState.data.libraryDocs||[]).find(x => x.id === d.revisionOf);
+    if (prev && prev.supersededBy === d.id) { prev.status = 'active'; delete prev.supersededBy; }
+  }
+  AppState.data.libraryDocs = (AppState.data.libraryDocs||[]).filter(x => x.id !== id);
+  AppState.save();
+  renderLibrary();
+  showToast('Library document deleted','warning');
+}
+
 function renderDocuments(){
   AppState.ensureData();
   const docs=AppState.data.documents||[];
@@ -7183,9 +7480,435 @@ function exportCSV(rows,headers,filename){
 const csv=[headers,...rows].map(r=>r.map(c=>`"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
 const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download=filename;a.click();showToast('Exported: '+filename,'success');}
 
+
+// ═══════════════════════════════════════════════════════════
+// ── WAVE 1: DESKTOP APP UX — Command Palette, Shortcuts, ──
+// ── Save Indicator, Recently Viewed, PWA Install ──────────
+// ═══════════════════════════════════════════════════════════
+
+// ── 1. COMMAND PALETTE ──────────────────────────────────────
+let _cmdSelectedIdx = 0;
+let _cmdResults = [];
+
+function openCmdPalette() {
+  const pal = document.getElementById('cmdPalette');
+  if (!pal) return;
+  pal.style.display = 'block';
+  const input = document.getElementById('cmdPaletteInput');
+  input.value = '';
+  input.focus();
+  renderCmdResults('');
+}
+
+function closeCmdPalette() {
+  const pal = document.getElementById('cmdPalette');
+  if (pal) pal.style.display = 'none';
+}
+
+function _cmdBuildIndex(query) {
+  const q = (query || '').toLowerCase().trim();
+  const results = [];
+  const user = _currentUserProfile;
+  const isAdmin = user && user.isAdmin;
+
+  // ── Pages ──
+  NAV_ITEMS.forEach(item => {
+    if (!q || item.label.toLowerCase().includes(q) || item.id.includes(q)) {
+      results.push({
+        type: 'page', icon: item.icon, label: item.label,
+        sublabel: 'Page · ' + item.section,
+        action: () => { navigate(item.id); }
+      });
+    }
+  });
+  // Settings
+  if (!q || 'settings'.includes(q)) {
+    results.push({ type: 'page', icon: 'fas fa-cog', label: 'Settings', sublabel: 'Page', action: () => navigate('settings') });
+  }
+
+  // ── Actions ──
+  const actions = [
+    { label: 'New Project', icon: 'fas fa-plus', keywords: 'create add project new', fn: () => { navigate('projects'); setTimeout(() => showProjectForm(), 200); } },
+    { label: 'New Prospect', icon: 'fas fa-search-dollar', keywords: 'create add prospect new potential', fn: () => { navigate('prospects'); setTimeout(() => showProspectForm(), 200); } },
+    { label: 'New Task', icon: 'fas fa-tasks', keywords: 'create add task new', fn: () => { navigate('tasks'); setTimeout(() => { if (typeof showTaskForm === 'function') showTaskForm(); }, 200); } },
+    { label: 'Upload Document', icon: 'fas fa-cloud-upload-alt', keywords: 'upload file document attach', fn: () => { navigate('documents'); setTimeout(() => { if (typeof uploadDoc === 'function') uploadDoc(); }, 200); } },
+    { label: 'Push to SharePoint', icon: 'fas fa-cloud-upload-alt', keywords: 'sync push save sharepoint upload', fn: () => { if (typeof spPushData === 'function') spPushData(false); } },
+    { label: 'Pull from SharePoint', icon: 'fas fa-cloud-download-alt', keywords: 'sync pull refresh sharepoint download latest', fn: () => { if (typeof spPullData === 'function') spPullData(); } },
+    { label: 'Export All Data (JSON)', icon: 'fas fa-file-export', keywords: 'export backup download json data', fn: () => { if (typeof exportData === 'function') exportData(); } },
+    { label: 'Toggle Theme', icon: 'fas fa-moon', keywords: 'theme dark light mode toggle', fn: () => { if (typeof toggleTheme === 'function') toggleTheme(); } },
+    { label: 'Keyboard Shortcuts', icon: 'fas fa-keyboard', keywords: 'shortcuts keys help keyboard', fn: () => showKbdHelp() },
+    { label: 'Sign Out', icon: 'fas fa-sign-out-alt', keywords: 'logout sign out exit', fn: () => { if (typeof doLogout === 'function') doLogout(); } },
+  ];
+  actions.forEach(a => {
+    if (!q || a.label.toLowerCase().includes(q) || a.keywords.includes(q)) {
+      results.push({ type: 'action', icon: a.icon, label: a.label, sublabel: 'Action', action: a.fn });
+    }
+  });
+
+  // ── Projects (search by name/id/client) ──
+  if (q.length >= 2) {
+    (AppState.data.projects || []).forEach(p => {
+      if (p.id.toLowerCase().includes(q) || (p.name||'').toLowerCase().includes(q) || (p.client||'').toLowerCase().includes(q)) {
+        results.push({
+          type: 'project',
+          icon: p.status === 'prospect' ? 'fas fa-search-dollar' : 'fas fa-briefcase',
+          label: p.name,
+          sublabel: p.id + ' · ' + (p.status || '') + (p.client ? ' · ' + p.client : ''),
+          action: () => showProjectDetail(p.id)
+        });
+      }
+    });
+
+    // ── Documents ──
+    (AppState.data.documents || []).slice(0, 50).forEach(d => {
+      if ((d.name||'').toLowerCase().includes(q) || (d.number||'').toLowerCase().includes(q)) {
+        results.push({
+          type: 'document', icon: 'fas fa-file-alt', label: d.name,
+          sublabel: 'Document · ' + (d.number || '') + ' · ' + (d.category || ''),
+          action: () => { navigate('documents'); setTimeout(() => { if (typeof showDocDetail === 'function') showDocDetail(d.id); }, 300); }
+        });
+      }
+    });
+
+    // ── Library docs ──
+    (AppState.data.libraryDocs || []).forEach(d => {
+      if (d.status !== 'superseded' && ((d.name||'').toLowerCase().includes(q) || (d.number||'').toLowerCase().includes(q) || (d.tags||[]).join(' ').toLowerCase().includes(q))) {
+        results.push({
+          type: 'document', icon: 'fas fa-book', label: d.name,
+          sublabel: 'Library · ' + (d.number||'') + ' Rev ' + (d.rev||'A') + ' · ' + (d.category||''),
+          action: () => { navigate('library'); }
+        });
+      }
+    });
+
+    // ── Tasks ──
+    (AppState.data.tasks || []).slice(0, 100).forEach(t => {
+      if ((t.name||t.title||'').toLowerCase().includes(q)) {
+        results.push({
+          type: 'task', icon: 'fas fa-tasks', label: t.name || t.title,
+          sublabel: 'Task · ' + (t.projectId || '') + ' · ' + (t.status || ''),
+          action: () => { navigate('tasks'); }
+        });
+      }
+    });
+
+    // ── Assets ──
+    ['equipment','tools','vehicles','consumables','materials'].forEach(typeKey => {
+      (AppState.data[typeKey] || []).forEach(a => {
+        if ((a.name||'').toLowerCase().includes(q) || (a.id||'').toLowerCase().includes(q)) {
+          results.push({
+            type: 'asset', icon: 'fas fa-toolbox', label: a.name,
+            sublabel: typeKey.charAt(0).toUpperCase() + typeKey.slice(1) + ' · ' + a.id,
+            action: () => { showAssetDetail(a.id, typeKey); }
+          });
+        }
+      });
+    });
+  }
+
+  // ── Recently viewed (when no query) ──
+  if (!q) {
+    const recent = _getRecentItems();
+    recent.slice(0, 5).forEach(r => {
+      results.unshift({
+        type: 'recent', icon: 'fas fa-history', label: r.label,
+        sublabel: 'Recent · ' + r.sublabel,
+        action: () => _openRecentItem(r)
+      });
+    });
+  }
+
+  return results.slice(0, 12);
+}
+
+function renderCmdResults(query) {
+  _cmdResults = _cmdBuildIndex(query);
+  _cmdSelectedIdx = 0;
+  const container = document.getElementById('cmdPaletteResults');
+  if (!container) return;
+  if (!_cmdResults.length) {
+    container.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px"><i class="fas fa-search" style="font-size:20px;opacity:.3;display:block;margin-bottom:8px"></i>No results for "${query}"</div>`;
+    return;
+  }
+  const typeColors = { page:'var(--accent-blue)', action:'var(--accent-amber)', project:'var(--accent-green)', document:'#bc8cff', task:'#39d3f2', asset:'#fb8f44', recent:'var(--text-muted)' };
+  container.innerHTML = _cmdResults.map((r, i) => `
+    <div onclick="_cmdExecute(${i})" onmouseenter="_cmdSelectedIdx=${i};_cmdHighlight()"
+      data-cmd-idx="${i}"
+      style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;cursor:pointer;
+        background:${i === _cmdSelectedIdx ? 'var(--bg-hover)' : 'transparent'}">
+      <div style="width:30px;height:30px;border-radius:7px;background:${typeColors[r.type]||'var(--text-muted)'}18;color:${typeColors[r.type]||'var(--text-muted)'};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <i class="${r.icon}" style="font-size:12px"></i>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.label}</div>
+        <div style="font-size:10px;color:var(--text-muted)">${r.sublabel}</div>
+      </div>
+      ${i === _cmdSelectedIdx ? '<kbd style="font-size:9px;padding:2px 5px;background:var(--bg-primary);border:1px solid var(--border);border-radius:3px;color:var(--text-muted)">↵</kbd>' : ''}
+    </div>
+  `).join('');
+}
+
+function _cmdHighlight() {
+  document.querySelectorAll('[data-cmd-idx]').forEach((el, i) => {
+    el.style.background = i === _cmdSelectedIdx ? 'var(--bg-hover)' : 'transparent';
+  });
+}
+
+function _cmdExecute(idx) {
+  const r = _cmdResults[idx !== undefined ? idx : _cmdSelectedIdx];
+  if (!r) return;
+  closeCmdPalette();
+  try { r.action(); } catch(e) { console.warn('Cmd action error:', e); }
+}
+
+function cmdPaletteKeyNav(e) {
+  if (e.key === 'ArrowDown') { e.preventDefault(); _cmdSelectedIdx = Math.min(_cmdSelectedIdx + 1, _cmdResults.length - 1); _cmdHighlight(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); _cmdSelectedIdx = Math.max(_cmdSelectedIdx - 1, 0); _cmdHighlight(); }
+  else if (e.key === 'Enter') { e.preventDefault(); _cmdExecute(); }
+  else if (e.key === 'Escape') { closeCmdPalette(); }
+}
+
+// ── 2. RECENTLY VIEWED TRACKING ─────────────────────────────
+function _trackRecentItem(type, id, label, sublabel) {
+  try {
+    let recent = JSON.parse(localStorage.getItem('shic_recent_items') || '[]');
+    recent = recent.filter(r => !(r.type === type && r.id === id)); // dedupe
+    recent.unshift({ type, id, label, sublabel, at: Date.now() });
+    recent = recent.slice(0, 10);
+    localStorage.setItem('shic_recent_items', JSON.stringify(recent));
+  } catch(e) {}
+}
+
+function _getRecentItems() {
+  try { return JSON.parse(localStorage.getItem('shic_recent_items') || '[]'); }
+  catch(e) { return []; }
+}
+
+function _openRecentItem(r) {
+  if (r.type === 'project') showProjectDetail(r.id);
+  else if (r.type === 'page') navigate(r.id);
+  else if (r.type === 'document') { navigate('documents'); setTimeout(() => { if (typeof showDocDetail === 'function') showDocDetail(r.id); }, 300); }
+  else if (r.type === 'asset' && r.assetType) showAssetDetail(r.id, r.assetType);
+}
+
+// Hook into showProjectDetail to track recents
+(function() {
+  const _origSPD = window.showProjectDetail || (typeof showProjectDetail === 'function' ? showProjectDetail : null);
+  if (typeof showProjectDetail === 'function') {
+    const orig = showProjectDetail;
+    window.showProjectDetail = function(id) {
+      const p = (AppState.data.projects || []).find(x => x.id === id);
+      if (p) _trackRecentItem('project', id, p.name, p.id + ' · ' + (p.status || ''));
+      return orig.apply(this, arguments);
+    };
+  }
+})();
+
+// ── 3. SAVE INDICATOR ───────────────────────────────────────
+let _saveIndicatorTimer = null;
+function showSaveIndicator(state) {
+  const el = document.getElementById('saveIndicator');
+  const icon = document.getElementById('saveIndicatorIcon');
+  const text = document.getElementById('saveIndicatorText');
+  if (!el || !icon || !text) return;
+  clearTimeout(_saveIndicatorTimer);
+  el.style.opacity = '1';
+  if (state === 'saving') {
+    icon.className = 'fas fa-circle-notch fa-spin';
+    icon.style.color = 'var(--accent-amber)';
+    text.textContent = 'Saving...';
+  } else if (state === 'synced') {
+    icon.className = 'fas fa-cloud-upload-alt';
+    icon.style.color = 'var(--accent-green)';
+    text.textContent = 'Synced to SharePoint';
+    _saveIndicatorTimer = setTimeout(() => { el.style.opacity = '0'; }, 2500);
+  } else if (state === 'offline') {
+    icon.className = 'fas fa-wifi';
+    icon.style.color = 'var(--accent-red)';
+    text.textContent = 'Offline — queued';
+    _saveIndicatorTimer = setTimeout(() => { el.style.opacity = '0'; }, 4000);
+  } else { // saved
+    icon.className = 'fas fa-check-circle';
+    icon.style.color = 'var(--accent-green)';
+    text.textContent = 'Saved';
+    _saveIndicatorTimer = setTimeout(() => { el.style.opacity = '0'; }, 2000);
+  }
+}
+
+// Hook into AppState.save
+(function() {
+  if (AppState && typeof AppState.save === 'function' && !AppState._saveIndicatorHooked) {
+    AppState._saveIndicatorHooked = true;
+    const origSave = AppState.save.bind(AppState);
+    AppState.save = function() {
+      showSaveIndicator('saving');
+      const result = origSave();
+      setTimeout(() => showSaveIndicator(navigator.onLine ? 'saved' : 'offline'), 300);
+      return result;
+    };
+  }
+})();
+
+// ── 4. KEYBOARD SHORTCUTS ───────────────────────────────────
+const KBD_SHORTCUTS = [
+  { keys: 'Ctrl/Cmd + K', desc: 'Open command palette' },
+  { keys: 'Ctrl/Cmd + S', desc: 'Force save & sync to SharePoint' },
+  { keys: 'Ctrl/Cmd + /', desc: 'Show keyboard shortcuts' },
+  { keys: '?', desc: 'Show keyboard shortcuts' },
+  { keys: 'G then D', desc: 'Go to Dashboard' },
+  { keys: 'G then P', desc: 'Go to Projects' },
+  { keys: 'G then T', desc: 'Go to Tasks' },
+  { keys: 'G then M', desc: 'Go to Daily Meeting' },
+  { keys: 'G then S', desc: 'Go to Settings' },
+  { keys: 'Esc', desc: 'Close modal / palette' },
+];
+
+function showKbdHelp() {
+  const helpEl = document.getElementById('kbdHelp');
+  const listEl = document.getElementById('kbdHelpList');
+  if (!helpEl || !listEl) return;
+  listEl.innerHTML = KBD_SHORTCUTS.map(s => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+      <span style="color:var(--text-secondary)">${s.desc}</span>
+      <kbd style="font-size:11px;padding:3px 8px;background:var(--bg-hover);border:1px solid var(--border);border-radius:5px;font-family:var(--font-mono)">${s.keys}</kbd>
+    </div>
+  `).join('');
+  helpEl.style.display = 'block';
+}
+
+// G-then-X navigation state
+let _gPressed = false;
+let _gTimer = null;
+
+document.addEventListener('keydown', function(e) {
+  const inInput = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName) ||
+    document.activeElement?.isContentEditable;
+
+  // Cmd/Ctrl+K — command palette (works everywhere)
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    openCmdPalette();
+    return;
+  }
+
+  // Cmd/Ctrl+S — force save & sync
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    AppState.save();
+    if (typeof spPushData === 'function' && _spConnected) {
+      showSaveIndicator('saving');
+      spPushData(false).then(() => showSaveIndicator('synced')).catch(() => showSaveIndicator('offline'));
+    }
+    return;
+  }
+
+  // Cmd/Ctrl+/ — keyboard help
+  if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+    e.preventDefault();
+    showKbdHelp();
+    return;
+  }
+
+  // Skip remaining single-key shortcuts when typing
+  if (inInput) return;
+
+  // ? — keyboard help
+  if (e.key === '?') {
+    e.preventDefault();
+    showKbdHelp();
+    return;
+  }
+
+  // G-then-X navigation
+  if (e.key.toLowerCase() === 'g' && !_gPressed) {
+    _gPressed = true;
+    clearTimeout(_gTimer);
+    _gTimer = setTimeout(() => { _gPressed = false; }, 1200);
+    return;
+  }
+  if (_gPressed) {
+    _gPressed = false;
+    clearTimeout(_gTimer);
+    const gMap = { d: 'dashboard', p: 'projects', t: 'tasks', m: 'dailymeeting', s: 'settings', r: 'reports', c: 'calendar', k: 'kpi' };
+    const target = gMap[e.key.toLowerCase()];
+    if (target) { e.preventDefault(); navigate(target); }
+    return;
+  }
+});
+
+// ── 5. PWA INSTALL PROMPT ───────────────────────────────────
+let _deferredInstallPrompt = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  _deferredInstallPrompt = e;
+  _showInstallBanner();
+});
+
+function _showInstallBanner() {
+  // Don't show if dismissed recently
+  const dismissed = localStorage.getItem('shic_install_dismissed');
+  if (dismissed && Date.now() - parseInt(dismissed) < 7 * 86400000) return;
+  // Don't show if already installed
+  if (window.matchMedia('(display-mode: standalone)').matches) return;
+
+  const banner = document.createElement('div');
+  banner.id = 'installBanner';
+  banner.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;box-shadow:0 8px 32px rgba(0,0,0,.4);max-width:320px;display:flex;align-items:center;gap:12px';
+  banner.innerHTML = `
+    <div style="width:40px;height:40px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;color:#fff;flex-shrink:0">S</div>
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:700">Install SHIC PM Suite</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Run as a desktop app — faster access, works offline</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:5px">
+      <button onclick="_installPWA()" class="btn btn-primary btn-sm" style="font-size:11px;white-space:nowrap">Install</button>
+      <button onclick="_dismissInstall()" style="background:none;border:none;color:var(--text-muted);font-size:10px;cursor:pointer">Not now</button>
+    </div>
+  `;
+  document.body.appendChild(banner);
+}
+
+function _installPWA() {
+  const banner = document.getElementById('installBanner');
+  if (banner) banner.remove();
+  if (!_deferredInstallPrompt) { showToast('Install not available — use browser menu → "Install app"', 'info', 5000); return; }
+  _deferredInstallPrompt.prompt();
+  _deferredInstallPrompt.userChoice.then(choice => {
+    if (choice.outcome === 'accepted') {
+      showToast('SHIC PM Suite installed! Check your Start menu / desktop.', 'success', 5000);
+    }
+    _deferredInstallPrompt = null;
+  });
+}
+
+function _dismissInstall() {
+  const banner = document.getElementById('installBanner');
+  if (banner) banner.remove();
+  localStorage.setItem('shic_install_dismissed', String(Date.now()));
+}
+
+// ── 6. ONLINE/OFFLINE INDICATOR ─────────────────────────────
+window.addEventListener('online', () => {
+  showToast('Back online — syncing...', 'success', 2000);
+  showSaveIndicator('saving');
+  if (typeof spPushData === 'function' && _spConnected && _spOfflineQueue) {
+    spPushData(true).then(() => showSaveIndicator('synced')).catch(() => {});
+  } else {
+    setTimeout(() => showSaveIndicator('saved'), 1000);
+  }
+});
+
+window.addEventListener('offline', () => {
+  showToast('You are offline — changes will be saved locally and synced when reconnected', 'warning', 5000);
+  showSaveIndicator('offline');
+});
+
+console.log('[SHIC] Wave 1 Desktop UX loaded — Cmd+K palette, shortcuts, save indicator, install prompt');
+
 document.addEventListener('keydown',e=>{
 if(e.key==='/'&&!['INPUT','TEXTAREA'].includes(e.target.tagName)){e.preventDefault();$('#globalSearch').focus();}
-if(e.key==='Escape'){$$('.modal-overlay.open').forEach(m=>m.classList.remove('open'));$('#notifPanel').classList.remove('open');}
+if(e.key==='Escape'){$$('.modal-overlay.open').forEach(m=>m.classList.remove('open'));$('#notifPanel').classList.remove('open');closeCmdPalette();const kh=document.getElementById('kbdHelp');if(kh)kh.style.display='none';}
 if(e.ctrlKey&&e.key==='n'){e.preventDefault();showQuickAdd();}});
 
 $('#globalSearch').addEventListener('input',function(){
