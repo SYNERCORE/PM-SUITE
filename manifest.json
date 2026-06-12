@@ -1,0 +1,26 @@
+{
+  "name": "SHIC Enterprise PM Suite",
+  "short_name": "SHIC",
+  "description": "Enterprise Project Management Suite - Synercore Heavy Industries Corporation",
+  "id": "./promaster.html",
+  "start_url": "./promaster.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#f59e0b",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23d97706'/%3E%3Ctext y='.9em' font-size='80' x='10' fill='white' font-weight='900'%3ES%3C/text%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23d97706'/%3E%3Ctext y='.9em' font-size='80' x='10' fill='white' font-weight='900'%3ES%3C/text%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
