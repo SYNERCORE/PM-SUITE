@@ -1842,12 +1842,17 @@ ${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${taskProjectFilt
 <div id="taskViewContent"></div>`;renderTaskView();}
 
 function getFilteredTasks(){return taskProjectFilter==='all'?AppState.data.tasks:(AppState.data.tasks||[]).filter(t=>t.projectId===taskProjectFilter);}
-function renderTaskView(){if(taskView==='kanban')renderKanban();else renderTaskTable();}
+function renderTaskView(){
+  if(!$('#taskViewContent'))return; // not on tasks page
+  if(taskView==='kanban')renderKanban();else renderTaskTable();
+}
 
 function renderKanban(){
+const container=$('#taskViewContent');
+if(!container)return; // not on tasks page, skip render
 const tasks=getFilteredTasks();
 const cols=[{id:'todo',label:'To Do',color:'#8b949e'},{id:'inprogress',label:'In Progress',color:'#388bfd'},{id:'done',label:'Done',color:'#3fb950'},{id:'blocked',label:'Blocked',color:'#f85149'}];
-$('#taskViewContent').innerHTML=`<div class="kanban-board">
+container.innerHTML=`<div class="kanban-board">
 ${cols.map(col=>{
 const ct=tasks.filter(t=>t.status===col.id);
 return`<div class="kanban-col" ondragover="event.preventDefault()" ondrop="dropTask(event,'${col.id}')">
@@ -1872,6 +1877,8 @@ if(t){t.status=status;if(status==='done')t.progress=100;AppState.save();renderTa
 dragTaskId=null;}
 
 function renderTaskTable(){
+const __ttContainer=$('#taskViewContent');
+if(!__ttContainer)return; // not on tasks page
 const tasks=getFilteredTasks();
 $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><table>
 <thead><tr><th>WBS</th><th>Task</th><th>Project</th><th>Assignee</th><th>End</th><th>Progress</th><th>Status</th><th>Priority</th><th></th></tr></thead>
