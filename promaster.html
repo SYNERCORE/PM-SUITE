@@ -9942,11 +9942,28 @@ async function _spFetchAllSubLists(token) {
 
 // ── Push all sub-lists in parallel ──────────────────────────
 async function _spPushAllSubLists(token) {
-  const summary = { added: 0, updated: 0, deleted: 0 };
+  const summary = { added: 0, updated: 0, deleted: 0, dupesRemoved: 0 };
   const tasks = Object.entries(SHIC_LIST_CONFIG).map(async ([listName, cfg]) => {
     try {
       const records = AppState.data[cfg.dataKey] || [];
-      if (!_spListIdMaps[listName]) _spListIdMaps[listName] = {};
+      // ── CRITICAL: Always refresh idMap from SP before pushing ──
+      // Without this, the push doesn't see existing rows and creates duplicates.
+      // We also detect & remove any existing duplicates as a self-healing step.
+      if (!_spListIdMaps[listName] || Object.keys(_spListIdMaps[listName]).length === 0) {
+        try {
+          const { items } = await _spFetchListItems(token, listName);
+          const dupCleanup = await _spRebuildIdMapAndCleanDupes(token, listName, items, cfg.idField);
+          _spListIdMaps[listName] = dupCleanup.idMap;
+          summary.dupesRemoved += dupCleanup.removed;
+          // Refresh hash cache too
+          _spListRecordHashes[listName] = dupCleanup.hashes;
+          if (dupCleanup.removed > 0) {
+            console.log('[SP] ' + listName + ': cleaned ' + dupCleanup.removed + ' duplicate row(s)');
+          }
+        } catch(e) {
+          _spListIdMaps[listName] = {};
+        }
+      }
       const r = await _spPushListData(token, listName, records, _spListIdMaps[listName]);
       summary.added += r.added; summary.updated += r.updated; summary.deleted += r.deleted;
       if (r.added || r.updated || r.deleted) {
@@ -9958,6 +9975,45 @@ async function _spPushAllSubLists(token) {
   });
   await Promise.all(tasks);
   return summary;
+}
+
+// ── Rebuild idMap from SP items AND remove duplicate rows ──
+// Keeps the most recently updated row for each record ID, deletes the rest.
+async function _spRebuildIdMapAndCleanDupes(token, listName, items, idField) {
+  const idMap = {};
+  const hashes = {};
+  const listId = _spListIds[listName];
+  // Group items by record.id (from DataBlob)
+  const groupedById = {};
+  items.forEach(item => {
+    try {
+      const raw = item.fields?.DataBlob;
+      if (!raw) return;
+      const rec = JSON.parse(raw);
+      if (!rec || !rec.id) return;
+      if (!groupedById[rec.id]) groupedById[rec.id] = [];
+      groupedById[rec.id].push({ spId: item.id, raw, updatedAt: item.fields?.UpdatedAt || item.lastModifiedDateTime || '' });
+    } catch(e) {}
+  });
+  let removed = 0;
+  // For each id, keep newest (by UpdatedAt), delete rest
+  for (const [recId, list] of Object.entries(groupedById)) {
+    list.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+    const keep = list[0];
+    idMap[recId] = keep.spId;
+    hashes[recId] = _quickHash(keep.raw);
+    // Delete the duplicates (everything after the first)
+    for (let i = 1; i < list.length; i++) {
+      try {
+        await fetch(
+          `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/items/${list[i].spId}`,
+          { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } }
+        );
+        removed++;
+      } catch(e) { /* ignore */ }
+    }
+  }
+  return { idMap, hashes, removed };
 }
 
 async function spPushData(silent = false) {
