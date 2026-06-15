@@ -310,11 +310,11 @@ canvas{display:block}
         </div>
         <div style="margin-bottom:12px">
           <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Azure App Client ID *</label>
-          <input id="setupClientId" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:12px;font-family:monospace;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#0078d4'" onblur="this.style.borderColor='#30363d'" value="${localStorage.getItem('shic_sp_clientid')||''}">
+          <input id="setupClientId" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:12px;font-family:monospace;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#0078d4'" onblur="this.style.borderColor='#30363d'">
         </div>
         <div style="margin-bottom:14px">
           <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">SharePoint Site URL *</label>
-          <input id="setupSiteUrl" type="text" placeholder="https://company.sharepoint.com/sites/yoursite" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:12px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#0078d4'" onblur="this.style.borderColor='#30363d'" value="${localStorage.getItem('shic_sp_siteurl')||''}">
+          <input id="setupSiteUrl" type="text" placeholder="https://company.sharepoint.com/sites/yoursite" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:12px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#0078d4'" onblur="this.style.borderColor='#30363d'">
         </div>
         <button onclick="setupAndLogin()" style="width:100%;padding:10px;background:#0078d4;border:none;border-radius:7px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:10px">
           <i class="fab fa-microsoft" style="margin-right:7px"></i>Save & Sign in with Microsoft
@@ -572,9 +572,10 @@ const SHIC_USERS_LIST = 'SHIC_Users'; // SharePoint list for user profiles
 // Maps data array keys to dedicated SharePoint lists.
 // Keeps SHIC_AppData small + scalable for high-volume data.
 const SHIC_LIST_CONFIG = {
-  'SHIC_Tasks':     { dataKey: 'tasks',             idField: 'TaskId', name: 'Tasks' },
-  'SHIC_UsageLogs': { dataKey: 'resourceUsageLogs', idField: 'LogId',  name: 'Usage Logs' },
-  'SHIC_DailyLogs': { dataKey: 'dailyMeetingLogs',  idField: 'LogId',  name: 'Daily Logs' },
+  'SHIC_Projects':  { dataKey: 'projects',          idField: 'ProjectId', name: 'Projects' },
+  'SHIC_Tasks':     { dataKey: 'tasks',             idField: 'TaskId',    name: 'Tasks' },
+  'SHIC_UsageLogs': { dataKey: 'resourceUsageLogs', idField: 'LogId',     name: 'Usage Logs' },
+  'SHIC_DailyLogs': { dataKey: 'dailyMeetingLogs',  idField: 'LogId',     name: 'Daily Logs' },
 };
 const SHIC_OFFLOADED_KEYS = Object.values(SHIC_LIST_CONFIG).map(c => c.dataKey);
 // Cache for list IDs to avoid re-resolving
@@ -9822,14 +9823,22 @@ async function _spPushListData(token, listName, records, prevIdMap) {
 
     const body = {
       fields: {
-        Title: String(record.id || '').slice(0, 250),
+        Title: String(record.name || record.id || '').slice(0, 250),
         [idField]: String(record.id || '').slice(0, 250),
-        ProjectId: String(record.projectId || '').slice(0, 250),
         DataBlob: recordJson,
         UpdatedBy: username,
         UpdatedAt: new Date().toISOString(),
       }
     };
+    // For sub-lists that reference a project (Tasks/Usage/Daily), populate ProjectId
+    if (listName !== 'SHIC_Projects') {
+      body.fields.ProjectId = String(record.projectId || '').slice(0, 250);
+    }
+    // Projects list: add Name + Status columns for SP filtering/views
+    if (listName === 'SHIC_Projects') {
+      body.fields.Name = String(record.name || '').slice(0, 250);
+      body.fields.Status = String(record.status || '').slice(0, 100);
+    }
     // LogDate column for daily logs
     if (listName === 'SHIC_DailyLogs' && record.date) {
       body.fields.LogDate = record.date;
@@ -11104,6 +11113,13 @@ function showAuthForm(form){
       const hasSetup=!!((_spClientId||localStorage.getItem('shic_sp_clientid'))&&(_spSiteUrl||localStorage.getItem('shic_sp_siteurl')));
       setupPrompt.style.display=hasSetup?'none':'block';
     }
+  }
+  // Pre-fill saved Client ID / Site URL into the setup form
+  if(form==='setup'){
+    const c=document.getElementById('setupClientId');
+    const s=document.getElementById('setupSiteUrl');
+    if(c)c.value=localStorage.getItem('shic_sp_clientid')||_spClientId||'';
+    if(s)s.value=localStorage.getItem('shic_sp_siteurl')||_spSiteUrl||'';
   }
 }
 
