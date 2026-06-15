@@ -14783,12 +14783,16 @@ function executeLogImport(){
   if(!AppState.data.resourceUsageLogs)AppState.data.resourceUsageLogs=[];
   const list=AppState.data.resourceUsageLogs;
   let added=0,skipped=0;
-  rows.forEach(row=>{
+  const skipReasons=[];
+  rows.forEach((row,rowIdx)=>{
     const txType=String(row.TransactionType||row.transactionType||'').trim();
     const qty=parseFloat(row.Quantity||row.quantity||0)||0;
     const allocId=String(row.AllocationID||row.allocationId||'').trim();
     const rName=String(row.ResourceName||row.resourceName||'').trim();
-    if(!txType||!['Issue','Return'].includes(txType)||qty<=0||!rName){skipped++;return;}
+    if(!rName){ skipReasons.push(`Row ${rowIdx+2}: missing ResourceName`); skipped++; return; }
+    if(!txType){ skipReasons.push(`Row ${rowIdx+2} (${rName}): missing TransactionType (Issue or Return)`); skipped++; return; }
+    if(!['Issue','Return'].includes(txType)){ skipReasons.push(`Row ${rowIdx+2} (${rName}): TransactionType "${txType}" invalid — use Issue or Return`); skipped++; return; }
+    if(qty<=0){ skipReasons.push(`Row ${rowIdx+2} (${rName}): Quantity must be > 0`); skipped++; return; }
     // Find allocation for auto-fill
     const alloc=(AppState.data.resourceAllocations||[]).find(a=>a.id===allocId&&a.projectId===pid);
     const logId=String(row.LogID||row.logId||'').trim();
@@ -14809,7 +14813,7 @@ function executeLogImport(){
       notes:String(row.Notes||row.notes||'').trim(),
     };
     // Skip exact duplicate log IDs
-    if(logId&&list.find(l=>l.id===logId)){skipped++;return;}
+    if(logId&&list.find(l=>l.id===logId)){ skipReasons.push(`Row ${rowIdx+2} (${rName}): LogID "${logId}" already exists`); skipped++; return; }
     list.push(rec);added++;
   });
   AppState.save();
@@ -16125,13 +16129,60 @@ function showImportPreview(rows,typeKey,fromExcel=false){
   const importBtn=$('#importBtn');
   if(!rows||!rows.length){preview.innerHTML=`<div style="color:var(--accent-red);padding:10px">No data rows found in file.</div>`;return;}
   window._importRows=rows;window._importTypeKey=typeKey;
-  if(importBtn)importBtn.removeAttribute('disabled');
+
+  // ── Validate against expected columns ──────────────────────
+  const expectedCols={
+    personnel:['ID','Name','Role'],
+    equipment:['ID','Name','Category'],
+    tools:['ID','Name','Category'],
+    vehicles:['ID','Name','Category'],
+    consumables:['ID','Name','Unit'],
+    materials:['ID','Name','Qty'],
+    thirdparty:['ID','Name','Category']
+  }[typeKey]||['ID','Name'];
+
   const headers=Object.keys(rows[0]);
+  const _norm=s=>(s||'').replace(/\s+/g,'').toLowerCase();
+  const headerNorms=headers.map(_norm);
+  const missing=[];
+  const found={};
+  expectedCols.forEach(c=>{
+    const ix=headerNorms.indexOf(_norm(c));
+    if(ix===-1) missing.push(c);
+    else found[c]=headers[ix];
+  });
+
+  // Check how many rows have a Name (required field)
+  const nameKey=found['Name']||headers.find(h=>_norm(h)==='name');
+  const idKey=found['ID']||headers.find(h=>_norm(h)==='id');
+  let rowsWithName=0, rowsWithId=0, rowsEmpty=0;
+  rows.forEach(r=>{
+    const hasName=nameKey && String(r[nameKey]||'').trim();
+    const hasId=idKey && String(r[idKey]||'').trim();
+    if(hasName) rowsWithName++;
+    if(hasId) rowsWithId++;
+    if(!hasName && !hasId) rowsEmpty++;
+  });
+
+  // Warning banner if there are issues
+  let warningHTML='';
+  if(missing.length>0||rowsWithName<rows.length||rowsWithId===0){
+    warningHTML=`<div style="margin-bottom:8px;padding:10px 12px;background:rgba(240,164,80,.1);border:1px solid rgba(240,164,80,.3);border-radius:7px;font-size:11px">
+      <div style="font-weight:700;color:var(--accent-amber);margin-bottom:4px"><i class="fas fa-exclamation-triangle" style="margin-right:5px"></i>Heads up — possible issues</div>
+      ${missing.length>0?`<div style="color:var(--text-secondary)">• Missing column(s): <strong>${missing.join(', ')}</strong></div>`:''}
+      ${rowsWithName<rows.length?`<div style="color:var(--text-secondary)">• <strong>${rows.length-rowsWithName}</strong> row(s) have empty Name — these will be skipped</div>`:''}
+      ${rowsWithId===0?`<div style="color:var(--text-secondary)">• All ID cells appear empty — IDs will be auto-generated (e.g., TOL-0001, TOL-0002, ...)</div>`:rowsWithId<rows.length?`<div style="color:var(--text-secondary)">• <strong>${rows.length-rowsWithId}</strong> row(s) have empty ID — IDs will be auto-generated for them</div>`:''}
+      <div style="margin-top:6px;color:var(--text-muted);font-size:10px">Headers found: ${headers.map(h=>'<code>'+h+'</code>').join(', ')}</div>
+    </div>`;
+  }
+
+  if(importBtn) importBtn.removeAttribute('disabled');
   const showRows=rows.slice(0,5);
   preview.innerHTML=`
+  ${warningHTML}
   <div style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
     <span style="font-size:12px;font-weight:600"><i class="fas fa-table" style="color:var(--accent-green);margin-right:6px"></i>Preview — ${rows.length} rows ready to import</span>
-    <span class="badge badge-green">${rows.length} records</span>
+    <span class="badge badge-green">${rowsWithName} valid · ${rows.length-rowsWithName} skipped</span>
   </div>
   <div style="overflow-x:auto;max-height:200px;border:1px solid var(--border);border-radius:6px">
     <table style="width:100%;font-size:10px;border-collapse:collapse">
@@ -16149,6 +16200,7 @@ function executeImport(){
   const typeKey=window._importTypeKey;
   if(!rows||!rows.length){showToast('No data to import','error');return;}
   let added=0,updated=0,skipped=0;
+  const skipReasons=[];
   const fieldMap={
     personnel:{id:'ID',name:'Name',role:'Role',dept:'Department',hourlyRate:'HourlyRate',utilization:'Utilization',availability:'Availability',skills:'Skills',certifications:'Certifications',notes:'Notes'},
     equipment:{id:'ID',name:'Name',category:'Category',make:'Make',model:'Model',serialNo:'SerialNo',status:'Status',projectId:'ProjectID',location:'Location',lastMaint:'LastMaint',nextMaint:'NextMaint',maintInterval:'MainInterval',lastCal:'LastCal',nextCal:'NextCal',calBody:'CalBody',cert:'Certification',certBody:'CertBody',certExpiry:'CertExpiry',dailyRate:'DailyRate',notes:'Notes'},
@@ -16181,7 +16233,17 @@ function executeImport(){
       if(jsKey==='skills'||jsKey==='certifications')val=val?String(val).split(',').map(s=>s.trim()).filter(Boolean):[];
       rec[jsKey]=val;
     });
-    if(!rec.id||!rec.name){skipped++;return;}
+    // Skip only if no name (which is the essential field)
+    if(!rec.name){ skipReasons.push(`Row ${skipped+added+updated+1}: missing Name`); skipped++; return; }
+    // Auto-generate ID if missing — keeps the row instead of skipping
+    if(!rec.id){
+      const prefix={personnel:'RES',equipment:'EQP',tools:'TOL',vehicles:'VEH',consumables:'CON',materials:'MAT',thirdparty:'TP'}[typeKey]||'ITM';
+      const existing=list.length;
+      let n=existing+1;
+      let newId=prefix+'-'+String(n).padStart(4,'0');
+      while(list.some(x=>x.id===newId)){n++;newId=prefix+'-'+String(n).padStart(4,'0');}
+      rec.id=newId;
+    }
     // Defaults
     if(typeKey==='equipment'||typeKey==='tools'||typeKey==='vehicles'){
       if(!rec.status)rec.status='available';
@@ -16202,7 +16264,34 @@ function executeImport(){
   window._importRows=null;
   // Refresh current tab
   renderMlTab();
-  showToast(`Import complete: ${added} added, ${updated} updated, ${skipped} skipped`,'success',5000);
+  if(skipped>0&&skipReasons.length){
+    // Show a detailed modal so the user can see what was skipped
+    $('#genericModalTitle').textContent='Import Complete';
+    $('#genericModalBody').innerHTML=`
+      <div style="display:flex;gap:14px;margin-bottom:14px;text-align:center">
+        <div style="flex:1;padding:10px;background:rgba(63,185,80,.1);border-radius:8px">
+          <div style="font-size:22px;font-weight:800;color:var(--accent-green)">${added}</div>
+          <div style="font-size:10px;color:var(--text-muted)">ADDED</div>
+        </div>
+        <div style="flex:1;padding:10px;background:rgba(56,139,253,.1);border-radius:8px">
+          <div style="font-size:22px;font-weight:800;color:var(--accent-blue)">${updated}</div>
+          <div style="font-size:10px;color:var(--text-muted)">UPDATED</div>
+        </div>
+        <div style="flex:1;padding:10px;background:rgba(240,164,80,.1);border-radius:8px">
+          <div style="font-size:22px;font-weight:800;color:var(--accent-amber)">${skipped}</div>
+          <div style="font-size:10px;color:var(--text-muted)">SKIPPED</div>
+        </div>
+      </div>
+      <div style="font-size:12px;font-weight:600;color:var(--accent-amber);margin-bottom:6px"><i class="fas fa-exclamation-triangle" style="margin-right:5px"></i>Skipped row reasons:</div>
+      <div style="max-height:280px;overflow-y:auto;padding:8px 12px;background:var(--bg-hover);border-radius:7px;font-size:11px;color:var(--text-secondary);line-height:1.7">
+        ${skipReasons.slice(0,50).map(r=>'• '+r).join('<br>')}
+        ${skipReasons.length>50?'<br>... and '+(skipReasons.length-50)+' more':''}
+      </div>`;
+    $('#genericModalFooter').innerHTML='<button class="btn btn-primary" onclick="closeModal(\'genericModal\')">OK</button>';
+    openModal('genericModal');
+  } else {
+    showToast(`Import complete: ${added} added, ${updated} updated${skipped?', '+skipped+' skipped':''}`,'success',5000);
+  }
 }
 
 
