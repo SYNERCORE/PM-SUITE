@@ -572,10 +572,37 @@ const SHIC_USERS_LIST = 'SHIC_Users'; // SharePoint list for user profiles
 // Maps data array keys to dedicated SharePoint lists.
 // Keeps SHIC_AppData small + scalable for high-volume data.
 const SHIC_LIST_CONFIG = {
-  'SHIC_Projects':  { dataKey: 'projects',          idField: 'ProjectId', name: 'Projects' },
-  'SHIC_Tasks':     { dataKey: 'tasks',             idField: 'TaskId',    name: 'Tasks' },
-  'SHIC_UsageLogs': { dataKey: 'resourceUsageLogs', idField: 'LogId',     name: 'Usage Logs' },
-  'SHIC_DailyLogs': { dataKey: 'dailyMeetingLogs',  idField: 'LogId',     name: 'Daily Logs' },
+  // Core project data
+  'SHIC_Projects':         { dataKey: 'projects',            idField: 'ProjectId', name: 'Projects',          hasProject: false },
+  'SHIC_Tasks':            { dataKey: 'tasks',               idField: 'TaskId',    name: 'Tasks',             hasProject: true  },
+  'SHIC_Costs':            { dataKey: 'costs',               idField: 'CostId',    name: 'Costs',             hasProject: true  },
+  'SHIC_QAQC':             { dataKey: 'qaqc',                idField: 'QAQCId',    name: 'QA/QC',             hasProject: true  },
+  'SHIC_Risks':            { dataKey: 'risks',               idField: 'RiskId',    name: 'Risks',             hasProject: true  },
+  'SHIC_Actions':          { dataKey: 'actions',             idField: 'ActionId',  name: 'Actions',           hasProject: true  },
+  'SHIC_DocsMeta':         { dataKey: 'documents',           idField: 'DocId',     name: 'Documents Metadata',hasProject: true  },
+  'SHIC_LibraryDocs':      { dataKey: 'libraryDocs',         idField: 'LibId',     name: 'Library Docs',      hasProject: false },
+  'SHIC_Allocations':      { dataKey: 'resourceAllocations', idField: 'AllocId',   name: 'Allocations',       hasProject: true  },
+  // Procurement & supply
+  'SHIC_Procurement':      { dataKey: 'procurement',         idField: 'ProcId',    name: 'Procurement',       hasProject: true  },
+  'SHIC_ProcurementLogs':  { dataKey: 'procurementLogs',     idField: 'LogId',     name: 'Procurement Logs',  hasProject: true  },
+  'SHIC_Materials':        { dataKey: 'materials',           idField: 'MatId',     name: 'Materials',         hasProject: true  },
+  'SHIC_Manpower':         { dataKey: 'manpower',            idField: 'MpId',      name: 'Manpower',          hasProject: true  },
+  // Assets
+  'SHIC_Equipment':        { dataKey: 'equipment',           idField: 'EqpId',     name: 'Equipment',         hasProject: false },
+  'SHIC_Tools':            { dataKey: 'tools',               idField: 'ToolId',    name: 'Tools',             hasProject: false },
+  'SHIC_Vehicles':         { dataKey: 'vehicles',            idField: 'VehId',     name: 'Vehicles',          hasProject: false },
+  'SHIC_Consumables':      { dataKey: 'consumables',         idField: 'ConId',     name: 'Consumables',       hasProject: false },
+  'SHIC_ThirdParty':       { dataKey: 'thirdParty',          idField: 'TpId',      name: 'Third Party',       hasProject: false },
+  'SHIC_AssetHistory':     { dataKey: 'assetHistory',        idField: 'EventId',   name: 'Asset History',     hasProject: false },
+  'SHIC_AssetUtilization': { dataKey: 'assetUtilization',    idField: 'UtilId',    name: 'Asset Utilization', hasProject: false },
+  // High-volume logs
+  'SHIC_UsageLogs':        { dataKey: 'resourceUsageLogs',   idField: 'LogId',     name: 'Usage Logs',        hasProject: true  },
+  'SHIC_DailyLogs':        { dataKey: 'dailyMeetingLogs',    idField: 'LogId',     name: 'Daily Logs',        hasProject: true  },
+  // Workflows & system
+  'SHIC_IdChangeRequests': { dataKey: 'idChangeRequests',    idField: 'ReqId',     name: 'ID Change Requests',hasProject: false },
+  'SHIC_Notifications':    { dataKey: 'notifications',       idField: 'NotifId',   name: 'Notifications',     hasProject: false },
+  'SHIC_Activities':       { dataKey: 'activities',          idField: 'ActId',     name: 'Activities',        hasProject: false },
+  'SHIC_ProjectIdHistory': { dataKey: 'projectIdHistory',    idField: 'HistId',    name: 'Project ID History',hasProject: false },
 };
 const SHIC_OFFLOADED_KEYS = Object.values(SHIC_LIST_CONFIG).map(c => c.dataKey);
 // Cache for list IDs to avoid re-resolving
@@ -9830,8 +9857,9 @@ async function _spPushListData(token, listName, records, prevIdMap) {
         UpdatedAt: new Date().toISOString(),
       }
     };
-    // For sub-lists that reference a project (Tasks/Usage/Daily), populate ProjectId
-    if (listName !== 'SHIC_Projects') {
+    // For sub-lists that reference a project, populate ProjectId (only if list has that column)
+    const cfgEntry = SHIC_LIST_CONFIG[listName];
+    if (cfgEntry && cfgEntry.hasProject) {
       body.fields.ProjectId = String(record.projectId || '').slice(0, 250);
     }
     // Projects list: add Name + Status columns for SP filtering/views
@@ -10014,6 +10042,241 @@ async function _spRebuildIdMapAndCleanDupes(token, listName, items, idField) {
     }
   }
   return { idMap, hashes, removed };
+}
+
+
+
+// ═══════════════════════════════════════════════════════════
+// ── SHAREPOINT LIST SETUP WIZARD ──────────────────────────
+// Auto-creates all required SP lists with proper columns
+// ═══════════════════════════════════════════════════════════
+
+async function showSpListWizard() {
+  if (!_spConnected) { showToast('Connect to SharePoint first', 'error'); return; }
+
+  $('#genericModalTitle').textContent = 'SharePoint List Setup Wizard';
+  $('#genericModalBody').innerHTML = `
+    <div style="padding:12px;background:rgba(188,140,255,.08);border:1px solid rgba(188,140,255,.2);border-radius:8px;margin-bottom:14px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px;color:#bc8cff"><i class="fas fa-magic" style="margin-right:6px"></i>Auto-Setup All Required SharePoint Lists</div>
+      <div style="font-size:11px;color:var(--text-secondary);line-height:1.6">
+        This wizard checks for required SharePoint lists and creates any that are missing — automatically and with the right columns.<br>
+        Safe to run multiple times. Existing lists are never modified.<br><br>
+        <strong>Required lists:</strong> ${Object.keys(SHIC_LIST_CONFIG).length} module lists + SHIC_AppData + SHIC_Users + SHIC_Documents library
+      </div>
+    </div>
+    <div id="wizardStatus" style="display:none;padding:10px;background:var(--bg-hover);border-radius:7px;margin-bottom:10px;font-size:11px"></div>
+    <div id="wizardList" style="max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:7px"><div style="padding:20px;text-align:center;color:var(--text-muted)"><i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Scanning SharePoint...</div></div>
+  `;
+  $('#genericModalFooter').innerHTML = `
+    <button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>
+    <button class="btn btn-secondary" onclick="_scanSpLists()"><i class="fas fa-redo"></i> Re-Scan</button>
+    <button class="btn btn-primary" id="wizardCreateBtn" onclick="_createMissingLists()" style="display:none"><i class="fas fa-bolt"></i> Auto-Create Missing Lists</button>
+    <button class="btn btn-success" id="wizardMigrateBtn" onclick="_migrateToNewLists()" style="display:none"><i class="fas fa-cloud-upload-alt"></i> Migrate Data Now</button>
+  `;
+  openModal('genericModal');
+  await _scanSpLists();
+}
+
+// ── Build the master list of all required lists ───────────
+function _getAllRequiredLists() {
+  const lists = Object.entries(SHIC_LIST_CONFIG).map(([name, cfg]) => ({
+    name,
+    role: 'data',
+    cfg,
+    columns: ['ProjectId', 'DataBlob', 'UpdatedBy', 'UpdatedAt'],
+    addColumns: cfg.hasProject
+      ? [cfg.idField, 'ProjectId', 'DataBlob', 'UpdatedBy', 'UpdatedAt']
+      : [cfg.idField, 'DataBlob', 'UpdatedBy', 'UpdatedAt'],
+  }));
+  // Projects also gets Name + Status columns for SP-side filtering
+  const projItem = lists.find(l => l.name === 'SHIC_Projects');
+  if (projItem) projItem.addColumns = ['ProjectId', 'Name', 'Status', 'DataBlob', 'UpdatedBy', 'UpdatedAt'];
+  // DailyLogs gets LogDate
+  const dlItem = lists.find(l => l.name === 'SHIC_DailyLogs');
+  if (dlItem) dlItem.addColumns = ['LogId', 'ProjectId', 'LogDate', 'DataBlob', 'UpdatedBy', 'UpdatedAt'];
+  // AssetHistory/AssetUtilization get AssetId
+  const ahItem = lists.find(l => l.name === 'SHIC_AssetHistory');
+  if (ahItem) ahItem.addColumns = ['EventId', 'AssetId', 'DataBlob', 'UpdatedBy', 'UpdatedAt'];
+  const auItem = lists.find(l => l.name === 'SHIC_AssetUtilization');
+  if (auItem) auItem.addColumns = ['UtilId', 'AssetId', 'DataBlob', 'UpdatedBy', 'UpdatedAt'];
+  return lists;
+}
+
+// ── Scan SP to see which lists exist ───────────────────────
+async function _scanSpLists() {
+  const wizListEl = document.getElementById('wizardList');
+  const wizStatusEl = document.getElementById('wizardStatus');
+  if (!wizListEl) return;
+  wizListEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)"><i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Scanning SharePoint...</div>';
+  try {
+    const token = await getSpToken();
+    if (!token) throw new Error('Could not get SP token');
+    if (!_spSiteId) await spResolveSiteAndList(token);
+    // Fetch all lists from SP
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists?$top=200&$select=id,displayName,name`,
+      { headers: { Authorization: 'Bearer ' + token } }
+    );
+    if (!res.ok) throw new Error('Could not list SharePoint lists: ' + res.status);
+    const data = await res.json();
+    const existingNames = new Set((data.value || []).map(l => l.displayName));
+    // Also remember IDs for known lists
+    (data.value || []).forEach(l => {
+      if (SHIC_LIST_CONFIG[l.displayName]) _spListIds[l.displayName] = l.id;
+    });
+
+    const required = _getAllRequiredLists();
+    const missing = required.filter(l => !existingNames.has(l.name));
+    const existing = required.filter(l => existingNames.has(l.name));
+
+    let html = '';
+    if (existing.length) {
+      html += '<div style="padding:8px 12px;background:rgba(63,185,80,.06);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--accent-green)">✅ EXISTING (' + existing.length + ')</div>';
+      existing.forEach(l => {
+        html += `<div style="padding:8px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);font-size:11px">
+          <i class="fas fa-check-circle" style="color:var(--accent-green)"></i>
+          <span style="flex:1;font-family:var(--font-mono)">${l.name}</span>
+          <span style="color:var(--text-muted);font-size:10px">${l.cfg.name}</span>
+        </div>`;
+      });
+    }
+    if (missing.length) {
+      html += '<div style="padding:8px 12px;background:rgba(240,164,80,.06);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--accent-amber)">⚠ MISSING (' + missing.length + ')</div>';
+      missing.forEach(l => {
+        html += `<div style="padding:8px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);font-size:11px">
+          <i class="fas fa-circle-xmark" style="color:var(--accent-amber)"></i>
+          <span style="flex:1;font-family:var(--font-mono)">${l.name}</span>
+          <span style="color:var(--text-muted);font-size:10px">${l.cfg.name}</span>
+          <span id="wzStatus_${l.name}" style="font-size:10px;color:var(--text-muted)">pending</span>
+        </div>`;
+      });
+    }
+    wizListEl.innerHTML = html;
+
+    wizStatusEl.style.display = 'block';
+    wizStatusEl.innerHTML = `<strong>Status:</strong> ${existing.length} existing, ${missing.length} missing.`;
+
+    const createBtn = document.getElementById('wizardCreateBtn');
+    const migrateBtn = document.getElementById('wizardMigrateBtn');
+    if (createBtn) createBtn.style.display = missing.length > 0 ? '' : 'none';
+    if (migrateBtn) migrateBtn.style.display = missing.length === 0 ? '' : 'none';
+
+    // Store for later
+    window._wizardMissing = missing;
+    window._wizardExisting = existing;
+  } catch (e) {
+    wizListEl.innerHTML = `<div style="padding:14px;color:var(--accent-red);font-size:12px"><i class="fas fa-exclamation-triangle" style="margin-right:5px"></i>Scan failed: ${e.message}</div>`;
+  }
+}
+
+// ── Auto-create all missing lists ─────────────────────────
+async function _createMissingLists() {
+  const missing = window._wizardMissing || [];
+  if (!missing.length) { showToast('No missing lists', 'info'); return; }
+
+  const wizStatusEl = document.getElementById('wizardStatus');
+  const createBtn = document.getElementById('wizardCreateBtn');
+  if (createBtn) createBtn.disabled = true;
+
+  try {
+    const token = await getSpToken();
+    if (!token) throw new Error('Could not get SP token');
+    if (!_spSiteId) await spResolveSiteAndList(token);
+
+    let createdCount = 0;
+    let failedCount = 0;
+    const errors = [];
+
+    for (const l of missing) {
+      const statusEl = document.getElementById('wzStatus_' + l.name);
+      if (statusEl) { statusEl.textContent = 'creating...'; statusEl.style.color = 'var(--accent-blue)'; }
+      try {
+        const cols = l.addColumns.filter(c => c !== 'Title' && c !== 'DataBlob' && c !== 'UpdatedAt')
+          .map(c => ({ name: c, text: { allowMultipleLines: false } }));
+        // DataBlob is multi-line text
+        cols.push({ name: 'DataBlob', text: { allowMultipleLines: true } });
+        // UpdatedAt is datetime
+        cols.push({ name: 'UpdatedAt', dateTime: {} });
+
+        const createRes = await fetch(
+          `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists`,
+          {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              displayName: l.name,
+              list: { template: 'genericList' },
+              columns: cols,
+            })
+          }
+        );
+        if (createRes.ok) {
+          const created = await createRes.json();
+          _spListIds[l.name] = created.id;
+          if (statusEl) { statusEl.innerHTML = '<i class="fas fa-check" style="margin-right:3px"></i>created'; statusEl.style.color = 'var(--accent-green)'; }
+          createdCount++;
+        } else if (createRes.status === 409) {
+          if (statusEl) { statusEl.textContent = 'already exists'; statusEl.style.color = 'var(--text-muted)'; }
+          createdCount++;
+        } else {
+          const errData = await createRes.json().catch(() => ({}));
+          const errMsg = errData.error?.message || 'HTTP ' + createRes.status;
+          if (statusEl) { statusEl.innerHTML = '<i class="fas fa-times" style="margin-right:3px"></i>failed'; statusEl.style.color = 'var(--accent-red)'; statusEl.title = errMsg; }
+          errors.push(l.name + ': ' + errMsg);
+          failedCount++;
+        }
+      } catch (e) {
+        if (statusEl) { statusEl.textContent = 'error: ' + e.message.slice(0,40); statusEl.style.color = 'var(--accent-red)'; }
+        errors.push(l.name + ': ' + e.message);
+        failedCount++;
+      }
+      await new Promise(r => setTimeout(r, 250)); // throttle to avoid 429
+    }
+
+    if (wizStatusEl) {
+      wizStatusEl.innerHTML = `<strong>Setup complete:</strong> ${createdCount} created, ${failedCount} failed.` +
+        (errors.length ? `<br><span style="font-size:10px;color:var(--accent-red)">${errors.slice(0,3).join(' · ')}</span>` : '');
+    }
+    if (createBtn) createBtn.disabled = false;
+    showToast(createdCount + ' list(s) created' + (failedCount ? ', ' + failedCount + ' failed' : ''), failedCount ? 'warning' : 'success', 5000);
+
+    // Auto re-scan to refresh state
+    setTimeout(() => _scanSpLists(), 1500);
+  } catch (e) {
+    if (wizStatusEl) wizStatusEl.innerHTML = `<span style="color:var(--accent-red)">Setup failed: ${e.message}</span>`;
+    if (createBtn) createBtn.disabled = false;
+    showToast('Setup failed: ' + e.message, 'error', 6000);
+  }
+}
+
+// ── Migrate existing data from main blob to sub-lists ─────
+async function _migrateToNewLists() {
+  if (!confirm('Migrate all data from SHIC_AppData blob to dedicated sub-lists?\n\nThis pushes your current data into the new lists. Safe to repeat.')) return;
+  const migrateBtn = document.getElementById('wizardMigrateBtn');
+  if (migrateBtn) migrateBtn.disabled = true;
+  const wizStatusEl = document.getElementById('wizardStatus');
+  if (wizStatusEl) wizStatusEl.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:5px"></i>Migrating data — this may take a minute...';
+
+  try {
+    // Force a full push — this strips offloaded keys from main blob and pushes them to sub-lists
+    SHIC_OFFLOADED_KEYS_REFRESH(); // re-read from config since we just expanded it
+    await spPushData(true);
+    if (wizStatusEl) wizStatusEl.innerHTML = '<span style="color:var(--accent-green)"><i class="fas fa-check-circle" style="margin-right:5px"></i>Migration complete. Main blob is now lean and all data lives in dedicated lists.</span>';
+    showToast('Data migrated to dedicated lists successfully', 'success', 5000);
+  } catch (e) {
+    if (wizStatusEl) wizStatusEl.innerHTML = `<span style="color:var(--accent-red)">Migration failed: ${e.message}</span>`;
+    showToast('Migration failed: ' + e.message, 'error', 6000);
+  } finally {
+    if (migrateBtn) migrateBtn.disabled = false;
+  }
+}
+
+// Helper to refresh offloaded keys after config change
+function SHIC_OFFLOADED_KEYS_REFRESH() {
+  // SHIC_OFFLOADED_KEYS is a const declared at top-level so we can't reassign;
+  // but we can rebuild via a function call site. Since our config is fixed
+  // at script load, this is just a guard for clarity.
+  return Object.values(SHIC_LIST_CONFIG).map(c => c.dataKey);
 }
 
 async function spPushData(silent = false) {
@@ -10430,6 +10693,7 @@ function renderSpPanel() {
       <button class="btn btn-primary" onclick="spPushData()"><i class="fas fa-cloud-upload-alt"></i> Push My Changes</button>
       <button class="btn btn-secondary" onclick="spPullData()"><i class="fas fa-cloud-download-alt"></i> Pull Latest</button>
       <button class="btn btn-secondary" onclick="_spPollRemote().then(()=>showToast('Checked for updates','info',2000))"><i class="fas fa-sync"></i> Check Now</button>
+      <button class="btn btn-secondary" onclick="showSpListWizard()" style="background:rgba(188,140,255,.12);border-color:rgba(188,140,255,.4);color:#bc8cff"><i class="fas fa-magic"></i> List Setup Wizard</button>
       <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
         <span style="font-size:11px;color:var(--text-secondary)">Auto-sync:</span>
         <label class="toggle"><input type="checkbox" ${_spAutoSync ? 'checked' : ''} onchange="spAutoSyncToggle(this.checked)"><span class="toggle-slider"></span></label>
