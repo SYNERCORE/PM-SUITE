@@ -5829,6 +5829,34 @@ let calDate=new Date();
 let _dmViewDate = new Date().toISOString().split('T')[0]; // current viewing date
 let _dmStatusFilter = 'all';
 let _dmUnsaved = {}; // { projectId: { status, remarks, targetActivity, update, flagged } }
+let _dmShowCompleted = false; // toggle to show completed/cancelled actions
+let _dmExpanded = {}; // { projectId: true } — manual expand overrides
+let _dmActionUpdates = {}; // { actionId: { text, newStatus } } — pending action updates
+
+// ── Helpers for action-item Daily Meeting integration ─────
+function _dmActionStatusColor(s) {
+  return { 'open':'#8b949e','in-progress':'#388bfd','on-hold':'#f0a450','completed':'#3fb950','cancelled':'#f85149' }[s||'open'] || '#8b949e';
+}
+function _dmActionPriorityIcon(action) {
+  const today = new Date().toISOString().split('T')[0];
+  if (action.status === 'completed') return { icon:'fa-check-circle', color:'#3fb950', label:'Completed' };
+  if (action.status === 'cancelled') return { icon:'fa-ban', color:'#8b949e', label:'Cancelled' };
+  if (action.dueDate && action.dueDate < today) return { icon:'fa-exclamation-circle', color:'#f85149', label:'Overdue' };
+  if (action.dueDate === today) return { icon:'fa-clock', color:'#f0a450', label:'Due today' };
+  return { icon:'fa-circle', color:'#3fb950', label:'On track' };
+}
+function _dmGetProjectActions(projectId) {
+  return (AppState.data.actions||[]).filter(a => a.projectId === projectId);
+}
+function _dmActionCounts(projectId) {
+  const today = new Date().toISOString().split('T')[0];
+  const acts = _dmGetProjectActions(projectId);
+  return {
+    total: acts.filter(a => a.status !== 'completed' && a.status !== 'cancelled').length,
+    overdue: acts.filter(a => a.status !== 'completed' && a.status !== 'cancelled' && a.dueDate && a.dueDate < today).length,
+    dueToday: acts.filter(a => a.status !== 'completed' && a.status !== 'cancelled' && a.dueDate === today).length,
+  };
+}
 
 function renderDailyMeeting() {
   AppState.ensureData();
@@ -5908,15 +5936,30 @@ function renderDailyMeeting() {
       const statusColor = statusColors[status] || '#8b949e';
       const readonly = !isToday;
 
+      // Action item counts
+      const actCounts = _dmActionCounts(p.id);
+      const hasUrgentActions = actCounts.overdue > 0 || actCounts.dueToday > 0;
+      const isExpanded = _dmExpanded[p.id] !== undefined ? _dmExpanded[p.id] : hasUrgentActions;
+      _dmExpanded[p.id] = isExpanded;
+
       return `<tr style="border-top:1px solid var(--border);${flagged ? 'background:rgba(248,81,73,.06)' : ''};${notUpdatedToday ? 'background:rgba(240,164,80,.04)' : ''}">
-        <td style="padding:6px 8px;min-width:160px;max-width:200px">
+        <td style="padding:6px 8px;min-width:160px;max-width:220px">
           <div style="display:flex;align-items:flex-start;gap:6px">
-            ${flagged ? '<i class="fas fa-flag" style="color:var(--accent-red);font-size:11px;margin-top:2px;flex-shrink:0"></i>' : '<div style="width:11px;flex-shrink:0"></div>'}
-            <div>
+            <button onclick="dmToggleExpand('${p.id}')" title="${isExpanded?'Collapse':'Expand'} action items"
+              style="background:none;border:none;color:var(--text-muted);cursor:pointer;padding:0;margin-top:2px;flex-shrink:0;transition:transform .15s;${isExpanded?'transform:rotate(90deg)':''}">
+              <i class="fas fa-chevron-right" style="font-size:9px"></i>
+            </button>
+            ${flagged ? '<i class="fas fa-flag" style="color:var(--accent-red);font-size:11px;margin-top:2px;flex-shrink:0"></i>' : ''}
+            <div style="flex:1;min-width:0">
               <div style="font-size:10px;font-family:var(--font-mono);font-weight:700;color:var(--accent-blue)">${p.id}</div>
               <div style="font-size:11px;font-weight:600;line-height:1.3">${p.name}</div>
               ${p.client ? `<div style="font-size:9px;color:var(--text-muted)">${p.client}</div>` : ''}
               ${notUpdatedToday ? '<div style="font-size:9px;color:var(--accent-amber);margin-top:2px"><i class="fas fa-exclamation-circle" style="margin-right:3px"></i>Not yet updated</div>' : ''}
+              ${(actCounts.total>0||actCounts.overdue>0) ? `<div style="display:flex;gap:4px;margin-top:3px;flex-wrap:wrap">
+                ${actCounts.overdue>0?`<span style="font-size:8px;background:rgba(248,81,73,.15);color:#f85149;padding:1px 5px;border-radius:8px;font-weight:700"><i class="fas fa-exclamation-circle" style="margin-right:2px"></i>${actCounts.overdue} overdue</span>`:''}
+                ${actCounts.dueToday>0?`<span style="font-size:8px;background:rgba(240,164,80,.15);color:#f0a450;padding:1px 5px;border-radius:8px;font-weight:700"><i class="fas fa-clock" style="margin-right:2px"></i>${actCounts.dueToday} today</span>`:''}
+                ${actCounts.total>0?`<span style="font-size:8px;background:var(--bg-hover);color:var(--text-secondary);padding:1px 5px;border-radius:8px;font-weight:600">${actCounts.total} open</span>`:''}
+              </div>`:''}
             </div>
           </div>
         </td>
@@ -5980,7 +6023,8 @@ function renderDailyMeeting() {
           </button>`}
           ${hasUpdate && log.savedBy ? `<div style="font-size:9px;color:var(--text-muted);margin-top:3px">${log.savedBy.split('@')[0]}</div>` : ''}
         </td>
-      </tr>`;
+      </tr>
+      ${isExpanded ? _dmRenderActionRows(p.id, readonly) : ''}`;
     }).join('');
   }
 
@@ -6060,14 +6104,22 @@ function renderDailyMeeting() {
   </div>
 
   <!-- Stats bar -->
-  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px">
-    ${[
+  <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:14px">
+    ${(()=>{
+      const allActs = (AppState.data.actions||[]).filter(a => projects.find(p=>p.id===a.projectId));
+      const t = new Date().toISOString().split('T')[0];
+      const openA = allActs.filter(a => a.status!=='completed' && a.status!=='cancelled').length;
+      const overdueA = allActs.filter(a => a.status!=='completed' && a.status!=='cancelled' && a.dueDate && a.dueDate<t).length;
+      return [
       ['fa-briefcase','Total Projects',totalProjects,'var(--accent-blue)'],
       ['fa-check-circle','Updated Today',updatedToday + ' / ' + totalProjects,'var(--accent-green)'],
       ['fa-flag','Flagged',flaggedCount,'var(--accent-red)'],
       ['fa-check-double','Done',doneCount,'var(--accent-green)'],
       ['fa-pause-circle','Waiting / On Hold',waitingCount,'var(--accent-amber)'],
-    ].map(([ico,lbl,val,col]) => `
+      ['fa-tasks','Open Actions',openA,'#388bfd'],
+      ['fa-exclamation-circle','Overdue Actions',overdueA,overdueA>0?'#f85149':'var(--text-muted)'],
+      ];
+    })().map(([ico,lbl,val,col]) => `
     <div style="padding:10px 12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);text-align:center">
       <i class="fas ${ico}" style="color:${col};margin-bottom:5px;display:block"></i>
       <div style="font-size:15px;font-weight:800;font-family:var(--font-mono);color:${col}">${val}</div>
@@ -6085,6 +6137,13 @@ function renderDailyMeeting() {
       <button class="btn btn-secondary btn-sm" onclick="dmChangeDate(1)" ${isToday ? 'disabled' : ''}><i class="fas fa-chevron-right"></i></button>
       ${!isToday ? `<button class="btn btn-primary btn-sm" onclick="dmGoToDate('${today}')">Today</button>` : ''}
     </div>
+    <!-- Show completed actions toggle -->
+    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer;white-space:nowrap">
+      <input type="checkbox" ${_dmShowCompleted?'checked':''} onchange="_dmShowCompleted=this.checked;renderDailyMeeting()">
+      Show completed actions
+    </label>
+    <button class="btn btn-secondary btn-sm" onclick="_dmExpandAll(true)" style="font-size:10px" title="Expand all action lists"><i class="fas fa-angles-down"></i></button>
+    <button class="btn btn-secondary btn-sm" onclick="_dmExpandAll(false)" style="font-size:10px" title="Collapse all action lists"><i class="fas fa-angles-up"></i></button>
     <!-- Status filter -->
     <div style="display:flex;gap:5px;flex-wrap:wrap">
       ${[['all','All','var(--text-secondary)'],['ONGOING','Ongoing','#388bfd'],['WAITING','Waiting','#f0a450'],['DONE','Done','#3fb950'],['ON HOLD','On Hold','#f85149']].map(([val,lbl,col]) =>
@@ -6113,6 +6172,175 @@ function renderDailyMeeting() {
 }
 
 // ── Daily Meeting helper functions ───────────────────────
+
+// ── Render expandable action item rows under a project ────
+function _dmRenderActionRows(projectId, readonly) {
+  let actions = _dmGetProjectActions(projectId);
+  if (!_dmShowCompleted) actions = actions.filter(a => a.status !== 'completed' && a.status !== 'cancelled');
+  if (!actions.length) {
+    return `<tr style="background:var(--bg-primary)">
+      <td colspan="10" style="padding:8px 16px 8px 38px;border-top:1px dashed var(--border)">
+        <div style="display:flex;align-items:center;gap:10px;font-size:11px;color:var(--text-muted)">
+          <i class="fas fa-tasks" style="color:var(--accent-blue)"></i>
+          <span>No action items yet for this project</span>
+          ${readonly?'':`<button class="btn btn-secondary btn-sm" style="font-size:10px;padding:3px 8px" onclick="dmAddActionInline('${projectId}')"><i class="fas fa-plus"></i> Add action</button>`}
+        </div>
+      </td></tr>`;
+  }
+  // Sort: overdue first, then due today, then by status
+  const today = new Date().toISOString().split('T')[0];
+  actions.sort((a,b) => {
+    const aOverdue = (a.status!=='completed'&&a.status!=='cancelled'&&a.dueDate&&a.dueDate<today)?0:1;
+    const bOverdue = (b.status!=='completed'&&b.status!=='cancelled'&&b.dueDate&&b.dueDate<today)?0:1;
+    if (aOverdue !== bOverdue) return aOverdue - bOverdue;
+    return (a.dueDate||'').localeCompare(b.dueDate||'');
+  });
+
+  const actionsHTML = actions.map(a => {
+    const pri = _dmActionPriorityIcon(a);
+    const statusColor = _dmActionStatusColor(a.status||'open');
+    const updates = a.updates || [];
+    const pendingUpdate = _dmActionUpdates[a.id] || {};
+    const updateText = pendingUpdate.text !== undefined ? pendingUpdate.text : '';
+    const pendingStatus = pendingUpdate.newStatus !== undefined ? pendingUpdate.newStatus : (a.status||'open');
+    const statusChanged = pendingStatus !== (a.status||'open');
+    const lastUpdate = updates[updates.length-1];
+    const updatedToday = a.lastUpdate === today || (pendingUpdate.text && pendingUpdate.text.trim());
+
+    return `<div style="padding:10px 12px;border-bottom:1px solid var(--border);background:${pri.color==='#f85149'?'rgba(248,81,73,.04)':pri.color==='#f0a450'?'rgba(240,164,80,.04)':'transparent'}">
+      <div style="display:grid;grid-template-columns:24px 1fr 220px 220px 60px;gap:10px;align-items:center">
+        <i class="fas ${pri.icon}" style="color:${pri.color};font-size:14px" title="${pri.label}"></i>
+        <div>
+          <div style="font-size:12px;font-weight:600;line-height:1.3;cursor:pointer" onclick="event.stopPropagation();_dmOpenAction('${a.id}')">${a.title||'(no title)'}</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px;display:flex;flex-wrap:wrap;gap:8px">
+            ${a.assignedTo?`<span><i class="fas fa-user" style="margin-right:3px"></i>${a.assignedTo}</span>`:''}
+            ${a.dueDate?`<span style="${pri.color==='#f85149'?'color:'+pri.color+';font-weight:700':''}"><i class="fas fa-calendar" style="margin-right:3px"></i>${a.dueDate}</span>`:''}
+            ${a.priority?`<span class="badge" style="background:${a.priority==='high'?'rgba(248,81,73,.15);color:#f85149':a.priority==='medium'?'rgba(240,164,80,.15);color:#f0a450':'rgba(63,185,80,.15);color:#3fb950'};font-size:8px;padding:1px 4px">${a.priority}</span>`:''}
+            ${lastUpdate?`<span title="${lastUpdate.text}"><i class="fas fa-history" style="margin-right:3px"></i>${updates.length} update${updates.length!==1?'s':''}</span>`:''}
+          </div>
+        </div>
+        ${readonly ? `<span style="font-size:11px;color:${statusColor};font-weight:600">${a.status||'open'}</span><span></span>` :
+        `<select class="form-select" style="height:28px;font-size:11px" onchange="dmActionSetStatus('${a.id}',this.value)">
+          ${['open','in-progress','on-hold','completed','cancelled'].map(s=>`<option value="${s}" ${pendingStatus===s?'selected':''}>${s}${statusChanged&&s===pendingStatus?' (will change)':''}</option>`).join('')}
+        </select>
+        <textarea class="form-input" rows="1" placeholder="Today's update for this action..." style="font-size:11px;padding:5px 8px;resize:vertical;min-height:28px" oninput="dmActionSetUpdate('${a.id}',this.value)">${updateText}</textarea>`}
+        ${readonly?'<span></span>':`<button class="btn btn-success btn-sm btn-icon" onclick="dmActionQuickComplete('${a.id}')" title="Mark as completed"><i class="fas fa-check"></i></button>`}
+      </div>
+      ${(updateText||statusChanged)?`<div style="margin-top:6px;padding-left:34px;font-size:10px;color:var(--accent-amber)"><i class="fas fa-exclamation-circle" style="margin-right:3px"></i>Pending changes — will save with meeting</div>`:''}
+    </div>`;
+  }).join('');
+
+  return `<tr style="background:var(--bg-primary)">
+    <td colspan="10" style="padding:0;border-top:2px solid var(--accent-blue)">
+      <div style="padding:8px 14px;background:rgba(56,139,253,.05);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--accent-blue);display:flex;align-items:center;justify-content:space-between">
+        <span><i class="fas fa-tasks" style="margin-right:6px"></i>Action Items (${actions.length}${_dmShowCompleted?' shown':' open'})</span>
+        ${readonly?'':`<button class="btn btn-secondary btn-sm" style="font-size:10px;padding:3px 10px" onclick="dmAddActionInline('${projectId}')"><i class="fas fa-plus"></i> Add Action</button>`}
+      </div>
+      ${actionsHTML}
+    </td></tr>`;
+}
+
+// ── Action handlers ────────────────────────────────────────
+function dmToggleExpand(pid) {
+  _dmExpanded[pid] = !_dmExpanded[pid];
+  renderDailyMeeting();
+}
+
+function _dmExpandAll(expand) {
+  const projects = (AppState.data.projects || []).filter(p =>
+    p.status === 'active' || p.status === 'planned' || p.status === 'on-hold'
+  );
+  projects.forEach(p => { _dmExpanded[p.id] = expand; });
+  renderDailyMeeting();
+}
+
+function dmActionSetStatus(actionId, newStatus) {
+  if (!_dmActionUpdates[actionId]) _dmActionUpdates[actionId] = {};
+  _dmActionUpdates[actionId].newStatus = newStatus;
+  // Don't re-render — that would lose textarea focus
+  // The pending indicator will appear on next save
+}
+
+function dmActionSetUpdate(actionId, text) {
+  if (!_dmActionUpdates[actionId]) _dmActionUpdates[actionId] = {};
+  _dmActionUpdates[actionId].text = text;
+}
+
+function dmActionQuickComplete(actionId) {
+  const a = (AppState.data.actions||[]).find(x => x.id === actionId);
+  if (!a) return;
+  if (a.status === 'completed') { showToast('Already completed','info'); return; }
+  if (!confirm('Mark "' + (a.title||'this action') + '" as completed?')) return;
+  if (!_dmActionUpdates[actionId]) _dmActionUpdates[actionId] = {};
+  _dmActionUpdates[actionId].newStatus = 'completed';
+  if (!_dmActionUpdates[actionId].text) _dmActionUpdates[actionId].text = 'Completed via Daily Meeting quick action';
+  // Apply immediately
+  _dmApplyActionUpdate(actionId);
+  AppState.save();
+  delete _dmActionUpdates[actionId];
+  renderDailyMeeting();
+  showToast('Action completed','success');
+}
+
+function _dmApplyActionUpdate(actionId) {
+  const a = (AppState.data.actions||[]).find(x => x.id === actionId);
+  if (!a) return;
+  const pending = _dmActionUpdates[actionId] || {};
+  const today = new Date().toISOString().split('T')[0];
+  const user = _currentUserProfile?.name || _currentUser?.email || 'User';
+  const oldStatus = a.status || 'open';
+  const newStatus = pending.newStatus || oldStatus;
+  const text = (pending.text || '').trim();
+  if (!text && newStatus === oldStatus) return; // nothing to save
+  if (!a.updates) a.updates = [];
+  a.updates.push({
+    date: today,
+    user,
+    text: text || ('Status changed: ' + oldStatus + ' → ' + newStatus),
+    statusBefore: oldStatus,
+    statusAfter: newStatus,
+  });
+  a.status = newStatus;
+  a.lastUpdate = today;
+  if (newStatus === 'completed') {
+    a.completedAt = new Date().toISOString();
+    a.completedBy = user;
+  }
+}
+
+function dmAddActionInline(projectId) {
+  const title = prompt('Action item title:');
+  if (!title || !title.trim()) return;
+  const assignedTo = prompt('Assigned to (optional):') || '';
+  const dueDate = prompt('Due date (YYYY-MM-DD, optional):') || '';
+  const priority = prompt('Priority (high/medium/low, optional):', 'medium') || 'medium';
+  const user = _currentUserProfile?.name || _currentUser?.email || 'User';
+  const newAction = {
+    id: 'ACT-' + Date.now().toString(36).toUpperCase(),
+    projectId,
+    title: title.trim(),
+    description: '',
+    assignedTo: assignedTo.trim(),
+    dueDate: dueDate.trim(),
+    priority: ['high','medium','low'].includes(priority.trim().toLowerCase()) ? priority.trim().toLowerCase() : 'medium',
+    status: 'open',
+    createdBy: user,
+    createdAt: new Date().toISOString(),
+    updates: [],
+  };
+  if (!AppState.data.actions) AppState.data.actions = [];
+  AppState.data.actions.push(newAction);
+  AppState.save();
+  _dmExpanded[projectId] = true;
+  renderDailyMeeting();
+  showToast('Action item added','success');
+}
+
+function _dmOpenAction(actionId) {
+  // Navigate to Action Items page and (if function exists) open detail
+  navigate('actions');
+}
+
 function dmSetStatus(pid, status) {
   if (!_dmUnsaved[pid]) _dmUnsaved[pid] = {};
   // Toggle off if already selected
@@ -6212,10 +6440,27 @@ function dmSaveMeeting() {
     savedCount++;
   });
 
-  if (savedCount === 0) { showToast('No changes to save', 'warning'); return; }
+  // Apply any pending action item updates
+  let actionUpdates = 0;
+  Object.keys(_dmActionUpdates).forEach(actId => {
+    const pending = _dmActionUpdates[actId];
+    if (pending.text || pending.newStatus) {
+      const a = (AppState.data.actions||[]).find(x => x.id === actId);
+      if (a) {
+        const willChange = (pending.text && pending.text.trim()) || (pending.newStatus && pending.newStatus !== (a.status||'open'));
+        if (willChange) { _dmApplyActionUpdate(actId); actionUpdates++; }
+      }
+    }
+  });
+  _dmActionUpdates = {};
+
+  if (savedCount === 0 && actionUpdates === 0) { showToast('No changes to save', 'warning'); return; }
   _dmUnsaved = {};
   AppState.save();
-  showToast(`Meeting saved — ${savedCount} project${savedCount !== 1 ? 's' : ''} updated`, 'success');
+  const parts = [];
+  if (savedCount) parts.push(`${savedCount} project${savedCount !== 1 ? 's' : ''}`);
+  if (actionUpdates) parts.push(`${actionUpdates} action${actionUpdates !== 1 ? 's' : ''}`);
+  showToast(`Meeting saved — ${parts.join(' + ')} updated`, 'success');
   renderDailyMeeting();
 }
 
@@ -6252,6 +6497,28 @@ function dmPrintMeeting() {
       const durActual = startDate ? Math.max(0, Math.ceil((viewDate - startDate) / 86400000)) : '—';
       const durPlan = startDate && endDate ? Math.max(0, Math.ceil((endDate - startDate) / 86400000)) : '—';
       const sc = statusColors[log.status || ''] || '#666';
+      // Build action items for print (open + in-progress + on-hold, hide completed/cancelled)
+      const today = new Date().toISOString().split('T')[0];
+      const projActions = (AppState.data.actions||[])
+        .filter(a => a.projectId === p.id && a.status !== 'completed' && a.status !== 'cancelled')
+        .sort((a,b) => (a.dueDate||'').localeCompare(b.dueDate||''));
+      let actionRow = '';
+      if (projActions.length > 0) {
+        const actionsTxt = projActions.map(a => {
+          const overdue = a.dueDate && a.dueDate < today;
+          const lastUpd = (a.updates||[]).slice(-1)[0];
+          const todayUpd = lastUpd && lastUpd.date === today ? lastUpd.text : '';
+          return `<div style="margin:3px 0;font-size:9px${overdue?';color:#c62828':''}">
+            <strong>${overdue?'[OVERDUE]':'['+(a.status||'open').toUpperCase()+']'}</strong> ${a.title||'(no title)'}
+            ${a.assignedTo?' — '+a.assignedTo:''}${a.dueDate?', due '+a.dueDate:''}
+            ${todayUpd?'<br><span style="color:#1565c0;padding-left:18px">↳ Today: '+todayUpd+'</span>':''}
+          </div>`;
+        }).join('');
+        actionRow = `<tr><td colspan="9" style="padding:5px 7px 8px 14px;border:1px solid #ccc;background:#fafafa">
+          <div style="font-size:9px;font-weight:700;color:#1565c0;margin-bottom:4px">📋 ACTION ITEMS (${projActions.length} open)</div>
+          ${actionsTxt}
+        </td></tr>`;
+      }
       return `<tr>
         <td style="padding:5px 7px;border:1px solid #ccc;font-size:10px;min-width:140px">${log.flagged ? '🚩 ' : ''}${p.id}<br><strong>${p.name}</strong>${p.client ? '<br><span style="color:#666">'+p.client+'</span>' : ''}</td>
         <td style="padding:5px 7px;border:1px solid #ccc;text-align:center;font-size:11px;font-weight:700">${p.progress || 0}%</td>
@@ -6262,7 +6529,7 @@ function dmPrintMeeting() {
         <td style="padding:5px 7px;border:1px solid #ccc;font-size:10px">${log.remarks || 'N/A'}</td>
         <td style="padding:5px 7px;border:1px solid #ccc;font-size:10px">${log.targetActivity || 'N/A'}</td>
         <td style="padding:5px 7px;border:1px solid #ccc;font-size:10px">${log.update || 'N/A'}</td>
-      </tr>`;
+      </tr>${actionRow}`;
     }).join('');
     groupHTML += `
     <div style="margin-bottom:16px">
@@ -6299,12 +6566,19 @@ function dmPrintMeeting() {
       <div style="font-size:14px;font-weight:700;margin-top:4px">DAILY PROJECT STATUS MEETING</div>
       <div style="font-size:12px;color:#555;margin-top:4px">${dateStr}</div>
     </div>
-    <div style="display:flex;gap:20px;margin-bottom:16px;font-size:11px">
+    <div style="display:flex;gap:20px;margin-bottom:16px;font-size:11px;flex-wrap:wrap">
       <div>Total Projects: <strong>${projects.length}</strong></div>
       <div>Updated: <strong>${dateLogs.length}</strong></div>
       <div>Flagged: <strong style="color:red">${dateLogs.filter(l=>l.flagged).length}</strong></div>
       <div>Done: <strong style="color:green">${dateLogs.filter(l=>l.status==='DONE').length}</strong></div>
       <div>Waiting/On Hold: <strong style="color:orange">${dateLogs.filter(l=>l.status==='WAITING'||l.status==='ON HOLD').length}</strong></div>
+      ${(()=>{
+        const t = new Date().toISOString().split('T')[0];
+        const allActs = (AppState.data.actions||[]).filter(a => projects.find(p=>p.id===a.projectId));
+        const openA = allActs.filter(a => a.status!=='completed' && a.status!=='cancelled').length;
+        const overdueA = allActs.filter(a => a.status!=='completed' && a.status!=='cancelled' && a.dueDate && a.dueDate<t).length;
+        return `<div>Open Actions: <strong style="color:#1565c0">${openA}</strong></div><div>Overdue Actions: <strong style="color:${overdueA>0?'red':'#666'}">${overdueA}</strong></div>`;
+      })()}
     </div>
     ${groupHTML}
     <div style="margin-top:30px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:30px;font-size:11px">
