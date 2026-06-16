@@ -5848,6 +5848,133 @@ function _dmActionPriorityIcon(action) {
 function _dmGetProjectActions(projectId) {
   return (AppState.data.actions||[]).filter(a => a.projectId === projectId);
 }
+
+// ── Get all historic daily-meeting logs for a project ─────
+function _dmGetProjectLogHistory(projectId) {
+  return (AppState.data.dailyMeetingLogs||[])
+    .filter(l => l.projectId === projectId)
+    .sort((a,b) => (b.date||'').localeCompare(a.date||''));
+}
+
+// ── Get the most recent log BEFORE the currently viewed date ──
+function _dmGetPreviousLog(projectId) {
+  const all = _dmGetProjectLogHistory(projectId);
+  return all.find(l => l.date < _dmViewDate);
+}
+
+// ── Show full update history modal for a project ───────────
+// ── Show full update history for a single action item ─────
+function dmShowActionHistory(actionId) {
+  const a = (AppState.data.actions||[]).find(x => x.id === actionId);
+  if (!a) return;
+  const updates = [...(a.updates||[])].reverse(); // newest first
+  const project = (AppState.data.projects||[]).find(p => p.id === a.projectId);
+  $('#genericModalTitle').textContent = 'Action Update History';
+  $('#genericModalBody').innerHTML = `
+    <div style="background:var(--bg-hover);padding:10px 12px;border-radius:8px;margin-bottom:14px">
+      <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px">${a.id} · ${project ? project.id : '(project)'}</div>
+      <div style="font-size:13px;font-weight:700">${a.description || a.title || '(no description)'}</div>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:3px">
+        ${a.assignee || a.assignedTo ? '👤 ' + (a.assignee || a.assignedTo) : ''}
+        ${a.dueDate ? ' · 📅 Due ' + a.dueDate : ''}
+        · Status: <strong>${a.status || 'open'}</strong>
+      </div>
+    </div>
+    ${updates.length === 0 ? `<div class="empty-state" style="padding:20px"><i class="fas fa-clock-rotate-left"></i><p>No updates yet for this action</p></div>` :
+    `<div style="max-height:50vh;overflow-y:auto;border-left:2px solid var(--border);margin-left:10px;padding-left:14px">
+      ${updates.map(u => {
+        const statusChanged = u.statusBefore && u.statusAfter && u.statusBefore !== u.statusAfter;
+        return `<div style="position:relative;margin-bottom:14px;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px">
+          <div style="position:absolute;left:-22px;top:14px;width:10px;height:10px;border-radius:50%;background:#bc8cff;border:2px solid var(--bg-primary)"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+            <span style="font-size:11px;font-weight:700;color:#bc8cff">${u.date}</span>
+            ${statusChanged ? `<span style="font-size:9px;font-family:var(--font-mono);color:var(--text-muted)">${u.statusBefore} → <strong style="color:var(--accent-green)">${u.statusAfter}</strong></span>` : ''}
+          </div>
+          ${u.text ? `<div style="font-size:11px;color:var(--text-secondary)">${u.text}</div>` : ''}
+          <div style="font-size:9px;color:var(--text-muted);margin-top:6px">${u.user ? '— ' + u.user : ''}</div>
+        </div>`;
+      }).join('')}
+    </div>`}
+  `;
+  $('#genericModalFooter').innerHTML = `<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
+  openModal('genericModal');
+}
+
+function dmShowHistory(projectId) {
+  const project = (AppState.data.projects||[]).find(p => p.id === projectId);
+  if (!project) return;
+  const logs = _dmGetProjectLogHistory(projectId);
+  const actions = _dmGetProjectActions(projectId);
+
+  // Build timeline entries: project logs + action updates
+  const timeline = [];
+  logs.forEach(l => {
+    timeline.push({
+      date: l.date,
+      type: 'meeting',
+      data: l,
+    });
+  });
+  actions.forEach(a => {
+    (a.updates||[]).forEach(u => {
+      timeline.push({
+        date: u.date || a.createdAt?.split('T')[0] || '',
+        type: 'action',
+        action: a,
+        data: u,
+      });
+    });
+  });
+  timeline.sort((a,b) => (b.date||'').localeCompare(a.date||''));
+
+  $('#genericModalTitle').textContent = 'Update History — ' + project.id;
+  $('#genericModalBody').innerHTML = `
+    <div style="background:var(--bg-hover);padding:10px 12px;border-radius:8px;margin-bottom:14px">
+      <div style="font-size:11px;font-family:var(--font-mono);color:var(--accent-blue);font-weight:700">${project.id}</div>
+      <div style="font-size:13px;font-weight:700;margin-top:2px">${project.name}</div>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${logs.length} meeting log${logs.length!==1?'s':''} · ${timeline.length-logs.length} action update${timeline.length-logs.length!==1?'s':''}</div>
+    </div>
+    ${timeline.length === 0 ? `<div class="empty-state" style="padding:30px"><i class="fas fa-clock-rotate-left" style="font-size:32px;opacity:.3"></i><p style="margin-top:8px">No history yet for this project</p></div>` :
+    `<div style="max-height:60vh;overflow-y:auto;border-left:2px solid var(--border);margin-left:10px;padding-left:14px">
+      ${timeline.map(entry => {
+        if (entry.type === 'meeting') {
+          const l = entry.data;
+          const statusColors = {'ONGOING':'#388bfd','WAITING':'#f0a450','DONE':'#3fb950','ON HOLD':'#f85149'};
+          return `<div style="position:relative;margin-bottom:14px;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px">
+            <div style="position:absolute;left:-22px;top:14px;width:10px;height:10px;border-radius:50%;background:${statusColors[l.status]||'#8b949e'};border:2px solid var(--bg-primary)"></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <span style="font-size:11px;font-weight:700;font-family:var(--font-mono);color:var(--accent-blue)"><i class="fas fa-clipboard-check" style="margin-right:5px"></i>${l.date}</span>
+              <span style="font-size:9px;padding:2px 8px;border-radius:10px;background:${statusColors[l.status]||'#8b949e'}22;color:${statusColors[l.status]||'#8b949e'};font-weight:700">${l.status || 'NO STATUS'}</span>
+            </div>
+            ${l.remarks ? `<div style="font-size:11px;margin-bottom:4px"><strong style="color:var(--text-secondary)">Remarks:</strong> ${l.remarks}</div>` : ''}
+            ${l.targetActivity ? `<div style="font-size:11px;margin-bottom:4px"><strong style="color:var(--text-secondary)">Target:</strong> ${l.targetActivity}</div>` : ''}
+            ${l.update ? `<div style="font-size:11px;margin-bottom:4px"><strong style="color:var(--accent-blue)">Update:</strong> ${l.update}</div>` : ''}
+            ${l.flagged ? `<div style="font-size:10px;color:var(--accent-red);margin-top:4px"><i class="fas fa-flag" style="margin-right:3px"></i>FLAGGED</div>` : ''}
+            <div style="font-size:9px;color:var(--text-muted);margin-top:6px">${l.savedBy ? '— ' + l.savedBy.split('@')[0] : ''}</div>
+          </div>`;
+        } else {
+          const a = entry.action;
+          const u = entry.data;
+          const statusChanged = u.statusBefore && u.statusAfter && u.statusBefore !== u.statusAfter;
+          return `<div style="position:relative;margin-bottom:14px;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;border-left:3px solid #bc8cff">
+            <div style="position:absolute;left:-22px;top:14px;width:10px;height:10px;border-radius:50%;background:#bc8cff;border:2px solid var(--bg-primary)"></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <span style="font-size:11px;font-weight:700;color:#bc8cff"><i class="fas fa-tasks" style="margin-right:5px"></i>${u.date} · Action ${a.id}</span>
+              ${statusChanged ? `<span style="font-size:9px;font-family:var(--font-mono);color:var(--text-muted)">${u.statusBefore} → <strong style="color:var(--accent-green)">${u.statusAfter}</strong></span>` : ''}
+            </div>
+            <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:3px">${a.description || a.title || '(no description)'}</div>
+            ${u.text ? `<div style="font-size:11px"><strong style="color:#bc8cff">Update:</strong> ${u.text}</div>` : ''}
+            <div style="font-size:9px;color:var(--text-muted);margin-top:6px">${u.user ? '— ' + u.user : ''}</div>
+          </div>`;
+        }
+      }).join('')}
+    </div>`}
+  `;
+  $('#genericModalFooter').innerHTML = `<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
+  openModal('genericModal');
+}
+
+
 function _dmActionCounts(projectId) {
   const today = new Date().toISOString().split('T')[0];
   const acts = _dmGetProjectActions(projectId);
@@ -5937,6 +6064,8 @@ function renderDailyMeeting() {
       const statusColor = statusColors[status] || '#8b949e';
       const readonly = !isToday;
 
+      // Previous update (most recent log before viewing date)
+      const prevLog = _dmGetPreviousLog(p.id);
       // Action item counts
       const actCounts = _dmActionCounts(p.id);
       const hasUrgentActions = actCounts.overdue > 0 || actCounts.dueToday > 0;
@@ -5952,7 +6081,7 @@ function renderDailyMeeting() {
             </button>
             ${flagged ? '<i class="fas fa-flag" style="color:var(--accent-red);font-size:11px;margin-top:2px;flex-shrink:0"></i>' : ''}
             <div style="flex:1;min-width:0">
-              <div style="font-size:10px;font-family:var(--font-mono);font-weight:700;color:var(--accent-blue)">${p.id}</div>
+              <div style="font-size:10px;font-family:var(--font-mono);font-weight:700;color:var(--accent-blue);display:flex;align-items:center;gap:5px"><span>${p.id}</span>${prevLog ? `<button onclick="event.stopPropagation();dmShowHistory('${p.id}')" title="View update history" style="background:none;border:none;color:var(--accent-blue);opacity:.6;cursor:pointer;padding:0;font-size:9px"><i class="fas fa-clock-rotate-left"></i></button>` : ''}</div>
               <div style="font-size:11px;font-weight:600;line-height:1.3">${p.name}</div>
               ${p.client ? `<div style="font-size:9px;color:var(--text-muted)">${p.client}</div>` : ''}
               ${notUpdatedToday ? '<div style="font-size:9px;color:var(--accent-amber);margin-top:2px"><i class="fas fa-exclamation-circle" style="margin-right:3px"></i>Not yet updated</div>' : ''}
@@ -6007,13 +6136,17 @@ function renderDailyMeeting() {
                 oninput="dmSetField('${p.id}','targetActivity',this.value)">${targetActivity}</textarea>`
           }
         </td>
-        <td style="padding:4px 6px;min-width:140px">
+        <td style="padding:4px 6px;min-width:160px">
           ${readonly
             ? `<span style="font-size:11px">${update || '<span style="color:var(--text-muted)">N/A</span>'}</span>`
             : `<textarea class="form-input" rows="2" placeholder="Today's update..."
                 style="width:100%;min-width:130px;font-size:11px;padding:4px 6px;resize:vertical;min-height:36px"
                 oninput="dmSetField('${p.id}','update',this.value)">${update}</textarea>`
           }
+          ${prevLog && prevLog.update ? `<div style="margin-top:4px;padding:4px 6px;background:var(--bg-hover);border-left:2px solid var(--accent-blue);border-radius:0 4px 4px 0;font-size:9px;line-height:1.4;color:var(--text-muted)" title="Previous update from ${prevLog.date}">
+            <div style="font-weight:700;color:var(--accent-blue);margin-bottom:2px"><i class="fas fa-clock-rotate-left" style="margin-right:3px"></i>Last update · ${prevLog.date}</div>
+            <div style="max-height:36px;overflow:hidden;text-overflow:ellipsis">${(prevLog.update||'').substring(0,140)}${(prevLog.update||'').length>140?'...':''}</div>
+          </div>` : ''}
         </td>
         <td style="padding:4px 6px;text-align:center">
           ${readonly ? '' : `
@@ -6232,6 +6365,11 @@ function _dmRenderActionRows(projectId, readonly) {
         ${readonly?'<span></span>':`<button class="btn btn-success btn-sm btn-icon" onclick="dmActionQuickComplete('${a.id}')" title="Mark as completed"><i class="fas fa-check"></i></button>`}
       </div>
       ${(updateText||statusChanged)?`<div style="margin-top:6px;padding-left:34px;font-size:10px;color:var(--accent-amber)"><i class="fas fa-exclamation-circle" style="margin-right:3px"></i>Pending changes — will save with meeting</div>`:''}
+      ${lastUpdate ? `<div style="margin-top:6px;padding:5px 8px;background:var(--bg-hover);border-left:2px solid #bc8cff;border-radius:0 4px 4px 0;margin-left:34px;font-size:10px;color:var(--text-muted);line-height:1.5">
+        <strong style="color:#bc8cff"><i class="fas fa-clock-rotate-left" style="margin-right:3px"></i>Last update · ${lastUpdate.date}</strong>${lastUpdate.user ? ` <span style="opacity:.7">by ${lastUpdate.user}</span>` : ''}
+        <div style="margin-top:2px;color:var(--text-secondary)">${(lastUpdate.text||'').substring(0,200)}${(lastUpdate.text||'').length>200?'...':''}</div>
+        ${(a.updates||[]).length > 1 ? `<a onclick="event.stopPropagation();dmShowActionHistory('${a.id}')" style="font-size:9px;color:var(--accent-blue);cursor:pointer;font-weight:600;margin-top:3px;display:inline-block">View all ${(a.updates||[]).length} updates →</a>` : ''}
+      </div>` : ''}
     </div>`;
   }).join('');
 
@@ -17012,116 +17150,500 @@ function deleteHistoryEntry(id){
 
 function showLogAssetHistoryFor(assetId, assetName, assetType){
   // Opens the log modal with the asset pre-selected
+  _ahSelectedAsset = null;
   showLogAssetHistory();
   // After modal renders, pre-select the asset
-  setTimeout(()=>{
-    const sel=$('#ahAsset');
-    if(!sel) return;
-    // Find and select the matching option
-    const opts=Array.from(sel.options);
-    const match=opts.find(o=>o.value.startsWith(assetId+'|'));
-    if(match){ sel.value=match.value; }
-  },100);
+  setTimeout(() => {
+    const typeToKey = { Equipment:'equipment', Tool:'tools', Vehicle:'vehicles', Personnel:'personnel', Consumable:'consumables', 'Third Party':'thirdParty' };
+    const listKey = typeToKey[assetType] || 'equipment';
+    const asset = (AppState.data[listKey]||[]).find(a => a.id === assetId);
+    if (asset) _ahPickAsset(asset, listKey);
+  }, 50);
 }
+
+// ── State for the new logging form ───────────────────────
+let _ahSelectedAsset = null; // { asset, typeKey, typeLabel }
+let _ahSelectedFile = null;
+
+const _AH_EVENT_TYPES = [
+  'Deployment','Return','Maintenance','Preventive Maintenance','Corrective Maintenance',
+  'Calibration','Inspection','Repair','Breakdown','Disposal','Transfer',
+  'Permit Renewal','Certification Renewal','Status Change','Other'
+];
+
+// Fields shown per event type
+const _AH_FIELD_RULES = {
+  'Deployment':            { project:true,  nextMaint:false, nextCal:false, certExpiry:false, cost:false },
+  'Return':                { project:false, nextMaint:false, nextCal:false, certExpiry:false, cost:false },
+  'Maintenance':           { project:false, nextMaint:true,  nextCal:false, certExpiry:false, cost:true },
+  'Preventive Maintenance':{ project:false, nextMaint:true,  nextCal:false, certExpiry:false, cost:true },
+  'Corrective Maintenance':{ project:false, nextMaint:true,  nextCal:false, certExpiry:false, cost:true },
+  'Calibration':           { project:false, nextMaint:false, nextCal:true,  certExpiry:true,  cost:true },
+  'Inspection':            { project:false, nextMaint:false, nextCal:false, certExpiry:false, cost:false },
+  'Repair':                { project:false, nextMaint:false, nextCal:false, certExpiry:false, cost:true },
+  'Breakdown':             { project:false, nextMaint:false, nextCal:false, certExpiry:false, cost:false },
+  'Disposal':              { project:false, nextMaint:false, nextCal:false, certExpiry:false, cost:true },
+  'Transfer':              { project:true,  nextMaint:false, nextCal:false, certExpiry:false, cost:false },
+  'Permit Renewal':        { project:false, nextMaint:false, nextCal:false, certExpiry:true,  cost:true },
+  'Certification Renewal': { project:false, nextMaint:false, nextCal:false, certExpiry:true,  cost:true },
+  'Status Change':         { project:false, nextMaint:false, nextCal:false, certExpiry:false, cost:false },
+  'Other':                 { project:true,  nextMaint:true,  nextCal:true,  certExpiry:true,  cost:true },
+};
+
+// Suggested "Status After" per event type
+const _AH_SUGGESTED_AFTER = {
+  'Deployment':            'in-use',
+  'Return':                'available',
+  'Maintenance':           'available · serviced {date}',
+  'Preventive Maintenance':'available · PM done {date}',
+  'Corrective Maintenance':'available · repaired {date}',
+  'Calibration':           'available · calibrated {date}',
+  'Inspection':            '',
+  'Repair':                'available · repaired {date}',
+  'Breakdown':             'out-of-service',
+  'Disposal':              'disposed',
+  'Transfer':              'in-use',
+  'Permit Renewal':        'available · permit renewed {date}',
+  'Certification Renewal': 'available · cert renewed {date}',
+  'Status Change':         '',
+  'Other':                 '',
+};
 
 function showLogAssetHistory(){
-  const allAssets=[...(AppState.data.equipment||[]),...(AppState.data.tools||[]),...(AppState.data.vehicles||[])];
-  $('#genericModalTitle').textContent='Log Asset History Event';
-  $('#genericModalBody').innerHTML=`<div class="form-grid">
-    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Asset *</label>
-    <select class="form-select" id="ahAsset">
-      <optgroup label="Equipment">${(AppState.data.equipment||[]).map(a=>`<option value="${a.id}|${a.name}|Equipment">${a.id} — ${a.name}</option>`).join('')}</optgroup>
-      <optgroup label="Tools">${(AppState.data.tools||[]).map(a=>`<option value="${a.id}|${a.name}|Tool">${a.id} — ${a.name}</option>`).join('')}</optgroup>
-      <optgroup label="Vehicles">${(AppState.data.vehicles||[]).map(a=>`<option value="${a.id}|${a.name}|Vehicle">${a.id} — ${a.name}</option>`).join('')}</optgroup>
-    </select></div>
-    <div class="form-group"><label class="form-label">Action / Event Type *</label>
-    <select class="form-select" id="ahAction">${['Deployment','Maintenance','Preventive Maintenance','Corrective Maintenance','Breakdown','Calibration','Permit Renewal','Certification Renewal','Status Change','Repair','Inspection','Transfer','Return to Store','Decommission','Other'].map(a=>`<option>${a}</option>`).join('')}</select></div>
-    <div class="form-group"><label class="form-label">Date *</label><input class="form-input" type="date" id="ahDate" value="${new Date().toISOString().split('T')[0]}"></div>
-    <div class="form-group"><label class="form-label">Project</label><select class="form-select" id="ahProj">
-      <option value="N/A">— Not Assigned / General</option>
-      ${(AppState.data.projects||[]).map(p=>`<option value="${p.id}">${p.id} — ${p.name.substring(0,22)}</option>`).join('')}
-    </select></div>
-    <div class="form-group"><label class="form-label">Performed By</label><input class="form-input" id="ahBy" placeholder="Name or company"></div>
-    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Detail / Description *</label><textarea class="form-textarea" id="ahDetail" placeholder="Describe what was done..." style="min-height:70px"></textarea></div>
-    <div class="form-group"><label class="form-label">Status / Value Before</label><input class="form-input" id="ahBefore" placeholder="e.g., available, in-use, due for calibration"></div>
-    <div class="form-group"><label class="form-label">Status / Value After</label><input class="form-input" id="ahAfter" placeholder="e.g., in-use, calibrated, renewed"></div>
-    <div class="form-group"><label class="form-label">Next Maintenance Date</label><input class="form-input" type="date" id="ahNextMaint"><div style="font-size:10px;color:var(--text-secondary);margin-top:3px">If applicable — will update the asset record</div></div>
-    <div class="form-group"><label class="form-label">Next Calibration Date</label><input class="form-input" type="date" id="ahNextCal"><div style="font-size:10px;color:var(--text-secondary);margin-top:3px">If applicable — will update the asset record</div></div>
-    <div class="form-group"><label class="form-label">Cert / Permit Expiry Update</label><input class="form-input" type="date" id="ahCertExpiry"><div style="font-size:10px;color:var(--text-secondary);margin-top:3px">If renewed — will update the asset record</div></div>
-  </div>`;
-  $('#genericModalFooter').innerHTML=`<button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button><button class="btn btn-primary" onclick="saveAssetHistory()"><i class="fas fa-save"></i> Log Event</button>`;
+  _ahSelectedAsset = null;
+  _ahSelectedFile = null;
+  $('#genericModalTitle').textContent = 'Log Asset History Event';
+  $('#genericModalBody').innerHTML = `
+    <!-- ASSET SEARCH SECTION -->
+    <div class="form-group" style="margin-bottom:14px">
+      <label class="form-label">Asset * <span style="font-weight:400;color:var(--text-muted)">(search by ID, name, category, serial...)</span></label>
+      <div style="position:relative">
+        <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:12px;pointer-events:none"></i>
+        <input id="ahAssetSearch" class="form-input" autocomplete="off"
+          style="padding-left:30px" placeholder="Type to search 1000+ assets..."
+          oninput="_ahRenderSearchResults(this.value)"
+          onfocus="_ahRenderSearchResults(this.value)"
+          onkeydown="_ahSearchKeyNav(event)">
+        <div id="ahSearchResults" style="display:none;position:absolute;left:0;right:0;top:calc(100% + 4px);max-height:280px;overflow-y:auto;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.3);z-index:100"></div>
+      </div>
+      <div id="ahAssetSelected" style="display:none;margin-top:10px;padding:10px 12px;background:rgba(56,139,253,.06);border:1px solid rgba(56,139,253,.25);border-radius:8px"></div>
+    </div>
+
+    <div id="ahEventFields" style="display:none">
+      <!-- EVENT TYPE + DATE -->
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">Event Type *</label>
+          <select class="form-select" id="ahAction" onchange="_ahOnEventTypeChange()">
+            ${_AH_EVENT_TYPES.map(a=>`<option value="${a}">${a}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Date *</label>
+          <input class="form-input" type="date" id="ahDate" value="${new Date().toISOString().split('T')[0]}" onchange="_ahUpdateSuggestedAfter()">
+        </div>
+      </div>
+
+      <!-- BEFORE / AFTER -->
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Status / Value Before
+            <a id="ahBeforeOverride" onclick="_ahToggleBeforeEdit()" style="font-size:10px;color:var(--accent-blue);cursor:pointer;font-weight:400;margin-left:8px"><i class="fas fa-lock" style="margin-right:3px"></i>Override</a>
+          </label>
+          <input class="form-input" id="ahBefore" readonly style="opacity:.85;cursor:not-allowed;background:var(--bg-hover)">
+          <div style="font-size:10px;color:var(--text-muted);margin-top:3px"><i class="fas fa-magic" style="margin-right:3px"></i>Auto-filled from asset record</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Status / Value After <span style="font-weight:400;color:var(--text-muted)">(suggestion)</span></label>
+          <input class="form-input" id="ahAfter" placeholder="Suggested based on event type">
+        </div>
+      </div>
+
+      <!-- CONDITIONAL FIELDS -->
+      <div id="ahProjGroup" class="form-grid" style="display:none">
+        <div class="form-group" style="grid-column:1/-1"><label class="form-label">Project</label>
+          <select class="form-select" id="ahProj">
+            <option value="N/A">— Not Assigned / General</option>
+            ${(AppState.data.projects||[]).map(p=>`<option value="${p.id}">${p.id} — ${(p.name||'').substring(0,32)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group" id="ahNextMaintGroup" style="display:none">
+          <label class="form-label">Next Maintenance Date</label>
+          <input class="form-input" type="date" id="ahNextMaint">
+          <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text-secondary);margin-top:4px;cursor:pointer">
+            <input type="checkbox" id="ahUpdAssetMaint" checked> Also update the asset record's next maintenance date
+          </label>
+        </div>
+        <div class="form-group" id="ahNextCalGroup" style="display:none">
+          <label class="form-label">Next Calibration Date</label>
+          <input class="form-input" type="date" id="ahNextCal">
+          <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text-secondary);margin-top:4px;cursor:pointer">
+            <input type="checkbox" id="ahUpdAssetCal" checked> Also update the asset record's next calibration date
+          </label>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group" id="ahCertExpiryGroup" style="display:none">
+          <label class="form-label">Cert / Permit Expiry</label>
+          <input class="form-input" type="date" id="ahCertExpiry">
+          <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text-secondary);margin-top:4px;cursor:pointer">
+            <input type="checkbox" id="ahUpdAssetCert" checked> Also update the asset record's expiry
+          </label>
+        </div>
+        <div class="form-group" id="ahCostGroup" style="display:none">
+          <label class="form-label">Cost <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
+          <input class="form-input" type="number" id="ahCost" placeholder="0.00" step="0.01">
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">Performed By</label>
+          <input class="form-input" id="ahBy" placeholder="Name or company">
+        </div>
+        <div class="form-group"><label class="form-label">&nbsp;</label>
+          <div style="display:flex;align-items:center;height:36px;color:var(--text-muted);font-size:11px">
+            <i class="fas fa-user" style="margin-right:5px"></i>Logged by: <strong style="margin-left:4px;color:var(--text-primary)">${_currentUserProfile?.name || _currentUser?.email || 'You'}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Detail / Description *</label>
+        <textarea class="form-textarea" id="ahDetail" placeholder="Describe what was done..." style="min-height:60px"></textarea>
+      </div>
+
+      <!-- ATTACHMENT -->
+      <div class="form-group" style="margin-top:14px">
+        <label class="form-label">📎 Attach Document / Photo <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
+        <input type="file" class="form-input" id="ahFile" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onchange="_ahPickFile(event)">
+        <div id="ahFilePreview" style="font-size:11px;color:var(--text-muted);margin-top:4px">Photos for breakdown, certificates for calibration, service receipts, etc.</div>
+      </div>
+    </div>
+  `;
+  $('#genericModalFooter').innerHTML = `
+    <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+    <button class="btn btn-primary" id="ahSaveBtn" onclick="saveAssetHistory()" disabled style="opacity:.5"><i class="fas fa-save"></i> Log Event</button>
+  `;
   openModal('genericModal');
+  setTimeout(() => document.getElementById('ahAssetSearch')?.focus(), 100);
 }
 
-function saveAssetHistory(){
-  const sel=$('#ahAsset')?.value||'';
-  const [assetId,assetName,assetType]=sel.split('|');
-  const action=$('#ahAction')?.value||'';
-  const nextMaint=$('#ahNextMaint')?.value||'';
-  const nextCal=$('#ahNextCal')?.value||'';
-  const certExpiry=$('#ahCertExpiry')?.value||'';
-  const date=$('#ahDate')?.value||new Date().toISOString().split('T')[0];
+// ── Asset search ───────────────────────────────────────
+let _ahSearchIdx = 0;
+function _ahRenderSearchResults(query) {
+  const resultsEl = document.getElementById('ahSearchResults');
+  if (!resultsEl) return;
+  const q = (query || '').toLowerCase().trim();
 
-  // Build detail auto-summary if empty
-  let detail=$('#ahDetail')?.value||'';
-  if(!detail){
-    const parts=[];
-    if(nextMaint)parts.push('Next maintenance: '+nextMaint);
-    if(nextCal)parts.push('Next calibration: '+nextCal);
-    if(certExpiry)parts.push('Cert/permit expiry updated to: '+certExpiry);
-    detail=parts.join(' · ')||action+' performed';
+  // Build pool of all asset types
+  const pool = [];
+  const addPool = (arr, typeKey, typeLabel, icon, color) => {
+    (arr || []).forEach(a => pool.push({ asset: a, typeKey, typeLabel, icon, color }));
+  };
+  addPool(AppState.data.equipment, 'equipment', 'Equipment', 'fa-cogs', '#fb8f44');
+  addPool(AppState.data.tools, 'tools', 'Tools', 'fa-wrench', '#bc8cff');
+  addPool(AppState.data.vehicles, 'vehicles', 'Vehicles', 'fa-truck', '#3fb950');
+  addPool(AppState.data.personnel, 'personnel', 'Personnel', 'fa-user-hard-hat', '#388bfd');
+  addPool(AppState.data.consumables, 'consumables', 'Consumables', 'fa-boxes', '#39d3f2');
+  addPool(AppState.data.thirdParty, 'thirdParty', 'Third Party', 'fa-handshake', '#f0a450');
+
+  let matches;
+  if (!q) {
+    // Recently logged assets at top
+    const recentIds = (AppState.data.assetHistory||[]).slice(-30).reverse().map(h => h.assetId);
+    const seen = new Set();
+    matches = [];
+    for (const id of recentIds) {
+      const found = pool.find(p => p.asset.id === id);
+      if (found && !seen.has(id)) { matches.push(found); seen.add(id); if (matches.length >= 6) break; }
+    }
+    if (matches.length === 0) matches = pool.slice(0, 12);
+  } else {
+    matches = pool.filter(p => {
+      const a = p.asset;
+      return (a.id || '').toLowerCase().includes(q)
+        || (a.name || '').toLowerCase().includes(q)
+        || (a.category || '').toLowerCase().includes(q)
+        || (a.serialNo || a.serial || '').toLowerCase().includes(q)
+        || (a.location || '').toLowerCase().includes(q)
+        || (a.make || '').toLowerCase().includes(q)
+        || (a.model || '').toLowerCase().includes(q);
+    }).slice(0, 30);
   }
 
-  const h={
-    id:'AH-'+((AppState.data.assetHistory||[]).length+1).toString().padStart(3,'0'),
-    assetId,assetName,assetType,action,detail,
-    performedBy:$('#ahBy')?.value||'',
-    date,
-    projectId:$('#ahProj')?.value||'N/A',
-    beforeValue:$('#ahBefore')?.value||'',
-    afterValue:$('#ahAfter')?.value||'',
-    nextMaint,nextCal,certExpiry
-  };
-  if(!h.assetId||!h.detail){showToast('Asset and detail required','error');return;}
-  if(!AppState.data.assetHistory)AppState.data.assetHistory=[];
-  AppState.data.assetHistory.push(h);
+  if (!matches.length) {
+    resultsEl.style.display = 'block';
+    resultsEl.innerHTML = `<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px"><i class="fas fa-search" style="font-size:18px;opacity:.4;display:block;margin-bottom:5px"></i>No assets match "${q}"</div>`;
+    return;
+  }
+  _ahSearchIdx = 0;
+  resultsEl.style.display = 'block';
+  resultsEl.innerHTML = (!q ? '<div style="padding:6px 12px;font-size:9px;font-weight:700;letter-spacing:1px;color:var(--text-muted);background:var(--bg-hover);border-bottom:1px solid var(--border)">' + (matches.length && (AppState.data.assetHistory||[]).length ? 'RECENT' : 'ALL ASSETS') + '</div>' : '')
+    + matches.map((m, i) => {
+    const a = m.asset;
+    const statusColor = (a.status==='available')?'#3fb950':(a.status==='in-use')?'#388bfd':(a.status==='maintenance')?'#f0a450':(a.status==='out-of-service')?'#f85149':'#8b949e';
+    return `<div data-ah-idx="${i}" onclick='_ahPickAsset(${JSON.stringify(a).replace(/'/g,"&#39;")}, "${m.typeKey}")' onmouseenter="_ahSearchIdx=${i};_ahHighlight()"
+      style="padding:8px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;border-bottom:1px solid var(--border);${i===_ahSearchIdx?'background:var(--bg-hover)':''}">
+      <div style="width:28px;height:28px;background:${m.color}22;color:${m.color};border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas ${m.icon}" style="font-size:11px"></i></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="font-family:var(--font-mono);color:var(--accent-blue)">${a.id}</span> — ${a.name||'(no name)'}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${m.typeLabel}${a.category?' · '+a.category:''}${a.location?' · '+a.location:''}</div>
+      </div>
+      <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${statusColor}22;color:${statusColor};font-weight:600;flex-shrink:0">${a.status||'available'}</span>
+    </div>`;
+  }).join('');
+}
 
-  // ── Push updates FROM history TO the asset tracking record ──
-  const typeToKey={Equipment:'equipment',Tool:'tools',Vehicle:'vehicles'};
-  const listKey=typeToKey[assetType];
-  if(listKey){
-    const asset=(AppState.data[listKey]||[]).find(a=>a.id===assetId);
-    if(asset){
-      // Dates: shift current "next" to "last" before overwriting
-      if(nextMaint){
-        asset.lastMaint=asset.nextMaint&&asset.nextMaint!=='N/A'?asset.nextMaint:date;
-        asset.nextMaint=nextMaint;
-      }
-      if(nextCal){
-        asset.lastCal=asset.nextCal&&asset.nextCal!=='N/A'?asset.nextCal:date;
-        asset.nextCal=nextCal;
-      }
-      if(certExpiry) asset.certExpiry=certExpiry;
+function _ahHighlight() {
+  document.querySelectorAll('[data-ah-idx]').forEach((el, i) => {
+    el.style.background = i === _ahSearchIdx ? 'var(--bg-hover)' : '';
+  });
+}
 
-      // Status logic based on action type
-      const afterVal=$('#ahAfter')?.value||'';
-      if(afterVal) asset.status=afterVal; // explicit "after" always wins
-      else{
-        if(action==='Deployment')                          asset.status='in-use';
-        if(action==='Maintenance'||action==='Preventive Maintenance'||action==='Corrective Maintenance')
-                                                           asset.status='available';
-        if(action==='Breakdown')                           asset.status='maintenance';
-        if(action==='Repair')                              asset.status='available';
-        if(action==='Return to Store')                     asset.status='available';
-        if(action==='Decommission')                        asset.status='out-of-service';
-        if(action==='Transfer'){
-          const projId=$('#ahProj')?.value||'N/A';
-          if(projId&&projId!=='N/A') asset.projectId=projId;
-        }
+function _ahSearchKeyNav(e) {
+  const resultsEl = document.getElementById('ahSearchResults');
+  if (!resultsEl || resultsEl.style.display === 'none') return;
+  const items = resultsEl.querySelectorAll('[data-ah-idx]');
+  if (!items.length) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); _ahSearchIdx = Math.min(_ahSearchIdx + 1, items.length - 1); _ahHighlight(); items[_ahSearchIdx]?.scrollIntoView({block:'nearest'}); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); _ahSearchIdx = Math.max(_ahSearchIdx - 1, 0); _ahHighlight(); items[_ahSearchIdx]?.scrollIntoView({block:'nearest'}); }
+  else if (e.key === 'Enter') { e.preventDefault(); items[_ahSearchIdx]?.click(); }
+  else if (e.key === 'Escape') { resultsEl.style.display = 'none'; }
+}
+
+function _ahPickAsset(asset, typeKey) {
+  const typeLabels = { equipment:'Equipment', tools:'Tools', vehicles:'Vehicles', personnel:'Personnel', consumables:'Consumables', thirdParty:'Third Party' };
+  const typeAssetType = { equipment:'Equipment', tools:'Tool', vehicles:'Vehicle', personnel:'Personnel', consumables:'Consumable', thirdParty:'Third Party' };
+  _ahSelectedAsset = { asset, typeKey, typeLabel: typeLabels[typeKey], assetType: typeAssetType[typeKey] };
+  // Update UI
+  const searchInput = document.getElementById('ahAssetSearch');
+  const resultsEl = document.getElementById('ahSearchResults');
+  const selectedEl = document.getElementById('ahAssetSelected');
+  const fieldsEl = document.getElementById('ahEventFields');
+  const saveBtn = document.getElementById('ahSaveBtn');
+  if (searchInput) { searchInput.value = ''; searchInput.placeholder = 'Search again to change asset...'; }
+  if (resultsEl) resultsEl.style.display = 'none';
+  if (selectedEl) {
+    const a = asset;
+    const statusColor = (a.status==='available')?'#3fb950':(a.status==='in-use')?'#388bfd':(a.status==='maintenance')?'#f0a450':'#8b949e';
+    selectedEl.style.display = 'block';
+    selectedEl.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px">
+        <i class="fas fa-check-circle" style="color:var(--accent-green);font-size:18px"></i>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700"><span style="font-family:var(--font-mono);color:var(--accent-blue)">${a.id}</span> — ${a.name||''}</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px">
+            <span style="padding:1px 6px;background:${statusColor}22;color:${statusColor};border-radius:8px;font-weight:600;margin-right:6px">${a.status||'available'}</span>
+            ${_ahSelectedAsset.typeLabel}${a.category?' · '+a.category:''}${a.location?' · 📍 '+a.location:''}
+            ${a.nextCal?' · 🔧 Cal: '+a.nextCal:''}${a.nextMaint?' · 🛠 Maint: '+a.nextMaint:''}${a.certExpiry?' · 📜 Cert: '+a.certExpiry:''}
+          </div>
+        </div>
+        <button onclick="_ahClearAsset()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px" title="Change asset"><i class="fas fa-times"></i></button>
+      </div>`;
+  }
+  if (fieldsEl) fieldsEl.style.display = 'block';
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+  // Auto-fill "Status Before" with current asset status (+ details if relevant)
+  _ahPopulateBefore();
+  _ahOnEventTypeChange(); // refresh visibility + after-suggestion
+}
+
+function _ahClearAsset() {
+  _ahSelectedAsset = null;
+  const searchInput = document.getElementById('ahAssetSearch');
+  const selectedEl = document.getElementById('ahAssetSelected');
+  const fieldsEl = document.getElementById('ahEventFields');
+  const saveBtn = document.getElementById('ahSaveBtn');
+  if (searchInput) { searchInput.value = ''; searchInput.placeholder = 'Type to search 1000+ assets...'; searchInput.focus(); }
+  if (selectedEl) selectedEl.style.display = 'none';
+  if (fieldsEl) fieldsEl.style.display = 'none';
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '.5'; }
+}
+
+function _ahPopulateBefore() {
+  if (!_ahSelectedAsset) return;
+  const a = _ahSelectedAsset.asset;
+  const beforeEl = document.getElementById('ahBefore');
+  if (!beforeEl) return;
+  const parts = [a.status || 'available'];
+  if (a.nextCal && a.nextCal !== 'N/A') {
+    const today = new Date().toISOString().split('T')[0];
+    if (a.nextCal < today) parts.push('cal overdue (was due ' + a.nextCal + ')');
+    else parts.push('cal due ' + a.nextCal);
+  }
+  if (a.nextMaint && a.nextMaint !== 'N/A') {
+    const today = new Date().toISOString().split('T')[0];
+    if (a.nextMaint < today) parts.push('maint overdue');
+  }
+  if (a.certExpiry && a.certExpiry !== 'N/A') {
+    const today = new Date().toISOString().split('T')[0];
+    if (a.certExpiry < today) parts.push('cert expired');
+  }
+  beforeEl.value = parts.join(' · ');
+}
+
+function _ahToggleBeforeEdit() {
+  const beforeEl = document.getElementById('ahBefore');
+  const overrideLink = document.getElementById('ahBeforeOverride');
+  if (!beforeEl) return;
+  if (beforeEl.readOnly) {
+    beforeEl.readOnly = false;
+    beforeEl.style.opacity = '1';
+    beforeEl.style.cursor = 'text';
+    beforeEl.style.background = '';
+    beforeEl.focus();
+    if (overrideLink) overrideLink.innerHTML = '<i class="fas fa-lock-open" style="margin-right:3px"></i>Reset to auto';
+  } else {
+    beforeEl.readOnly = true;
+    beforeEl.style.opacity = '.85';
+    beforeEl.style.cursor = 'not-allowed';
+    beforeEl.style.background = 'var(--bg-hover)';
+    _ahPopulateBefore();
+    if (overrideLink) overrideLink.innerHTML = '<i class="fas fa-lock" style="margin-right:3px"></i>Override';
+  }
+}
+
+function _ahOnEventTypeChange() {
+  const action = document.getElementById('ahAction')?.value || 'Other';
+  const rules = _AH_FIELD_RULES[action] || _AH_FIELD_RULES['Other'];
+  // Show/hide groups
+  const show = (id, cond) => { const el = document.getElementById(id); if (el) el.style.display = cond ? '' : 'none'; };
+  show('ahProjGroup', rules.project);
+  show('ahNextMaintGroup', rules.nextMaint);
+  show('ahNextCalGroup', rules.nextCal);
+  show('ahCertExpiryGroup', rules.certExpiry);
+  show('ahCostGroup', rules.cost);
+  _ahUpdateSuggestedAfter();
+}
+
+function _ahUpdateSuggestedAfter() {
+  const action = document.getElementById('ahAction')?.value || 'Other';
+  const date = document.getElementById('ahDate')?.value || new Date().toISOString().split('T')[0];
+  const afterEl = document.getElementById('ahAfter');
+  if (!afterEl) return;
+  const tmpl = _AH_SUGGESTED_AFTER[action] || '';
+  const suggested = tmpl.replace('{date}', date);
+  // Only set if not yet user-edited (heuristic: matches last suggestion or empty)
+  if (!afterEl.value || afterEl.dataset.fromSuggestion === '1') {
+    afterEl.value = suggested;
+    afterEl.dataset.fromSuggestion = '1';
+  }
+  // Track manual edits so we don't overwrite
+  if (!afterEl._ahHooked) {
+    afterEl._ahHooked = true;
+    afterEl.addEventListener('input', () => { afterEl.dataset.fromSuggestion = '0'; });
+  }
+}
+
+function _ahPickFile(event) {
+  const file = event.target.files[0];
+  const preview = document.getElementById('ahFilePreview');
+  if (!file) { _ahSelectedFile = null; if (preview) preview.textContent = 'Photos for breakdown, certificates for calibration, service receipts, etc.'; return; }
+  if (file.size > 50 * 1024 * 1024) { showToast('File too large — max 50 MB', 'error'); event.target.value = ''; return; }
+  _ahSelectedFile = file;
+  if (preview) preview.innerHTML = '<i class="fas fa-paperclip" style="color:var(--accent-blue);margin-right:5px"></i><strong>' + file.name + '</strong> · ' + _formatFileSize(file.size);
+}
+
+async function saveAssetHistory() {
+  if (!_ahSelectedAsset) { showToast('Please select an asset', 'error'); return; }
+  const a = _ahSelectedAsset.asset;
+  const typeKey = _ahSelectedAsset.typeKey;
+  const assetType = _ahSelectedAsset.assetType;
+  const action = $('#ahAction')?.value || '';
+  const rules = _AH_FIELD_RULES[action] || _AH_FIELD_RULES['Other'];
+  const date = $('#ahDate')?.value || new Date().toISOString().split('T')[0];
+  let detail = $('#ahDetail')?.value || '';
+  const nextMaint = rules.nextMaint ? ($('#ahNextMaint')?.value || '') : '';
+  const nextCal = rules.nextCal ? ($('#ahNextCal')?.value || '') : '';
+  const certExpiry = rules.certExpiry ? ($('#ahCertExpiry')?.value || '') : '';
+  const cost = rules.cost ? (parseFloat($('#ahCost')?.value || 0) || 0) : 0;
+  const projectId = rules.project ? ($('#ahProj')?.value || 'N/A') : 'N/A';
+  const updMaint = document.getElementById('ahUpdAssetMaint')?.checked !== false;
+  const updCal = document.getElementById('ahUpdAssetCal')?.checked !== false;
+  const updCert = document.getElementById('ahUpdAssetCert')?.checked !== false;
+
+  if (!detail) {
+    const parts = [];
+    if (nextMaint) parts.push('Next maintenance: ' + nextMaint);
+    if (nextCal) parts.push('Next calibration: ' + nextCal);
+    if (certExpiry) parts.push('Cert/permit expiry updated to: ' + certExpiry);
+    detail = parts.join(' · ') || action + ' performed';
+  }
+
+  // Upload attachment if present
+  let attachment = null;
+  if (_ahSelectedFile) {
+    if (_spConnected) {
+      try {
+        showToast('Uploading attachment...', 'info', 2000);
+        const result = await spUploadFile(_ahSelectedFile, 'ASSETS/' + a.id);
+        attachment = {
+          name: _ahSelectedFile.name,
+          fileUrl: result.url,
+          fileWebUrl: result.webUrl,
+          spDriveId: result.driveId,
+          spItemId: result.itemId,
+          size: _formatFileSize(_ahSelectedFile.size),
+        };
+      } catch(e) {
+        if (!confirm('Attachment upload failed: ' + e.message + '\n\nSave event without attachment?')) return;
       }
+    } else {
+      if (!confirm('Not connected to SharePoint — cannot upload attachment.\n\nSave event without attachment?')) return;
     }
   }
-  AppState.save();closeModal('genericModal');renderMlHistory();showToast('History logged — asset record updated','success');
+
+  const h = {
+    id: 'AH-' + ((AppState.data.assetHistory||[]).length + 1).toString().padStart(4, '0'),
+    assetId: a.id,
+    assetName: a.name,
+    assetType,
+    action,
+    detail,
+    performedBy: $('#ahBy')?.value || '',
+    loggedBy: _currentUserProfile?.name || _currentUser?.email || '',
+    date,
+    projectId,
+    beforeValue: $('#ahBefore')?.value || '',
+    afterValue: $('#ahAfter')?.value || '',
+    nextMaint, nextCal, certExpiry, cost,
+    attachment,
+    timestamp: new Date().toISOString(),
+  };
+  if (!AppState.data.assetHistory) AppState.data.assetHistory = [];
+  AppState.data.assetHistory.push(h);
+
+  // Update asset record per rules + checkboxes
+  const asset = (AppState.data[typeKey] || []).find(x => x.id === a.id);
+  if (asset) {
+    if (nextMaint && updMaint) {
+      asset.lastMaint = asset.nextMaint && asset.nextMaint !== 'N/A' ? asset.nextMaint : date;
+      asset.nextMaint = nextMaint;
+    }
+    if (nextCal && updCal) {
+      asset.lastCal = asset.nextCal && asset.nextCal !== 'N/A' ? asset.nextCal : date;
+      asset.nextCal = nextCal;
+    }
+    if (certExpiry && updCert) asset.certExpiry = certExpiry;
+
+    const afterVal = $('#ahAfter')?.value || '';
+    if (afterVal) {
+      // Try to extract a clean status keyword from the suggestion (first word before ·)
+      const cleanStatus = afterVal.split('·')[0].trim();
+      // Only update status field with a known status keyword
+      const knownStatuses = ['available','in-use','maintenance','out-of-service','disposed'];
+      if (knownStatuses.includes(cleanStatus)) asset.status = cleanStatus;
+    }
+    if (action === 'Transfer' && projectId && projectId !== 'N/A') asset.projectId = projectId;
+    if (action === 'Deployment' && projectId && projectId !== 'N/A') asset.projectId = projectId;
+  }
+
+  AppState.save();
+  closeModal('genericModal');
+  if (typeof renderMlHistory === 'function') renderMlHistory();
+  showToast('History logged' + (attachment ? ' + attachment uploaded' : ''), 'success');
 }
 
 // logAssetHistoryAuto kept for compatibility but no longer called automatically
