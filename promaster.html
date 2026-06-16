@@ -8439,14 +8439,15 @@ function _formatRelativeTime(ts) {
 // ── Compute number of records that differ from last-known remote state ──
 function _computePendingChanges() {
   try {
-    if (typeof _spDataHash === 'undefined' || !_spDataHash) return 0;
-    // Hash current local data the same way we hash before push
-    const localStr = JSON.stringify(_normalizeDataForHash(AppState.data));
-    const localHash = _quickHash(localStr);
-    if (localHash === _spDataHash) return 0;
-    // Count actual changed records across all data arrays
-    return _countChangedRecords();
+    // Always count records with _newlyCreated flag (truth source)
+    const items = _countChangedRecords();
+    return items.length;
   } catch(e) { return 0; }
+}
+
+// Returns the actual pending items for display
+function _getPendingItems() {
+  try { return _countChangedRecords(); } catch(e) { return []; }
 }
 
 function _normalizeDataForHash(data) {
@@ -8457,19 +8458,48 @@ function _normalizeDataForHash(data) {
 }
 
 function _countChangedRecords() {
-  // Count items that haven't been confirmed pushed yet
-  let count = 0;
-  const arrays = ['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
-    'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs',
-    'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
-    'assetHistory','assetUtilization','idChangeRequests','notifications','activities','projectIdHistory'];
-  arrays.forEach(k => {
-    const local = (AppState.data[k] || []);
-    local.forEach(r => { if (r && r._newlyCreated) count++; });
+  // Returns { count, items: [{arrayKey, label, type}] } so we can show details
+  const items = [];
+  const arrays = [
+    { k: 'projects', label: 'Project' },
+    { k: 'tasks', label: 'Task' },
+    { k: 'costs', label: 'Cost' },
+    { k: 'qaqc', label: 'QA/QC' },
+    { k: 'risks', label: 'Risk' },
+    { k: 'actions', label: 'Action' },
+    { k: 'documents', label: 'Document' },
+    { k: 'libraryDocs', label: 'Library Doc' },
+    { k: 'resourceAllocations', label: 'Allocation' },
+    { k: 'resourceUsageLogs', label: 'Usage Log' },
+    { k: 'dailyMeetingLogs', label: 'Daily Log' },
+    { k: 'procurement', label: 'Procurement' },
+    { k: 'procurementLogs', label: 'Proc. Log' },
+    { k: 'materials', label: 'Material' },
+    { k: 'manpower', label: 'Manpower' },
+    { k: 'equipment', label: 'Equipment' },
+    { k: 'tools', label: 'Tool' },
+    { k: 'vehicles', label: 'Vehicle' },
+    { k: 'consumables', label: 'Consumable' },
+    { k: 'thirdParty', label: 'Third Party' },
+    { k: 'assetHistory', label: 'Asset History' },
+    { k: 'assetUtilization', label: 'Asset Util.' },
+    { k: 'idChangeRequests', label: 'ID Change Req' },
+  ];
+  arrays.forEach(cfg => {
+    (AppState.data[cfg.k] || []).forEach(r => {
+      if (r && r._newlyCreated) {
+        items.push({
+          arrayKey: cfg.k,
+          type: cfg.label,
+          id: r.id || '',
+          label: r.description || r.name || r.title || r.id || '(unnamed)',
+          createdAt: r._localCreatedAt || r.createdAt || '',
+          createdBy: r.createdBy || r.uploadedBy || _currentUserProfile?.name || '',
+        });
+      }
+    });
   });
-  // Plus the ones modified — approximated by hash diff
-  if (count === 0) count = 1; // at least one if hash differs
-  return count;
+  return items;
 }
 
 // ── Click handler: bi-directional sync ────────────────────
@@ -8479,17 +8509,99 @@ async function syncStatusClick() {
     showToast('Not connected to SharePoint — please sign in', 'warning', 4000);
     return;
   }
+  // If pending, show details modal first with options to sync or review
+  if (_syncState === 'pending') {
+    const items = _getPendingItems();
+    if (items.length > 0) {
+      showPendingDetails(items);
+      return;
+    }
+  }
+  // No pending → just sync to verify
+  await _doFullSync();
+}
+
+
+// ── Show what's pending sync ──────────────────────────────
+function showPendingDetails(items) {
+  if (!items || items.length === 0) {
+    // Nothing actually pending — start sync directly
+    _doFullSync();
+    return;
+  }
+  // Group by type for clean display
+  const byType = {};
+  items.forEach(it => {
+    if (!byType[it.type]) byType[it.type] = [];
+    byType[it.type].push(it);
+  });
+
+  $('#genericModalTitle').textContent = 'Pending Sync — ' + items.length + ' item' + (items.length !== 1 ? 's' : '');
+  $('#genericModalBody').innerHTML = `
+    <div style="padding:10px 12px;background:rgba(240,164,80,.08);border:1px solid rgba(240,164,80,.25);border-radius:8px;margin-bottom:14px">
+      <div style="font-weight:700;color:var(--accent-amber);margin-bottom:4px"><i class="fas fa-cloud-upload-alt" style="margin-right:5px"></i>${items.length} record${items.length !== 1 ? 's' : ''} not yet synced to SharePoint</div>
+      <div style="font-size:11px;color:var(--text-secondary)">These items were created/changed locally and will be pushed when you sync.</div>
+    </div>
+    <div style="max-height:380px;overflow-y:auto">
+      ${Object.entries(byType).map(([type, list]) => `
+        <div style="margin-bottom:14px">
+          <div style="font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:1px;margin-bottom:6px;padding:0 4px">${type.toUpperCase()} <span style="color:var(--accent-amber)">(${list.length})</span></div>
+          ${list.map(it => `
+            <div style="padding:8px 12px;border:1px solid var(--border);border-radius:7px;margin-bottom:5px;font-size:11px;display:flex;align-items:center;gap:10px">
+              <i class="fas fa-circle" style="color:var(--accent-amber);font-size:6px;flex-shrink:0"></i>
+              <div style="flex:1;min-width:0">
+                <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                  ${it.id ? `<span style="font-family:var(--font-mono);color:var(--accent-blue);margin-right:6px">${it.id}</span>` : ''}${it.label}
+                </div>
+                <div style="font-size:9px;color:var(--text-muted);margin-top:2px">
+                  ${it.createdBy ? '👤 ' + it.createdBy + ' · ' : ''}${it.createdAt ? '📅 ' + new Date(it.createdAt).toLocaleString() : 'just now'}
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `).join('')}
+    </div>
+  `;
+  $('#genericModalFooter').innerHTML = `
+    <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+    <button class="btn btn-secondary" onclick="_discardPendingChanges()" style="color:var(--accent-red);border-color:rgba(248,81,73,.3)" title="Discard all unsynced changes"><i class="fas fa-trash"></i> Discard</button>
+    <button class="btn btn-primary" onclick="closeModal('genericModal');_doFullSync()"><i class="fas fa-cloud-upload-alt"></i> Sync Now</button>
+  `;
+  openModal('genericModal');
+}
+
+// ── Confirm + discard all pending changes ─────────────────
+function _discardPendingChanges() {
+  if (!confirm('Discard ALL unsynced changes?\n\nThis will REMOVE records that have not been pushed to SharePoint. This action cannot be undone.')) return;
+  const arrays = ['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
+    'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs',
+    'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
+    'assetHistory','assetUtilization','idChangeRequests','notifications','activities','projectIdHistory'];
+  let removed = 0;
+  arrays.forEach(k => {
+    if (!AppState.data[k]) return;
+    const before = AppState.data[k].length;
+    AppState.data[k] = AppState.data[k].filter(r => !(r && r._newlyCreated));
+    removed += before - AppState.data[k].length;
+  });
+  AppState.save();
+  closeModal('genericModal');
+  try { updateSyncStatusButton(); } catch(e) {}
+  showToast('Discarded ' + removed + ' unsynced record(s)', 'warning', 4000);
+  // Re-render whatever page we're on
+  try { const cur = AppState.currentPage; if (cur && typeof navigate === 'function') navigate(cur); } catch(e) {}
+}
+
+// ── Do the actual sync (extracted from syncStatusClick) ────
+async function _doFullSync() {
   _syncState = 'syncing';
   updateSyncStatusButton();
   try {
-    // Phase 1: PULL — get latest from SP
     await _spPollRemote();
-    // Phase 2: COLLISION CHECK — fix any duplicate IDs before push
     const renamed = await _detectAndResolveIdCollisions();
     _syncLastRenamed = renamed.length;
-    // Phase 3: PUSH — send local changes
     await spPushData(true);
-    // Phase 4: Clear "newly created" flags now that they're synced
     _clearNewlyCreatedFlags();
     _syncLastTs = Date.now();
     _syncState = 'synced';
@@ -8507,6 +8619,7 @@ async function syncStatusClick() {
   }
   updateSyncStatusButton();
 }
+
 
 // ═══════════════════════════════════════════════════════════
 // ── ID COLLISION DETECTION (first-to-sync wins) ───────────
