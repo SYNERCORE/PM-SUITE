@@ -1,6 +1,6 @@
 // SHIC PM Suite — Service Worker
 // Provides offline caching of the app shell so the app opens without network.
-const CACHE = 'shic-v2';
+const CACHE = 'shic-v3';
 const APP_SHELL = ['./promaster.html'];
 
 self.addEventListener('install', (e) => {

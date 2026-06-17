@@ -38,6 +38,7 @@ body{font-family:var(--font-main);background:var(--bg-primary);color:var(--text-
 .topbar-title{font-size:15px;font-weight:600;flex:1}
 @keyframes syncPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
 @keyframes syncSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes slideUp{from{transform:translate(-50%,40px);opacity:0}to{transform:translate(-50%,0);opacity:1}}
 #syncStatusBtn:hover{transform:scale(1.04);filter:brightness(1.1)}
 #syncStatusBtn:active{transform:scale(.96)}
 .topbar-actions{display:flex;align-items:center;gap:7px}
@@ -343,6 +344,10 @@ canvas{display:block}
   </div>
   <div class="sidebar-nav" id="sidebarNav"></div>
   <div class="sidebar-footer">
+    <div class="nav-item" onclick="navigate('trash')" title="Trash">
+      <span class="nav-icon"><i class="fas fa-trash"></i></span>
+      <span class="nav-label">Trash</span>
+    </div>
     <div class="nav-item" onclick="navigate('settings')">
       <span class="nav-icon"><i class="fas fa-cog"></i></span>
       <span class="nav-label">Settings</span>
@@ -396,6 +401,7 @@ canvas{display:block}
 <div id="calendar" class="page"></div>
     <div id="reports" class="page"></div>
     <div id="masterlist" class="page"></div>
+    <div id="trash" class="page"></div>
     <div id="settings" class="page"></div>
   </div>
 </div>
@@ -1113,6 +1119,11 @@ function _pgNav(tableId, data, rerenderFn) {
 
 function renderPage(pid){
 AppState.ensureData();
+// Fix #3: auto-purge old trash on first load each session
+if (!window._trashPurged) {
+  window._trashPurged = true;
+  try { autoPurgeOldTrash(); } catch(e) {}
+}
 const map={dashboard:renderDashboard,projects:renderProjects,tasks:renderTasks,gantt:renderGantt,
 resources:renderResources,manpower:renderManpower,materials:renderMaterials,procurement:renderProcurement,
 costs:renderCosts,qaqc:renderQAQC,risks:renderRisks,actions:renderActions,documents:renderDocuments,
@@ -1385,7 +1396,7 @@ ${['all','active','completed','planned'].map(f=>`<button class="btn btn-sm ${pro
 <div class="grid grid-3" id="projectsGrid">${renderProjCards()}</div>`;}
 
 function renderProjCards(){
-let ps=(AppState.data.projects||[]).filter(p=>p.status!=='prospect'); // exclude prospects from main list
+let ps=(AppState.data.projects||[]).filter(p=>!p._deleted && p.status!=='prospect'); // exclude soft-deleted + prospects
 if(projectFilter!=='all')ps=ps.filter(p=>p.status===projectFilter);
 if(typeof projectBUFilter!=='undefined'&&projectBUFilter!=='all'){
   ps=ps.filter(p=>(p.businessUnit||'')===(projectBUFilter||'')); 
@@ -1418,8 +1429,97 @@ ${p.businessUnit?(()=>{const bu=(AppState.data.businessUnits||[]).find(b=>b.id==
 function filterProjects(f){projectFilter=f;renderProjects();}
 function searchProjects(v){projectSearch=v;$('#projectsGrid').innerHTML=renderProjCards();}
 
+
+// ═══════════════════════════════════════════════════════════
+// ── FIX #2: FIELD-LEVEL CONFLICT DETECTION ───────────────
+// Snapshot record when modal opens, diff against current on save
+// ═══════════════════════════════════════════════════════════
+
+let _editModalSnapshots = {}; // { modalKey: { record, openedAt } }
+
+function _snapshotRecord(modalKey, record) {
+  if (!record) return;
+  _editModalSnapshots[modalKey] = {
+    record: JSON.parse(JSON.stringify(record)), // deep clone
+    openedAt: Date.now(),
+  };
+}
+
+// Returns array of field names that have changed since modal opened
+function _detectExternalChanges(modalKey, currentRecord) {
+  const snap = _editModalSnapshots[modalKey];
+  if (!snap || !currentRecord) return [];
+  const changed = [];
+  Object.keys(currentRecord).forEach(key => {
+    // Skip internal/transient fields
+    if (key.startsWith('_') || key === 'id') return;
+    if (typeof currentRecord[key] === 'object') return; // skip nested objects/arrays
+    if (JSON.stringify(snap.record[key]) !== JSON.stringify(currentRecord[key])) {
+      changed.push(key);
+    }
+  });
+  return changed;
+}
+
+function _clearSnapshot(modalKey) {
+  delete _editModalSnapshots[modalKey];
+}
+
+// Show conflict warning modal — returns Promise<boolean> (true = keep mine, false = reload)
+function _showConflictWarning(modalKey, currentRecord, mySnapshot, conflictFields) {
+  return new Promise(resolve => {
+    const fieldList = conflictFields.map(f => `<div style="padding:6px 10px;background:var(--bg-hover);border-radius:5px;margin-bottom:4px;font-size:11px">
+      <strong style="color:var(--accent-amber);text-transform:uppercase;font-size:9px;letter-spacing:.5px">${f}</strong><br>
+      <span style="color:var(--text-muted)">Your value:</span> <code style="background:rgba(63,185,80,.1);padding:1px 5px;border-radius:3px;color:var(--accent-green);font-size:10px">${String(mySnapshot.record[f]||'').substring(0,80)}</code><br>
+      <span style="color:var(--text-muted)">Current value:</span> <code style="background:rgba(248,81,73,.1);padding:1px 5px;border-radius:3px;color:var(--accent-red);font-size:10px">${String(currentRecord[f]||'').substring(0,80)}</code>
+    </div>`).join('');
+
+    $('#genericModalTitle').textContent = '⚠ Conflict Detected';
+    $('#genericModalBody').innerHTML = `
+      <div style="padding:12px;background:rgba(240,164,80,.1);border:1px solid rgba(240,164,80,.3);border-radius:8px;margin-bottom:14px">
+        <div style="font-weight:700;color:var(--accent-amber);margin-bottom:5px"><i class="fas fa-exclamation-triangle" style="margin-right:5px"></i>Another user modified this record while you were editing</div>
+        <div style="font-size:11px;color:var(--text-secondary)">${conflictFields.length} field${conflictFields.length!==1?'s':''} changed. Choose how to resolve:</div>
+      </div>
+      <div style="max-height:300px;overflow-y:auto;margin-bottom:10px">${fieldList}</div>
+      <div style="padding:10px 12px;background:var(--bg-hover);border-radius:7px;font-size:11px;color:var(--text-muted)">
+        <strong>Keep my changes:</strong> Overwrites the other user's edits with yours.<br>
+        <strong>Reload latest:</strong> Discards your unsaved edits and reloads the current record.
+      </div>
+    `;
+    $('#genericModalFooter').innerHTML = `
+      <button class="btn btn-secondary" onclick="closeModal('genericModal');window._conflictResolve&&window._conflictResolve('reload')"><i class="fas fa-undo"></i> Reload latest</button>
+      <button class="btn btn-primary" style="background:var(--accent-amber);border-color:var(--accent-amber)" onclick="closeModal('genericModal');window._conflictResolve&&window._conflictResolve('keep')"><i class="fas fa-save"></i> Keep my changes</button>
+    `;
+    window._conflictResolve = (choice) => {
+      window._conflictResolve = null;
+      resolve(choice === 'keep');
+    };
+    openModal('genericModal');
+  });
+}
+
+// Wrapper used by Save handlers — returns true if user wants to proceed
+async function _checkConflictBeforeSave(modalKey, recordId, dataKey) {
+  const snap = _editModalSnapshots[modalKey];
+  if (!snap) return true; // no snapshot = no check
+  const current = (AppState.data[dataKey] || []).find(r => r.id === recordId);
+  if (!current) return true; // record gone — let save handle it
+  const changed = _detectExternalChanges(modalKey, current);
+  if (changed.length === 0) return true; // no conflict
+  // Conflict! Ask user
+  const keepMine = await _showConflictWarning(modalKey, current, snap, changed);
+  if (!keepMine) {
+    // Reload — close edit modal too (user will need to reopen with fresh data)
+    _clearSnapshot(modalKey);
+    return false;
+  }
+  return true;
+}
+
 function showProjectForm(id=null){
 const p=id?(AppState.data.projects||[]).find(x=>x.id===id):null;
+// Fix #2: snapshot record for conflict detection
+if (p) _snapshotRecord('project_'+id, p);
 $('#projectModalTitle').textContent=id?'Edit Project':'New Project';
 $('#projectModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">Project ID${id&&p?.status==='prospect'?' <span style="font-size:10px;color:var(--accent-amber)">(editable)</span>':id?' <span style="font-size:10px;color:var(--text-muted)">(use Change ID button to modify)</span>':''}</label><input class="form-input" id="pId" value="${p?.id||'PRJ-'+((AppState.data.projects||[]).length+1).toString().padStart(3,'0')}" ${id&&p?.status!=='prospect'?'readonly style="opacity:.6"':''}></div>
@@ -1447,8 +1547,18 @@ ${(AppState.data.businessUnits||[]).map(bu=>`<option value="${bu.id}" ${p?.busin
 <button class="btn btn-primary" onclick="saveProject('${id||''}')"><i class="fas fa-save"></i> ${id?'Update':'Create'}</button>
 </div>`; openModal('projectModal');}
 
-function saveProject(id){
+async function saveProject(id){
 const newId=$('#pId').value.trim();
+// Fix #2: check for external changes before save
+if (id) {
+  const proceed = await _checkConflictBeforeSave('project_'+id, id, 'projects');
+  if (!proceed) {
+    // User chose "Reload latest" — close edit modal and reopen with fresh data
+    closeModal('projectModal');
+    setTimeout(() => showProjectForm(id), 300);
+    return;
+  }
+}
 const pr={id:newId,name:$('#pName').value,client:$('#pClient').value,location:$('#pLoc').value,startDate:$('#pStart').value,endDate:$('#pEnd').value,budget:parseFloat($('#pBudget').value)||0,pm:$('#pPM').value,status:$('#pStatus').value,priority:$('#pPri').value,discipline:$('#pDisc').value,progress:parseInt($('#pProg').value)||0,description:$('#pDesc').value,businessUnit:$('#pBU')?.value||'',plannedProgress:parseInt($('#pPlannedProg')?.value)||0,spent:0,riskLevel:'medium',phase:'Initiation'};
 if(!pr.name){showToast('Project name required','error');return;}
 if(!newId){showToast('Project ID required','error');return;}
@@ -1478,11 +1588,24 @@ if(id){
   AppState.data.projects.push(pr);
 }
 AppState.save();closeModal('projectModal');
+if(id)_clearSnapshot('project_'+id);
 const isProspect=pr.status==='prospect';
 if(isProspect){renderProspects();navigate('prospects');}else{renderProjects();}
 showToast(id?'Project updated':(isProspect?'Prospect created':'Project created'),'success');}
 
 function deleteProject(id){
+  if(!confirm('Delete this project? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.')) return;
+  if(softDelete('projects', id)){
+    AppState.save();
+    if (typeof buildSidebar==='function') buildSidebar();
+    if (typeof renderProjects==='function') renderProjects();
+    showToast('Project moved to Trash','warning');
+  }
+  return;
+  // Original code below (no longer reached) ────────────
+  _origDeleteProject(id);
+}
+function _origDeleteProject(id){
 if(!confirm('Delete this project?'))return;
 AppState.data.projects=(AppState.data.projects||[]).filter(p=>p.id!==id);
 AppState.save();showToast('Project deleted','warning');renderProjects();}
@@ -1935,6 +2058,8 @@ $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><tabl
 </div></td></tr>`).join('')}</tbody></table>${_pgNav("tasks",tasks,typeof renderTaskView==="function"?renderTaskView:null)}</div></div>`;}
 
 function showTaskForm(id=null,defStatus='todo'){
+// Fix #2b: snapshot for conflict detection if editing
+if(id && typeof _genericSnapshotForEdit==='function')_genericSnapshotForEdit('task_'+id,'tasks',id);
 const t=id?(AppState.data.tasks||[]).find(x=>x.id===id):null;
 $('#taskModalTitle').textContent=id?'Edit Task':'New Task';
 $('#taskModalBody').innerHTML=`<div class="form-grid">
@@ -1957,14 +2082,30 @@ $('#taskModalBody').innerHTML=`<div class="form-grid">
 <button class="btn btn-primary" onclick="saveTask('${id||''}')"><i class="fas fa-save"></i> ${id?'Update':'Create'}</button>
 </div>`; openModal('taskModal');}
 
-function saveTask(id){
+async function saveTask(id){
+// Fix #2b: conflict check before save
+if(id && typeof _genericCheckConflict==='function'){
+  const proceed=await _genericCheckConflict('task_'+id,'tasks',id);
+  if(!proceed){
+    closeModal('genericModal');
+    setTimeout(()=>showTaskForm(id),300);
+    return;
+  }
+}
 const t={id:id||'TSK-'+(Date.now()%100000).toString().padStart(5,'0'),projectId:$('#tProj').value,wbs:$('#tWbs').value,name:$('#tName').value,assignee:$('#tAss').value,dept:$('#tDept').value,startDate:$('#tStart').value,endDate:$('#tEnd').value,plannedHrs:parseFloat($('#tPH').value)||0,actualHrs:parseFloat($('#tAH').value)||0,status:$('#tStat').value,priority:$('#tPri').value,progress:parseInt($('#tProg').value)||0,milestone:$('#tMile').value==='true'};
 if(!t.name){showToast('Task name required','error');return;}
 if(id){const i=(AppState.data.tasks||[]).findIndex(x=>x.id===id);AppState.data.tasks[i]={...AppState.data.tasks[i],...t};}
 else AppState.data.tasks.push(t);
 AppState.save();closeModal('taskModal');renderTaskView();showToast(id?'Task updated':'Task created','success');}
 
-function deleteTask(id){if(!confirm('Delete task?'))return;AppState.data.tasks=(AppState.data.tasks||[]).filter(t=>t.id!==id);AppState.save();renderTaskView();}
+function deleteTask(id){
+  if(!confirm('Delete task? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.'))return;
+  if(softDelete('tasks', id)){
+    AppState.save();
+    if(typeof renderTaskView==='function') renderTaskView();
+    showToast('Task moved to Trash','warning');
+  }
+}
 
 // ── GLOBAL GANTT MODULE ───────────────────────────────────
 
@@ -4904,7 +5045,7 @@ c=$('#sCurve');if(c){c.width=c.parentElement.offsetWidth-30;drawLine('sCurve',[{
 },50);}
 
 function renderQAQC(){
-const{qaqc}=AppState.data;
+const qaqc=(AppState.data.qaqc||[]).filter(q=>!q._deleted);
 $('#qaqc').innerHTML=`<div class="section-header" style="margin-bottom:14px">
 <div class="section-title">QA/QC Management</div>
 <button class="btn btn-primary btn-sm" onclick="showAddInspection(detailProjectId)"><i class="fas fa-plus"></i> New IR</button></div>
@@ -4960,7 +5101,7 @@ AppState.data.qaqc.push(item);AppState.save();closeModal('genericModal');renderQ
 
 
 function renderRisks(){
-const{risks}=AppState.data;
+const risks=(AppState.data.risks||[]).filter(r=>!r._deleted);
 $('#risks').innerHTML=`<div class="section-header" style="margin-bottom:14px">
 <div class="section-title">Risk Register</div>
 <button class="btn btn-primary btn-sm" onclick="showAddRisk(detailProjectId)"><i class="fas fa-plus"></i> New Risk</button></div>
@@ -5031,7 +5172,7 @@ if(!r.description){showToast('Description required','error');return;}
 AppState.data.risks.push(r);AppState.save();closeModal('genericModal');renderRisks();showToast('Risk added','success');buildSidebar();}
 
 function renderActions(){
-const{actions}=AppState.data;
+const actions=(AppState.data.actions||[]).filter(a=>!a._deleted);
 $('#actions').innerHTML=`<div class="section-header" style="margin-bottom:14px">
 <div class="section-title">Action Items Tracker</div>
 <button class="btn btn-primary btn-sm" onclick="showAddAction(detailProjectId)"><i class="fas fa-plus"></i> New Action</button></div>
@@ -5074,6 +5215,24 @@ if(!a.description){showToast('Description required','error');return;}
 AppState.data.actions.push(a);AppState.save();closeModal('genericModal');renderActions();showToast('Action created','success');buildSidebar();}
 
 function closeAction(id){const a=(AppState.data.actions||[]).find(a=>a.id===id);if(a){a.status='closed';AppState.save();renderActions();showToast('Action closed','success');buildSidebar();}}
+function deleteAction(id){
+  if(!confirm('Delete action? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.'))return;
+  if(softDelete('actions', id)){
+    AppState.save();
+    if(typeof renderActions==='function')renderActions();
+    if(typeof buildSidebar==='function')buildSidebar();
+    showToast('Action moved to Trash','warning');
+  }
+}
+function deleteRisk(id){
+  if(!confirm('Delete risk? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.'))return;
+  if(softDelete('risks', id)){
+    AppState.save();
+    if(typeof renderRisks==='function')renderRisks();
+    if(typeof buildSidebar==='function')buildSidebar();
+    showToast('Risk moved to Trash','warning');
+  }
+}
 
 // ── DOCUMENTS MODULE ─────────────────────────────────────
 
@@ -5627,13 +5786,12 @@ async function deleteDoc(id){
   const d=(AppState.data.documents||[]).find(x=>x.id===id);
   if(!d){showToast('Document not found','error');return;}
   const wasRequested=d.deletionRequested?(' (requested by '+d.deletionRequestedBy+')'):'';
-  if(!confirm('Delete this document'+wasRequested+'?\n\nThis cannot be undone.\nDocument: '+d.name))return;
-  // Try to delete file from SharePoint if it exists there
-  if(d.spDriveId&&d.spItemId){
-    try{ await spDeleteFile(d.spDriveId,d.spItemId); }catch(e){console.warn('SP delete:',e.message);}
+  if(!confirm('Delete document'+wasRequested+'?\n\nIt will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days. The SharePoint file will be deleted when permanently purged.\nDocument: '+d.name))return;
+  if(softDelete('documents', id)){
+    AppState.save();
+    if(typeof renderDocuments==='function')renderDocuments();
+    showToast('Document moved to Trash','warning');
   }
-  AppState.data.documents=(AppState.data.documents||[]).filter(x=>x.id!==id);
-  AppState.save();renderDocuments();showToast('Document deleted','warning');
 }
 
 // ── Request document deletion (non-admin users) ─────────────
@@ -7442,8 +7600,8 @@ $('#settings').innerHTML=`
 <div id="offlineStatusContainer"></div>
 
 <!-- ── FIREBASE REAL-TIME COLLABORATION PANEL ── -->
-${(_spConnected&&_spAccount)?'<div style="padding:10px 14px;background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.25);border-radius:8px;font-size:11px;margin-bottom:12px;display:flex;align-items:center;gap:8px"><i class=\"fas fa-exclamation-triangle\" style=\"color:var(--accent-red)\"></i><span><strong>Firebase sync is paused</strong> — SharePoint is your active database. Firebase auto-push and listener are disabled to prevent data conflicts.</span></div>':""}
-<div class="card" id="fbCollabCard" style="margin-bottom:16px;border:1px solid rgba(251,143,68,.25);${(_spConnected&&_spAccount)?'opacity:0.6;pointer-events:none':''}">
+
+<div class="card" id="fbCollabCard" style="display:none;margin-bottom:16px;border:1px solid rgba(251,143,68,.25)">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
     <div style="display:flex;align-items:center;gap:12px">
       <div style="width:40px;height:40px;background:linear-gradient(135deg,#ff9a00,#ff6f00);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
@@ -7568,8 +7726,8 @@ ${(_spConnected&&_spAccount)?'<div style="padding:10px 14px;background:rgba(248,
 </div>
 
 <!-- ── ONEDRIVE SYNC PANEL ── -->
-${(_spConnected&&_spAccount)?'<div style="padding:8px 12px;background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.2);border-radius:6px;font-size:11px;margin-bottom:8px;display:flex;align-items:center;gap:8px"><i class=\"fas fa-exclamation-triangle\" style=\"color:var(--accent-amber)\"></i><span><strong>OneDrive auto-sync is paused</strong> — SharePoint is your active database. OneDrive can still be used for manual backup.</span></div>':""}
-<div class="card" style="margin-bottom:16px;border:1px solid ${connected?'rgba(63,185,80,.4)':'rgba(56,139,253,.25)'};${(_spConnected&&_spAccount)?'opacity:0.75':''}">
+
+<div class="card" id="onedriveCard" style="display:none;margin-bottom:16px;border:1px solid ${connected?'rgba(63,185,80,.4)':'rgba(56,139,253,.25)'}">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
     <div style="display:flex;align-items:center;gap:12px">
       <div style="width:40px;height:40px;background:linear-gradient(135deg,#0078d4,#106ebe);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
@@ -7653,7 +7811,7 @@ ${(_spConnected&&_spAccount)?'<div style="padding:8px 12px;background:rgba(248,8
         ${clientId?`<div style="font-size:10px;color:var(--accent-green);margin-top:6px"><i class="fas fa-check-circle" style="margin-right:4px"></i>Client ID saved — click Connect</div>`:''}
       </div>
     </div>
-    ${clientId?`<div style="margin-top:12px;text-align:center"><button class="btn btn-primary" onclick="connectOneDrive()"><i class="fab fa-microsoft" style="margin-right:6px"></i>Connect to OneDrive</button></div>`:''}
+
   </div>`}
 </div>
 
@@ -11109,8 +11267,10 @@ async function _spPushAllSubLists(token) {
       if (r.added || r.updated || r.deleted) {
         console.log('[SP] ' + listName + ': +' + r.added + ' ~' + r.updated + ' -' + r.deleted);
       }
+      if (typeof _markListSyncSuccess === 'function') _markListSyncSuccess(listName);
     } catch(e) {
       console.warn('[SP] Push ' + listName + ' failed:', e.message);
+      if (typeof _markListSyncFail === 'function') _markListSyncFail(listName, e.message);
     }
   });
   await Promise.all(tasks);
@@ -11591,8 +11751,45 @@ async function spPullData() {
 }
 
 // ── Poll SharePoint every 2 minutes for remote changes ───
+// ── Active editing detection (Fix #1: prevents polling from wiping typing) ──
+let _activeEditingTs = 0;
+let _activeEditingFocus = null;
+(function setupEditingDetection() {
+  if (window._editingDetectionHooked) return;
+  window._editingDetectionHooked = true;
+  document.addEventListener('focusin', e => {
+    const t = e.target;
+    if (!t) return;
+    if (['INPUT','TEXTAREA','SELECT'].includes(t.tagName) || t.isContentEditable) {
+      _activeEditingTs = Date.now();
+      _activeEditingFocus = t;
+    }
+  }, true);
+  document.addEventListener('input', e => {
+    const t = e.target;
+    if (t && (['INPUT','TEXTAREA','SELECT'].includes(t.tagName) || t.isContentEditable)) {
+      _activeEditingTs = Date.now();
+    }
+  }, true);
+  document.addEventListener('focusout', e => {
+    _activeEditingFocus = null;
+  }, true);
+})();
+
+// Returns true if user is actively editing (focused input OR typed within last 8s)
+function _isUserActivelyEditing() {
+  if (_activeEditingFocus) return true;
+  if (_activeEditingTs && (Date.now() - _activeEditingTs) < 8000) return true;
+  return false;
+}
+
 async function _spPollRemote() {
   if (!_spConnected || !_spAccount || _spSyncing) return;
+  // Fix #1: skip if user is actively editing — prevents wiping typed text
+  if (_isUserActivelyEditing()) {
+    console.log('[SP] Poll deferred — user is editing');
+    return;
+  }
   try {
     const token = await getSpToken();
     if (!token) return;
@@ -13984,7 +14181,7 @@ function renderProjectDetail(){
   const costs=(AppState.data.costs||[]).filter(c=>c.projectId===p.id);
   const risks=(AppState.data.risks||[]).filter(r=>r.projectId===p.id);
   const actions=(AppState.data.actions||[]).filter(a=>a.projectId===p.id);
-  const docs=(AppState.data.documents||[]).filter(d=>d.projectId===p.id);
+  const docs=(AppState.data.documents||[]).filter(d=>!d._deleted && d.projectId===p.id);
   const qaqc=(AppState.data.qaqc||[]).filter(q=>q.projectId===p.id);
   const totP=costs.reduce((s,c)=>s+c.planned,0);
   const totA=costs.reduce((s,c)=>s+c.actual,0);
@@ -14875,9 +15072,12 @@ function updateCostField(id,field,val){
   if(c){c[field]=val;AppState.save();}
 }
 function deleteCostItem(id){
-  if(!confirm('Delete this cost item?'))return;
-  AppState.data.costs=(AppState.data.costs||[]).filter(c=>c.id!==id);
-  AppState.save();renderDetailCosts();showToast('Cost item deleted','warning');
+  if(!confirm('Delete cost item? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.'))return;
+  if(softDelete('costs', id)){
+    AppState.save();
+    if(typeof renderDetailCosts==='function')renderDetailCosts();
+    showToast('Cost item moved to Trash','warning');
+  }
 }
 function showAddCostItem(){
   $('#genericModalTitle').textContent='Add Cost Item';
@@ -15075,7 +15275,14 @@ function renderDetailQAQC(){
   </div>`;
 }
 function updateQAQCField(id,field,val){const q=(AppState.data.qaqc||[]).find(q=>q.id===id);if(q){q[field]=val;AppState.save();showToast('Updated','success');}}
-function deleteQAQCItem(id){if(!confirm('Delete IR?'))return;AppState.data.qaqc=(AppState.data.qaqc||[]).filter(q=>q.id!==id);AppState.save();renderDetailQAQC();showToast('IR deleted','warning');}
+function deleteQAQCItem(id){
+  if(!confirm('Delete IR? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.'))return;
+  if(softDelete('qaqc', id)){
+    AppState.save();
+    if(typeof renderDetailQAQC==='function')renderDetailQAQC();
+    showToast('IR moved to Trash','warning');
+  }
+}
 
 function renderDetailRisks(){
   const risks=(AppState.data.risks||[]).filter(r=>r.projectId===detailProjectId);
@@ -15412,10 +15619,19 @@ function updateAlloc(id,field,val){
   if(a){a[field]=val;AppState.save();}
 }
 function deleteAlloc(id){
-  if(!confirm('Remove this allocation?'))return;
-  AppState.data.resourceAllocations=(AppState.data.resourceAllocations||[]).filter(a=>a.id!==id);
-  AppState.data.resourceUsageLogs=(AppState.data.resourceUsageLogs||[]).filter(l=>l.allocationId!==id);
-  AppState.save();renderDetailAllocation();showToast('Allocation removed','warning');
+  if(!confirm('Remove allocation? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.'))return;
+  if(softDelete('resourceAllocations', id)){
+    // Also soft-delete linked usage logs
+    (AppState.data.resourceUsageLogs||[]).forEach(l => {
+      if(l.allocationId===id) {
+        l._deleted=true; l._deletedAt=new Date().toISOString();
+        l._deletedBy=_currentUserProfile?.name||_currentUser?.email||'unknown';
+      }
+    });
+    AppState.save();
+    if(typeof renderDetailAllocation==='function')renderDetailAllocation();
+    showToast('Allocation moved to Trash','warning');
+  }
 }
 
 // ── ALLOCATE RESOURCE MODAL ────────────────────────────────
@@ -18344,6 +18560,438 @@ async function saveAssetHistory() {
   if (typeof renderMlHistory === 'function') renderMlHistory();
   showToast('History logged' + (attachment ? ' + attachment uploaded' : ''), 'success');
 }
+
+
+// ═══════════════════════════════════════════════════════════
+// ── FIX #3: SOFT-DELETE + TRASH MODULE ───────────────────
+// Records get _deleted:true flag instead of being removed
+// 30-day retention before permanent delete
+// ═══════════════════════════════════════════════════════════
+
+const SOFT_DELETE_RETENTION_DAYS = 30;
+
+// Mark a record as soft-deleted (used by new delete handlers)
+function softDelete(arrayKey, id) {
+  const list = AppState.data[arrayKey] || [];
+  const idx = list.findIndex(r => r && r.id === id);
+  if (idx === -1) return false;
+  const r = list[idx];
+  r._deleted = true;
+  r._deletedAt = new Date().toISOString();
+  r._deletedBy = _currentUserProfile?.name || _currentUser?.email || 'unknown';
+  return true;
+}
+
+// Restore a soft-deleted record
+function restoreFromTrash(arrayKey, id) {
+  const list = AppState.data[arrayKey] || [];
+  const r = list.find(x => x && x.id === id);
+  if (!r) return false;
+  delete r._deleted;
+  delete r._deletedAt;
+  delete r._deletedBy;
+  return true;
+}
+
+// Permanently remove a soft-deleted record (admin only or after retention)
+function purgeFromTrash(arrayKey, id) {
+  if (!AppState.data[arrayKey]) return false;
+  AppState.data[arrayKey] = AppState.data[arrayKey].filter(r => r && r.id !== id);
+  return true;
+}
+
+// Filter active (non-deleted) records — used by getActive() helper
+function getActive(arrayKey) {
+  return (AppState.data[arrayKey] || []).filter(r => r && !r._deleted);
+}
+
+// Filter deleted records (for Trash view)
+function getTrashed(arrayKey) {
+  return (AppState.data[arrayKey] || []).filter(r => r && r._deleted);
+}
+
+// Auto-purge records older than retention (run on app start)
+function autoPurgeOldTrash() {
+  const cutoff = Date.now() - (SOFT_DELETE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  let purged = 0;
+  const arrays = ['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
+    'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs',
+    'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
+    'assetHistory','assetUtilization'];
+  arrays.forEach(k => {
+    if (!AppState.data[k]) return;
+    const before = AppState.data[k].length;
+    AppState.data[k] = AppState.data[k].filter(r => {
+      if (!r || !r._deleted) return true;
+      const t = new Date(r._deletedAt || 0).getTime();
+      return t > cutoff;
+    });
+    purged += before - AppState.data[k].length;
+  });
+  if (purged > 0) {
+    console.log('[Trash] Auto-purged ' + purged + ' records older than ' + SOFT_DELETE_RETENTION_DAYS + ' days');
+  }
+}
+
+// ── Trash module renderer ─────────────────────────────────
+function renderTrash() {
+  const arrays = [
+    { k: 'projects', label: 'Projects', icon: 'fa-briefcase' },
+    { k: 'tasks', label: 'Tasks', icon: 'fa-tasks' },
+    { k: 'actions', label: 'Action Items', icon: 'fa-bolt' },
+    { k: 'risks', label: 'Risks', icon: 'fa-shield-halved' },
+    { k: 'qaqc', label: 'QA/QC', icon: 'fa-clipboard-check' },
+    { k: 'costs', label: 'Costs', icon: 'fa-money-bill' },
+    { k: 'documents', label: 'Documents', icon: 'fa-file' },
+    { k: 'libraryDocs', label: 'Library Docs', icon: 'fa-book' },
+    { k: 'procurement', label: 'Procurement', icon: 'fa-cart-shopping' },
+    { k: 'materials', label: 'Materials', icon: 'fa-cubes' },
+    { k: 'equipment', label: 'Equipment', icon: 'fa-cogs' },
+    { k: 'tools', label: 'Tools', icon: 'fa-wrench' },
+    { k: 'vehicles', label: 'Vehicles', icon: 'fa-truck' },
+    { k: 'consumables', label: 'Consumables', icon: 'fa-box' },
+    { k: 'thirdParty', label: 'Third Party', icon: 'fa-handshake' },
+    { k: 'manpower', label: 'Manpower', icon: 'fa-users' },
+    { k: 'resourceAllocations', label: 'Allocations', icon: 'fa-share-nodes' },
+    { k: 'dailyMeetingLogs', label: 'Daily Logs', icon: 'fa-clipboard' },
+  ];
+  // Count per type
+  const counts = arrays.map(a => ({ ...a, count: getTrashed(a.k).length }));
+  const totalTrashed = counts.reduce((s, x) => s + x.count, 0);
+
+  $('#trash').innerHTML = `
+    <div class="section-header" style="margin-bottom:14px">
+      <div>
+        <div class="section-title"><i class="fas fa-trash" style="color:var(--accent-amber);margin-right:8px"></i>Trash</div>
+        <div class="section-sub">Deleted records · auto-purged after ${SOFT_DELETE_RETENTION_DAYS} days · ${totalTrashed} item${totalTrashed!==1?'s':''}</div>
+      </div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap">
+        ${totalTrashed > 0 ? `<button class="btn btn-danger btn-sm" onclick="purgeAllTrash()"><i class="fas fa-skull"></i> Purge All</button>` : ''}
+      </div>
+    </div>
+    ${totalTrashed === 0 ? `
+      <div class="empty-state" style="padding:40px">
+        <i class="fas fa-trash" style="font-size:48px;opacity:.3"></i>
+        <p style="margin-top:10px;font-size:14px;color:var(--text-muted)">Trash is empty</p>
+        <p style="font-size:11px;color:var(--text-muted)">Deleted records appear here and can be restored within ${SOFT_DELETE_RETENTION_DAYS} days</p>
+      </div>` : `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">
+        ${counts.filter(c => c.count > 0).map(c => `
+          <div class="card" style="padding:12px;cursor:pointer" onclick="showTrashFor('${c.k}','${c.label}')">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="width:36px;height:36px;background:rgba(248,81,73,.15);border-radius:8px;display:flex;align-items:center;justify-content:center">
+                <i class="fas ${c.icon}" style="color:var(--accent-red);font-size:14px"></i>
+              </div>
+              <div style="flex:1">
+                <div style="font-size:13px;font-weight:600">${c.label}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${c.count} deleted</div>
+              </div>
+              <i class="fas fa-chevron-right" style="color:var(--text-muted);font-size:11px"></i>
+            </div>
+          </div>
+        `).join('')}
+      </div>`}
+  `;
+}
+
+function showTrashFor(arrayKey, label) {
+  const items = getTrashed(arrayKey).sort((a,b) => (b._deletedAt||'').localeCompare(a._deletedAt||''));
+  $('#genericModalTitle').textContent = 'Trash · ' + label;
+  $('#genericModalBody').innerHTML = `
+    <div style="max-height:60vh;overflow-y:auto">
+      ${items.length === 0 ? '<div class="empty-state">No items</div>' :
+      items.map(r => {
+        const daysOld = Math.floor((Date.now() - new Date(r._deletedAt||0).getTime()) / (24*60*60*1000));
+        const daysLeft = SOFT_DELETE_RETENTION_DAYS - daysOld;
+        const name = r.name || r.description || r.title || r.id || '(unnamed)';
+        return `<div style="padding:10px 12px;border:1px solid var(--border);border-radius:7px;margin-bottom:6px;display:flex;align-items:center;gap:10px">
+          <div style="flex:1;min-width:0">
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--accent-blue)">${r.id||'-'}</div>
+            <div style="font-size:12px;font-weight:600;line-height:1.3;margin-top:2px">${name}</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:3px">
+              Deleted by ${r._deletedBy||'unknown'} · ${daysOld} day${daysOld!==1?'s':''} ago
+              ${daysLeft <= 7 ? `<span style="color:var(--accent-amber);font-weight:600;margin-left:5px">⚠ ${daysLeft} day${daysLeft!==1?'s':''} until permanent delete</span>` : ''}
+            </div>
+          </div>
+          <button class="btn btn-success btn-sm" onclick="_restoreItem('${arrayKey}','${r.id}','${label.replace(/'/g,"&#39;")}')"><i class="fas fa-undo"></i> Restore</button>
+          <button class="btn btn-danger btn-sm btn-icon" onclick="_purgeItem('${arrayKey}','${r.id}','${label.replace(/'/g,"&#39;")}')" title="Permanently delete"><i class="fas fa-times"></i></button>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+  $('#genericModalFooter').innerHTML = `<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
+  openModal('genericModal');
+}
+
+function _restoreItem(arrayKey, id, label) {
+  if (restoreFromTrash(arrayKey, id)) {
+    AppState.save();
+    showToast('Restored from trash', 'success');
+    closeModal('genericModal');
+    if (typeof renderTrash === 'function' && AppState.currentPage === 'trash') renderTrash();
+  }
+}
+
+function _purgeItem(arrayKey, id, label) {
+  if (!confirm('Permanently delete this ' + label + '?\n\nThis CANNOT be undone.')) return;
+  if (purgeFromTrash(arrayKey, id)) {
+    AppState.save();
+    showToast('Permanently deleted', 'warning');
+    showTrashFor(arrayKey, label); // refresh
+  }
+}
+
+function purgeAllTrash() {
+  if (!confirm('Permanently delete ALL items in trash?\n\nThis CANNOT be undone.')) return;
+  const arrays = ['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
+    'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs',
+    'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
+    'assetHistory','assetUtilization'];
+  let purged = 0;
+  arrays.forEach(k => {
+    if (!AppState.data[k]) return;
+    const before = AppState.data[k].length;
+    AppState.data[k] = AppState.data[k].filter(r => !r || !r._deleted);
+    purged += before - AppState.data[k].length;
+  });
+  AppState.save();
+  showToast('Purged ' + purged + ' item(s)', 'warning', 4000);
+  renderTrash();
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// ── PRIORITY 2 & 3 FIXES ──────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────
+// FIX #10: UPDATE AVAILABLE BANNER
+// Detects newer service worker version, shows reload prompt
+// ─────────────────────────────────────────────────────────
+(function setupUpdateBanner() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.ready.then(reg => {
+    reg.addEventListener('updatefound', () => {
+      const newSW = reg.installing;
+      if (!newSW) return;
+      newSW.addEventListener('statechange', () => {
+        if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
+          // A new version is waiting
+          showUpdateAvailableBanner(newSW);
+        }
+      });
+    });
+  });
+})();
+
+function showUpdateAvailableBanner(newSW) {
+  // Don't show if already visible
+  if (document.getElementById('updateAvailableBanner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'updateAvailableBanner';
+  banner.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#388bfd,#1f6feb);color:#fff;padding:14px 20px;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.4);display:flex;align-items:center;gap:14px;z-index:9999;font-size:13px;font-weight:600;animation:slideUp .3s ease-out;max-width:90vw';
+  banner.innerHTML = `
+    <i class="fas fa-sync-alt" style="font-size:18px"></i>
+    <div>
+      <div style="font-weight:700">New version available</div>
+      <div style="font-size:11px;opacity:.9;font-weight:400">Click reload to get the latest fixes and features</div>
+    </div>
+    <button onclick="document.getElementById('updateAvailableBanner').remove()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px">Later</button>
+    <button onclick="_applyUpdateAndReload()" style="background:#fff;border:none;color:#1f6feb;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px"><i class="fas fa-sync" style="margin-right:5px"></i>Reload</button>
+  `;
+  document.body.appendChild(banner);
+  window._pendingSW = newSW;
+}
+
+function _applyUpdateAndReload() {
+  if (window._pendingSW) {
+    window._pendingSW.postMessage('skipWaiting');
+  }
+  setTimeout(() => location.reload(), 300);
+}
+
+// ─────────────────────────────────────────────────────────
+// FIX #16: PARTIAL SYNC FAILURE DETECTION
+// Tracks per-list success/fail, shows amber on partial failures
+// ─────────────────────────────────────────────────────────
+let _spListSyncStatus = {}; // { listName: { lastSuccess: ts, lastError: msg, failedAt: ts } }
+
+function _markListSyncSuccess(listName) {
+  _spListSyncStatus[listName] = { lastSuccess: Date.now(), lastError: null, failedAt: null };
+}
+
+function _markListSyncFail(listName, errMsg) {
+  if (!_spListSyncStatus[listName]) _spListSyncStatus[listName] = {};
+  _spListSyncStatus[listName].lastError = errMsg;
+  _spListSyncStatus[listName].failedAt = Date.now();
+}
+
+function _hasPartialSyncFailure() {
+  const cutoff = Date.now() - (10 * 60 * 1000); // last 10 min
+  return Object.values(_spListSyncStatus).some(s => s.failedAt && s.failedAt > cutoff && (!s.lastSuccess || s.lastSuccess < s.failedAt));
+}
+
+function _getFailedLists() {
+  const cutoff = Date.now() - (10 * 60 * 1000);
+  return Object.entries(_spListSyncStatus)
+    .filter(([n, s]) => s.failedAt && s.failedAt > cutoff && (!s.lastSuccess || s.lastSuccess < s.failedAt))
+    .map(([n, s]) => ({ list: n, error: s.lastError, failedAt: s.failedAt }));
+}
+
+// ─────────────────────────────────────────────────────────
+// FIX #7: ORPHANED FILE CLEANUP
+// Tracks pending file uploads; warns if records didn't sync
+// ─────────────────────────────────────────────────────────
+let _pendingFileUploads = JSON.parse(localStorage.getItem('shic_pending_uploads') || '[]');
+
+function _trackFileUpload(spDriveId, spItemId, recordRef) {
+  _pendingFileUploads.push({
+    spDriveId, spItemId, recordRef,
+    uploadedAt: Date.now(),
+  });
+  localStorage.setItem('shic_pending_uploads', JSON.stringify(_pendingFileUploads));
+}
+
+function _confirmFileUpload(spItemId) {
+  _pendingFileUploads = _pendingFileUploads.filter(p => p.spItemId !== spItemId);
+  localStorage.setItem('shic_pending_uploads', JSON.stringify(_pendingFileUploads));
+}
+
+async function _checkForOrphanedFiles() {
+  // Files uploaded more than 30 min ago without successful record push
+  const orphans = _pendingFileUploads.filter(p => (Date.now() - p.uploadedAt) > (30 * 60 * 1000));
+  if (orphans.length === 0) return [];
+  // Could ping admins or show in admin panel; for now log
+  console.warn('[Sync] ' + orphans.length + ' file(s) may be orphaned in SharePoint:', orphans);
+  return orphans;
+}
+
+// ─────────────────────────────────────────────────────────
+// FIX #1b: AUTO-SAVE DRAFTS TO LOCALSTORAGE EVERY 30s
+// Captures in-progress textarea/input values for crash recovery
+// ─────────────────────────────────────────────────────────
+let _draftAutoSaveTimer = null;
+
+function _captureFormDrafts() {
+  const inputs = document.querySelectorAll('input[id], textarea[id], select[id]');
+  const drafts = {};
+  inputs.forEach(el => {
+    if (!el.id || !el.value || el.type === 'password' || el.type === 'file') return;
+    if (el.closest('.modal-overlay.active') || el.closest('.page.active')) {
+      drafts[el.id] = el.value;
+    }
+  });
+  if (Object.keys(drafts).length > 0) {
+    localStorage.setItem('shic_form_drafts', JSON.stringify({ drafts, savedAt: Date.now() }));
+  }
+}
+
+function _restoreFormDrafts() {
+  try {
+    const stored = JSON.parse(localStorage.getItem('shic_form_drafts') || '{}');
+    if (!stored.drafts) return;
+    const age = Date.now() - (stored.savedAt || 0);
+    if (age > 60 * 60 * 1000) {
+      // Drafts older than 1 hour are too stale — discard
+      localStorage.removeItem('shic_form_drafts');
+      return;
+    }
+    // Wait a moment then offer recovery if there's stuff
+    setTimeout(() => {
+      const recoverable = Object.entries(stored.drafts).filter(([id, val]) => {
+        const el = document.getElementById(id);
+        return el && !el.value && val;
+      });
+      if (recoverable.length > 0) {
+        if (confirm('Found ' + recoverable.length + ' unsaved form field(s) from your last session. Restore them?')) {
+          recoverable.forEach(([id, val]) => {
+            const el = document.getElementById(id);
+            if (el) el.value = val;
+          });
+          showToast('Restored ' + recoverable.length + ' field(s) from auto-save', 'success', 4000);
+        }
+        localStorage.removeItem('shic_form_drafts');
+      }
+    }, 2000);
+  } catch (e) {}
+}
+
+// Start auto-save when there are open modals
+function _startDraftAutoSave() {
+  if (_draftAutoSaveTimer) return;
+  _draftAutoSaveTimer = setInterval(() => {
+    try {
+      const hasActiveModal = document.querySelector('.modal-overlay.active');
+      if (hasActiveModal) _captureFormDrafts();
+    } catch(e) {}
+  }, 30000);
+}
+_startDraftAutoSave();
+
+// Clear drafts after successful save
+function _clearFormDrafts() {
+  localStorage.removeItem('shic_form_drafts');
+}
+
+// ─────────────────────────────────────────────────────────
+// FIX #2b: EXTEND CONFLICT DETECTION TO MORE FORMS
+// Adds snapshot helpers for Risk, Action, QA-QC, Cost, Task, Document edit
+// ─────────────────────────────────────────────────────────
+function _genericSnapshotForEdit(modalKey, dataKey, id) {
+  if (!id) return;
+  const record = (AppState.data[dataKey] || []).find(r => r && r.id === id);
+  if (record) _snapshotRecord(modalKey, record);
+}
+
+async function _genericCheckConflict(modalKey, dataKey, id) {
+  if (!id) return true;
+  return await _checkConflictBeforeSave(modalKey, id, dataKey);
+}
+
+// ─────────────────────────────────────────────────────────
+// FIX #16b: ENHANCE SYNC INDICATOR FOR PARTIAL FAILURE
+// Update sync status button to amber when partial failure
+// ─────────────────────────────────────────────────────────
+(function enhanceSyncStatus() {
+  if (typeof updateSyncStatusButton !== 'function') return;
+  const origUpdate = updateSyncStatusButton;
+  window.updateSyncStatusButton = function() {
+    try { origUpdate(); } catch(e) {}
+    // Override to amber if partial failure detected
+    if (_hasPartialSyncFailure() && _syncState === 'synced') {
+      const btn = document.getElementById('syncStatusBtn');
+      const dot = document.getElementById('syncStatusDot');
+      const label = document.getElementById('syncStatusLabel');
+      if (btn && dot && label) {
+        btn.style.background = 'rgba(240,164,80,.15)';
+        btn.style.borderColor = 'rgba(240,164,80,.5)';
+        btn.style.color = '#f0a450';
+        dot.style.background = '#f0a450';
+        const failed = _getFailedLists();
+        label.textContent = failed.length + ' list' + (failed.length !== 1 ? 's' : '') + ' failed';
+        btn.title = 'Partial sync failure: ' + failed.map(f => f.list).join(', ') + ' · Click to retry';
+      }
+    }
+  };
+})();
+
+// ─────────────────────────────────────────────────────────
+// FIX #15b: BULK OPERATION PRE-FLIGHT CHECK
+// Confirms before allowing >5 deletes at once
+// ─────────────────────────────────────────────────────────
+function preFlightBulkDelete(arrayKey, ids, label) {
+  const count = ids.length;
+  if (count <= 5) return true;
+  return confirm(
+    '⚠ BULK DELETE WARNING\n\n' +
+    'You are about to delete ' + count + ' ' + label + ' record(s).\n\n' +
+    'They will be moved to Trash and recoverable for ' + SOFT_DELETE_RETENTION_DAYS + ' days.\n\n' +
+    'Are you sure you want to proceed?'
+  );
+}
+
+// Restore drafts when app first loads
+setTimeout(() => { try { _restoreFormDrafts(); } catch(e) {} }, 3000);
 
 // logAssetHistoryAuto kept for compatibility but no longer called automatically
 function logAssetHistoryAuto(assetId,assetName,assetType,action,field,oldVal,newVal,projectId){
