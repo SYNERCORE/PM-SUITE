@@ -11006,17 +11006,32 @@ async function _spPushListData(token, listName, records, prevIdMap) {
     } catch(e) { console.warn('[SP] Write error for', record.id, ':', e.message); }
   }
 
-  // Delete remote items not present locally (respecting _spDeletedIds)
+  // Delete remote items — but ONLY ones we intentionally deleted locally
+  // (tracked in _spDeletedIds). NEVER delete records just because they're
+  // missing from our local data — they may have been added by another user.
+  const intentionalDeletes = (typeof _spDeletedIds !== 'undefined' && _spDeletedIds)
+    ? Object.keys(_spDeletedIds)
+    : [];
   for (const idToDelete of remoteIdsToDelete) {
+    // Skip unless this ID was explicitly deleted by THIS user
+    if (!intentionalDeletes.includes(idToDelete)) {
+      // Not intentional → another user may have added it or it's a stale map.
+      // Drop from local idMap so we re-discover it on next pull, but DON'T delete from SP.
+      delete prevIdMap[idToDelete];
+      continue;
+    }
     try {
-      await fetch(
+      const res = await fetch(
         `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/items/${prevIdMap[idToDelete]}`,
         { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } }
       );
-      delete prevIdMap[idToDelete];
-      if (_spListRecordHashes[listName]) delete _spListRecordHashes[listName][idToDelete];
-      deleted++;
-    } catch(e) { console.warn('[SP] Delete error:', e.message); }
+      // 404 = already gone, treat as success (clean up local map)
+      if (res.ok || res.status === 404) {
+        delete prevIdMap[idToDelete];
+        if (_spListRecordHashes[listName]) delete _spListRecordHashes[listName][idToDelete];
+        deleted++;
+      }
+    } catch(e) { /* silent — non-critical */ }
   }
 
   return { added, updated, deleted };
