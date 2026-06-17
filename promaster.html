@@ -171,8 +171,9 @@ tr:last-child td{border-bottom:none}
 .chip{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:20px;font-size:10px;background:var(--bg-hover);border:1px solid var(--border)}
 .project-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;transition:var(--transition);cursor:pointer}
 .project-card:hover{transform:translateY(-2px);box-shadow:var(--shadow);border-color:var(--accent-blue)}
-.project-card-id{font-size:9px;font-family:var(--font-mono);color:var(--text-muted)}
-.project-card-name{font-size:14px;font-weight:600;margin-bottom:3px}
+.project-card-id{font-size:13px;font-family:var(--font-mono);color:var(--accent-blue);font-weight:700;letter-spacing:.3px;margin-bottom:3px}
+.project-card-id-discipline{font-size:9px;color:var(--text-muted);font-weight:500;margin-left:5px}
+.project-card-name{font-size:13px;font-weight:600;margin-bottom:3px;line-height:1.35}
 .project-card-client{font-size:11px;color:var(--text-secondary)}
 .toggle{position:relative;width:42px;height:22px}
 .toggle input{opacity:0;width:0;height:0}
@@ -1396,7 +1397,7 @@ const bu=Math.round((p.spent/p.budget)*100);
 const dl=daysBetween(new Date().toISOString().split('T')[0],p.endDate);
 return`<div class="project-card">
 <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
-<div><div class="project-card-id">${p.id} &middot; ${p.discipline||''}</div><div class="project-card-name">${p.name}</div><div class="project-card-client"><i class="fas fa-building" style="font-size:9px"></i> ${p.client}</div>
+<div><div class="project-card-id">${p.id}${p.discipline?'<span class="project-card-id-discipline">'+p.discipline+'</span>':''}</div><div class="project-card-name">${p.name}</div><div class="project-card-client"><i class="fas fa-building" style="font-size:9px"></i> ${p.client}</div>
 ${p.businessUnit?(()=>{const bu=(AppState.data.businessUnits||[]).find(b=>b.id===p.businessUnit);return bu?`<div style="margin-top:3px"><span style="font-size:9px;padding:1px 7px;border-radius:10px;background:${bu.color||'#388bfd'}22;color:${bu.color||'#388bfd'};font-weight:600;border:1px solid ${bu.color||'#388bfd'}44"><i class="fas fa-layer-group" style="margin-right:3px;font-size:8px"></i>${bu.name}</span></div>`:'';})():''}
 </div>
 <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">${sBadge(p.status)}${pBadge(p.priority)}</div></div>
@@ -4906,7 +4907,7 @@ function renderQAQC(){
 const{qaqc}=AppState.data;
 $('#qaqc').innerHTML=`<div class="section-header" style="margin-bottom:14px">
 <div class="section-title">QA/QC Management</div>
-<button class="btn btn-primary btn-sm" onclick="showAddInspection()"><i class="fas fa-plus"></i> New IR</button></div>
+<button class="btn btn-primary btn-sm" onclick="showAddInspection(detailProjectId)"><i class="fas fa-plus"></i> New IR</button></div>
 <div class="grid grid-4" style="margin-bottom:14px">
 ${sc('fas fa-clipboard-check','Total IRs',qaqc.length,'Inspection records','#388bfd','rgba(56,139,253,.15)')}
 ${sc('fas fa-check-double','Approved',qaqc.filter(q=>q.status==='approved').length,'Passed','#3fb950','rgba(63,185,80,.15)')}
@@ -4937,10 +4938,11 @@ $('#qaqcTable').innerHTML=`<div class="card"><div class="table-wrap"><table>
 <td>${sBadge(q.status)}</td>
 </tr>`).join('')}</tbody></table>${_pgNav("qaqc",items,typeof renderQAQC==="function"?renderQAQC:null)}</div></div>`;}
 
-function showAddInspection(){
+function showAddInspection(pid){
+if(!pid && typeof detailProjectId !== 'undefined') pid = detailProjectId;
 $('#genericModalTitle').textContent='New Inspection Record';
 $('#genericModalBody').innerHTML=`<div class="form-grid">
-<div class="form-group"><label class="form-label">Project</label><select class="form-select" id="gProj">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}">${p.id}</option>`).join('')}</select></div>
+<div class="form-group"><label class="form-label">Project</label><select class="form-select" id="gProj">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${p.id===pid?'selected':''}>${p.id}${p.name?' — '+p.name.substring(0,30):''}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Type</label><select class="form-select" id="gType">${['Inspection','NCR','Punch','Test','Audit'].map(t=>`<option>${t}</option>`).join('')}</select></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Description *</label><input class="form-input" id="gDesc" placeholder="Inspection description"></div>
 <div class="form-group"><label class="form-label">Inspector</label><input class="form-input" id="gInsp" placeholder="Inspector name"></div>
@@ -4961,7 +4963,7 @@ function renderRisks(){
 const{risks}=AppState.data;
 $('#risks').innerHTML=`<div class="section-header" style="margin-bottom:14px">
 <div class="section-title">Risk Register</div>
-<button class="btn btn-primary btn-sm" onclick="showAddRisk()"><i class="fas fa-plus"></i> New Risk</button></div>
+<button class="btn btn-primary btn-sm" onclick="showAddRisk(detailProjectId)"><i class="fas fa-plus"></i> New Risk</button></div>
 <div class="grid grid-4" style="margin-bottom:14px">
 ${sc('fas fa-shield-alt','Total Risks',risks.length,'Identified','#f0a450','rgba(240,164,80,.15)')}
 ${sc('fas fa-exclamation-triangle','Active',risks.filter(r=>r.status==='active').length,'Require attention','#f85149','rgba(248,81,73,.15)')}
@@ -5007,10 +5009,11 @@ ${[['#c5221f','Critical 15+'],['#e37400','High 8-14'],['#f9ab00','Medium 4-7'],[
 </tr>`;}).join('')}</tbody></table></div></div>`;
 setTimeout(()=>{const c=$('#riskCatChart');if(c){c.width=c.parentElement.offsetWidth-30;const cats=[...new Set(risks.map(r=>r.category))];drawBar('riskCatChart',cats,cats.map(ct=>risks.filter(r=>r.category===ct).length),'#f0a450');}},50);}
 
-function showAddRisk(){
+function showAddRisk(pid){
+if(!pid && typeof detailProjectId !== 'undefined') pid = detailProjectId;
 $('#genericModalTitle').textContent='New Risk';
 $('#genericModalBody').innerHTML=`<div class="form-grid">
-<div class="form-group"><label class="form-label">Project</label><select class="form-select" id="gProj">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}">${p.id}</option>`).join('')}</select></div>
+<div class="form-group"><label class="form-label">Project</label><select class="form-select" id="gProj">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${p.id===pid?'selected':''}>${p.id}${p.name?' — '+p.name.substring(0,30):''}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Category</label><select class="form-select" id="gCat">${['Procurement','Resources','Technical','HSE','Regulatory','Financial','Schedule'].map(c=>`<option>${c}</option>`).join('')}</select></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Risk Description *</label><input class="form-input" id="gDesc" placeholder="Describe the risk"></div>
 <div class="form-group"><label class="form-label">Probability (1-5)</label><input class="form-input" type="number" id="gProb" min="1" max="5" value="3"></div>
@@ -5031,7 +5034,7 @@ function renderActions(){
 const{actions}=AppState.data;
 $('#actions').innerHTML=`<div class="section-header" style="margin-bottom:14px">
 <div class="section-title">Action Items Tracker</div>
-<button class="btn btn-primary btn-sm" onclick="showAddAction()"><i class="fas fa-plus"></i> New Action</button></div>
+<button class="btn btn-primary btn-sm" onclick="showAddAction(detailProjectId)"><i class="fas fa-plus"></i> New Action</button></div>
 <div class="grid grid-4" style="margin-bottom:14px">
 ${sc('fas fa-clipboard-list','Total Actions',actions.length,'All items','#388bfd','rgba(56,139,253,.15)')}
 ${sc('fas fa-exclamation-circle','Overdue',actions.filter(a=>a.status==='overdue').length,'Past due','#f85149','rgba(248,81,73,.15)')}
@@ -5051,10 +5054,11 @@ ${sc('fas fa-check','Completed',actions.filter(a=>a.status==='closed').length,'R
 <td><button class="btn btn-success btn-sm btn-icon" onclick="closeAction('${a.id}')" title="Mark closed"><i class="fas fa-check"></i></button></td>
 </tr>`).join('')}</tbody></table>${_pgNav("actions",actions,typeof renderActions==="function"?renderActions:null)}</div></div>`;}
 
-function showAddAction(){
+function showAddAction(pid){
+if(!pid && typeof detailProjectId !== 'undefined') pid = detailProjectId;
 $('#genericModalTitle').textContent='New Action Item';
 $('#genericModalBody').innerHTML=`<div class="form-grid">
-<div class="form-group"><label class="form-label">Project</label><select class="form-select" id="gProj">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}">${p.id}</option>`).join('')}</select></div>
+<div class="form-group"><label class="form-label">Project</label><select class="form-select" id="gProj">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${p.id===pid?'selected':''}>${p.id}${p.name?' — '+p.name.substring(0,30):''}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Source</label><input class="form-input" id="gSrc" placeholder="e.g., Review Meeting"></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Description *</label><input class="form-input" id="gDesc" placeholder="Action description"></div>
 <div class="form-group"><label class="form-label">Assigned To</label><input class="form-input" id="gAss" placeholder="Person name"></div>
@@ -13993,7 +13997,7 @@ function renderProjectDetail(){
   <!-- Back bar -->
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
     <button class="btn btn-secondary btn-sm" onclick="detailProjectId=null;renderProjects()"><i class="fas fa-arrow-left"></i> All Projects</button>
-    <div style="font-size:11px;color:var(--text-secondary)">${p.id} &rsaquo; Project Detail</div>
+    <div style="display:flex;align-items:center;gap:8px"><span style="font-size:15px;font-family:var(--font-mono);color:var(--accent-blue);font-weight:700;letter-spacing:.3px">${p.id}</span><span style="font-size:11px;color:var(--text-muted)">&rsaquo; Project Detail</span></div>
     <div style="margin-left:auto;display:flex;gap:7px">
       ${sBadge(p.status)} ${pBadge(p.priority)}
       ${p.status==='completed'||p.status==='archived'?'':`<button class="btn btn-secondary btn-sm" onclick="showChangeProjectId('${p.id}')" title="Change Project ID"><i class="fas fa-id-card"></i> Change ID</button>`}
@@ -14006,7 +14010,12 @@ function renderProjectDetail(){
   <div style="background:linear-gradient(135deg,#0d2147,#112266);border:1px solid rgba(56,139,253,.25);border-radius:var(--radius);padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div>
-        <div style="font-size:11px;font-family:var(--font-mono);color:rgba(255,255,255,.5);margin-bottom:4px">${p.id} &middot; ${p.discipline||'—'} &middot; Phase: ${p.phase||'—'}</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
+          <span style="font-size:18px;font-family:var(--font-mono);color:#f59e0b;font-weight:800;letter-spacing:.5px;padding:3px 12px;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);border-radius:6px">${p.id}</span>
+          <span style="font-size:10px;color:rgba(255,255,255,.6)">${p.discipline||'—'}</span>
+          <span style="font-size:10px;color:rgba(255,255,255,.6)">&middot;</span>
+          <span style="font-size:10px;color:rgba(255,255,255,.6)">Phase: ${p.phase||'—'}</span>
+        </div>
         <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:4px">${p.name}</div>
         <div style="font-size:13px;color:rgba(255,255,255,.7)"><i class="fas fa-building" style="margin-right:6px"></i>${p.client} &nbsp;|&nbsp; <i class="fas fa-map-marker-alt" style="margin-right:6px"></i>${p.location}</div>
       </div>
@@ -15031,7 +15040,7 @@ function renderDetailQAQC(){
   <div class="card">
     <div class="section-header" style="margin-bottom:12px">
       <div class="section-title">Inspection &amp; QA Records</div>
-      <button class="btn btn-primary btn-sm" onclick="showAddInspection()"><i class="fas fa-plus"></i> New IR</button>
+      <button class="btn btn-primary btn-sm" onclick="showAddInspection(detailProjectId)"><i class="fas fa-plus"></i> New IR</button>
     </div>
     <div class="table-wrap"><table>
       <thead><tr><th>ID</th><th>Type</th><th>Description</th><th>Inspector</th><th>Date</th><th>Discipline</th><th>Result</th><th>Status</th><th></th></tr></thead>
@@ -15064,7 +15073,7 @@ function renderDetailRisks(){
   <div class="card">
     <div class="section-header" style="margin-bottom:12px">
       <div class="section-title">Risk Register</div>
-      <button class="btn btn-primary btn-sm" onclick="showAddRisk()"><i class="fas fa-plus"></i> New Risk</button>
+      <button class="btn btn-primary btn-sm" onclick="showAddRisk(detailProjectId)"><i class="fas fa-plus"></i> New Risk</button>
     </div>
     <div class="table-wrap"><table>
       <thead><tr><th>ID</th><th>Description</th><th>Category</th><th>P</th><th>I</th><th>Score</th><th>Mitigation</th><th>Owner</th><th>Due</th><th>Status</th><th></th></tr></thead>
@@ -15099,7 +15108,7 @@ function renderDetailActions(){
   <div class="card">
     <div class="section-header" style="margin-bottom:12px">
       <div class="section-title">Action Items</div>
-      <button class="btn btn-primary btn-sm" onclick="showAddAction()"><i class="fas fa-plus"></i> New Action</button>
+      <button class="btn btn-primary btn-sm" onclick="showAddAction(detailProjectId)"><i class="fas fa-plus"></i> New Action</button>
     </div>
     <div class="table-wrap"><table>
       <thead><tr><th>ID</th><th>Description</th><th>Assignee</th><th>Source</th><th>Due Date</th><th>Priority</th><th>Status</th><th></th></tr></thead>
