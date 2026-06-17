@@ -19165,14 +19165,19 @@ async function _runDailyBackup() {
       backup.recordCounts[k] = (AppState.data[k] || []).length;
     });
 
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const fileName = 'backup-' + today + '-' + (_currentUserProfile?.email || 'unknown').split('@')[0] + '.json';
+    // Create a File (not Blob) — spUploadFile reads file.name property
+    const file = new File(
+      [JSON.stringify(backup, null, 2)],
+      fileName,
+      { type: 'application/json' }
+    );
 
-    // Upload via SP upload helper if available
+    // Upload — spUploadFile signature is (file, projectId) where projectId becomes the subfolder
     if (typeof spUploadFile === 'function') {
-      await spUploadFile(blob, 'Backups', fileName);
+      const result = await spUploadFile(file, 'Backups');
       localStorage.setItem(DAILY_BACKUP_KEY, today);
-      auditLog('backup', 'Daily backup uploaded', { fileName, sizeKB: Math.round(blob.size / 1024) });
+      auditLog('backup', 'Daily backup uploaded', { fileName, sizeKB: Math.round(file.size / 1024), webUrl: result?.webUrl });
       console.log('[Backup] Daily backup uploaded: ' + fileName);
     }
   } catch(e) {
