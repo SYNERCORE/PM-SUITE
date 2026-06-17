@@ -8903,6 +8903,9 @@ let _gPressed = false;
 let _gTimer = null;
 
 document.addEventListener('keydown', function(e) {
+  // Guard: skip synthetic events that don't have a key (IME, autofill, etc.)
+  if (typeof e.key !== 'string') return;
+
   const inInput = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName) ||
     document.activeElement?.isContentEditable;
 
@@ -8940,6 +8943,9 @@ document.addEventListener('keydown', function(e) {
     showKbdHelp();
     return;
   }
+
+  // Guard against synthetic events with no key (IME, autofill, extensions)
+  if (typeof e.key !== 'string') return;
 
   // G-then-X navigation
   if (e.key.toLowerCase() === 'g' && !_gPressed) {
