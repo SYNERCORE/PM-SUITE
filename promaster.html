@@ -1520,6 +1520,8 @@ function showProjectForm(id=null){
 const p=id?(AppState.data.projects||[]).find(x=>x.id===id):null;
 // Fix #2: snapshot record for conflict detection
 if (p) _snapshotRecord('project_'+id, p);
+// Fix: mark this project as being edited — prevents background sync from wiping fields
+if (id && typeof markRecordEditing === 'function') markRecordEditing('projects', id);
 $('#projectModalTitle').textContent=id?'Edit Project':'New Project';
 $('#projectModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">Project ID${id&&p?.status==='prospect'?' <span style="font-size:10px;color:var(--accent-amber)">(editable)</span>':id?' <span style="font-size:10px;color:var(--text-muted)">(use Change ID button to modify)</span>':''}</label><input class="form-input" id="pId" value="${p?.id||'PRJ-'+((AppState.data.projects||[]).length+1).toString().padStart(3,'0')}" ${id&&p?.status!=='prospect'?'readonly style="opacity:.6"':''}></div>
@@ -1588,7 +1590,7 @@ if(id){
   AppState.data.projects.push(pr);
 }
 AppState.save();closeModal('projectModal');
-if(id)_clearSnapshot('project_'+id);
+if(id){_clearSnapshot('project_'+id);if(typeof unmarkRecordEditing==='function')unmarkRecordEditing('projects',id);}
 const isProspect=pr.status==='prospect';
 if(isProspect){renderProspects();navigate('prospects');}else{renderProjects();}
 showToast(id?'Project updated':(isProspect?'Prospect created':'Project created'),'success');}
@@ -11829,6 +11831,40 @@ function _refreshCurrentView() {
   } catch(e) { console.warn('[SP] Refresh view error:', e.message); }
 }
 
+
+// ── Track records currently being edited (per data array) ──
+// Prevents background polling from wiping in-progress field edits.
+let _editingRecords = {}; // { dataKey: { recordId: { startedAt, originalSnapshot } } }
+
+function markRecordEditing(dataKey, recordId) {
+  if (!_editingRecords[dataKey]) _editingRecords[dataKey] = {};
+  if (!_editingRecords[dataKey][recordId]) {
+    const r = (AppState.data[dataKey]||[]).find(x => x && x.id === recordId);
+    _editingRecords[dataKey][recordId] = {
+      startedAt: Date.now(),
+      originalSnapshot: r ? JSON.parse(JSON.stringify(r)) : null,
+    };
+  } else {
+    _editingRecords[dataKey][recordId].startedAt = Date.now(); // refresh timestamp
+  }
+}
+
+function unmarkRecordEditing(dataKey, recordId) {
+  if (_editingRecords[dataKey]) delete _editingRecords[dataKey][recordId];
+}
+
+// Returns set of recordIds currently being edited in this array (within last 15 minutes)
+function getEditingRecordIds(dataKey) {
+  const m = _editingRecords[dataKey] || {};
+  const cutoff = Date.now() - (15 * 60 * 1000); // forget edits older than 15 min
+  const ids = new Set();
+  Object.entries(m).forEach(([id, info]) => {
+    if (info.startedAt > cutoff) ids.add(id);
+    else delete m[id];
+  });
+  return ids;
+}
+
 async function _spPollRemote() {
   if (!_spConnected || !_spAccount || _spSyncing) return;
   // Fix #1: skip if user is actively editing — prevents wiping typed text
@@ -11881,9 +11917,13 @@ async function _spPollRemote() {
         const merged = [];
         const seen = new Set();
 
-        // 1. Keep all local records that are NOT in remote yet:
+        // Get IDs of records currently being edited — preserve these
+        const editingIds = (typeof getEditingRecordIds === 'function') ? getEditingRecordIds(cfg.dataKey) : new Set();
+
+        // 1. Keep all local records that are NOT to be replaced:
         //    - _newlyCreated (user created locally, not yet pushed)
         //    - _deleted (user soft-deleted locally, not yet propagated)
+        //    - currently being edited (active form has changes the user hasn't saved)
         localList.forEach(r => {
           if (!r || !r.id) return;
           if (r._newlyCreated) {
@@ -11892,15 +11932,20 @@ async function _spPollRemote() {
             return;
           }
           if (r._deleted) {
-            // Keep soft-delete marker even if remote still has the record
             merged.push(r);
             seen.add(r.id);
             return;
           }
+          if (editingIds.has(r.id)) {
+            // User has this record open in an edit form — preserve their in-progress state
+            merged.push(r);
+            seen.add(r.id);
+            console.log('[SP] Preserved local edit on ' + cfg.dataKey + '/' + r.id);
+            return;
+          }
         });
 
-        // 2. Add ALL remote records (this is the truth source)
-        //    unless we already have a local soft-delete / newly-created with the same ID
+        // 2. Add ALL remote records that aren't preserved locally
         remoteList.forEach(r => {
           if (!r || !r.id || seen.has(r.id)) return;
           merged.push(r);
@@ -12540,15 +12585,44 @@ async function m365SaveUserProfile(token, siteId, profile, itemId) {
       LastLogin: new Date().toISOString(),
     }
   });
+
+  // Helper: silent fetch with one auto-retry on transient errors (504, 503, 429)
+  const _silentFetch = async (url, options, isLastLoginOnly) => {
+    try {
+      const res = await fetch(url, options);
+      if (!res.ok && [502, 503, 504, 429].includes(res.status)) {
+        // Transient — wait then retry once
+        await new Promise(r => setTimeout(r, 1500));
+        const retry = await fetch(url, options);
+        if (!retry.ok && isLastLoginOnly) {
+          // Non-critical: this is just a LastLogin timestamp update
+          console.log('[Profile] LastLogin update skipped (SP returned ' + retry.status + ') — non-critical');
+        }
+        return retry;
+      }
+      return res;
+    } catch(e) {
+      if (isLastLoginOnly) {
+        console.log('[Profile] LastLogin update skipped (' + e.message + ') — non-critical');
+        return { ok: false };
+      }
+      throw e;
+    }
+  };
+
   if (itemId) {
-    await fetch(
+    // Updating an existing profile (mostly just LastLogin) — make this resilient + silent
+    await _silentFetch(
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}`,
-      { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body }
+      { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body },
+      true // isLastLoginOnly — failures are non-critical
     );
   } else {
-    const res = await fetch(
+    // Creating a new profile — this matters, retry but surface failure
+    const res = await _silentFetch(
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`,
-      { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body }
+      { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body },
+      false
     );
     return res.ok ? (await res.json()).id : null;
   }
@@ -14294,6 +14368,8 @@ function _renderProjectIdHistoryBadge(currentId){
 }
 
 function showProjectDetail(id){
+// Fix: while viewing project detail, treat it as "actively edited" so polling won't wipe inline edits
+if (typeof markRecordEditing === 'function') markRecordEditing('projects', id);
   detailProjectId=id;
   detailTab='overview';
   navigate('projects');
@@ -14334,7 +14410,7 @@ function renderProjectDetail(){
   $('#projects').innerHTML=`
   <!-- Back bar -->
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-    <button class="btn btn-secondary btn-sm" onclick="detailProjectId=null;renderProjects()"><i class="fas fa-arrow-left"></i> All Projects</button>
+    <button class="btn btn-secondary btn-sm" onclick="if(typeof unmarkRecordEditing==='function')unmarkRecordEditing('projects',detailProjectId);detailProjectId=null;renderProjects()"><i class="fas fa-arrow-left"></i> All Projects</button>
     <div style="display:flex;align-items:center;gap:8px"><span style="font-size:15px;font-family:var(--font-mono);color:var(--accent-blue);font-weight:700;letter-spacing:.3px">${p.id}</span><span style="font-size:11px;color:var(--text-muted)">&rsaquo; Project Detail</span></div>
     <div style="margin-left:auto;display:flex;gap:7px">
       ${sBadge(p.status)} ${pBadge(p.priority)}
