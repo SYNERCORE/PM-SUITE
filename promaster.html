@@ -1124,6 +1124,11 @@ if (!window._trashPurged) {
   window._trashPurged = true;
   try { autoPurgeOldTrash(); } catch(e) {}
 }
+// Capture initial sync snapshot once on first load
+if (!window._snapshotCaptured) {
+  window._snapshotCaptured = true;
+  try { _captureSyncedSnapshot(); } catch(e) {}
+}
 const map={dashboard:renderDashboard,projects:renderProjects,tasks:renderTasks,gantt:renderGantt,
 resources:renderResources,manpower:renderManpower,materials:renderMaterials,procurement:renderProcurement,
 costs:renderCosts,qaqc:renderQAQC,risks:renderRisks,actions:renderActions,documents:renderDocuments,
@@ -8621,9 +8626,103 @@ function _normalizeDataForHash(data) {
   return copy;
 }
 
+
+// ── Track when data was last in sync with remote ──
+// _lastSyncedSnapshot stores JSON hashes per array so we can detect modifications
+// to existing records (not just _newlyCreated)
+let _lastSyncedSnapshot = {}; // { dataKey: hashByRecordId }
+
+function _captureSyncedSnapshot() {
+  _lastSyncedSnapshot = {};
+  const arrays = [
+    'projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
+    'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs',
+    'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
+    'assetHistory','assetUtilization','idChangeRequests','notifications','projectIdHistory'
+  ];
+  arrays.forEach(k => {
+    const list = AppState.data[k] || [];
+    _lastSyncedSnapshot[k] = {};
+    list.forEach(r => {
+      if (r && r.id) {
+        // Hash the record content (exclude transient flags)
+        const clean = { ...r };
+        delete clean._newlyCreated;
+        delete clean._localCreatedAt;
+        _lastSyncedSnapshot[k][r.id] = _quickHash(JSON.stringify(clean));
+      }
+    });
+  });
+}
+
+// Returns array of [dataKey, recordId, type] for records that differ from last sync
+function _detectContentChanges() {
+  const changes = [];
+  const arrays = Object.keys(_lastSyncedSnapshot);
+  arrays.forEach(k => {
+    const snap = _lastSyncedSnapshot[k] || {};
+    const list = AppState.data[k] || [];
+    const localById = {};
+    list.forEach(r => { if (r && r.id) localById[r.id] = r; });
+
+    // Modified or new records
+    Object.entries(localById).forEach(([id, r]) => {
+      if (r._deleted) return; // soft-deleted counted separately
+      if (r._newlyCreated) {
+        changes.push({ dataKey: k, recordId: id, type: 'new', label: r.description||r.name||r.title||id });
+        return;
+      }
+      const clean = { ...r };
+      delete clean._newlyCreated;
+      delete clean._localCreatedAt;
+      const hash = _quickHash(JSON.stringify(clean));
+      if (snap[id] && snap[id] !== hash) {
+        changes.push({ dataKey: k, recordId: id, type: 'modified', label: r.description||r.name||r.title||id });
+      } else if (!snap[id]) {
+        // Not in last snapshot — treat as new
+        changes.push({ dataKey: k, recordId: id, type: 'new', label: r.description||r.name||r.title||id });
+      }
+    });
+
+    // Soft-deleted records
+    list.filter(r => r && r._deleted).forEach(r => {
+      changes.push({ dataKey: k, recordId: r.id, type: 'deleted', label: r.description||r.name||r.title||r.id });
+    });
+  });
+  return changes;
+}
+
 function _countChangedRecords() {
-  // Returns { count, items: [{arrayKey, label, type}] } so we can show details
+  // Returns array of pending items so we can show details
+  // Uses BOTH the _newlyCreated flag (for new records) AND content-diff (for edits)
   const items = [];
+
+  // First, get content-based changes (modified existing records + new)
+  if (Object.keys(_lastSyncedSnapshot||{}).length > 0) {
+    const changes = _detectContentChanges();
+    changes.forEach(c => {
+      const labelMap = {
+        projects:'Project',tasks:'Task',costs:'Cost',qaqc:'QA/QC',risks:'Risk',actions:'Action',
+        documents:'Document',libraryDocs:'Library Doc',resourceAllocations:'Allocation',
+        resourceUsageLogs:'Usage Log',dailyMeetingLogs:'Daily Log',procurement:'Procurement',
+        procurementLogs:'Proc. Log',materials:'Material',manpower:'Manpower',equipment:'Equipment',
+        tools:'Tool',vehicles:'Vehicle',consumables:'Consumable',thirdParty:'Third Party',
+        assetHistory:'Asset History',assetUtilization:'Asset Util.',idChangeRequests:'ID Change Req',
+        notifications:'Notification',projectIdHistory:'Project ID Hist'
+      };
+      items.push({
+        arrayKey: c.dataKey,
+        type: labelMap[c.dataKey] || c.dataKey,
+        id: c.recordId,
+        label: c.label + (c.type==='modified' ? ' (modified)' : c.type==='deleted' ? ' (deleted)' : ''),
+        createdAt: new Date().toISOString(),
+        createdBy: _currentUserProfile?.name || 'You',
+      });
+    });
+    return items;
+  }
+
+  // Fallback: original flag-based detection (when no snapshot yet)
   const arrays = [
     { k: 'projects', label: 'Project' },
     { k: 'tasks', label: 'Task' },
@@ -8762,11 +8861,28 @@ async function _doFullSync() {
   _syncState = 'syncing';
   updateSyncStatusButton();
   try {
-    await _spPollRemote();
+    // ── STEP 1: PUSH FIRST ──────────────────────────────
+    // Push local changes BEFORE pulling — protects against losing in-progress edits.
+    // The push uses the latest local state; subsequent pull merges remote into local
+    // without overwriting what we just pushed.
+    await spPushData(true);
+
+    // ── STEP 2: DETECT ID COLLISIONS ──────────────
+    // After push, see if anyone else created the same IDs in parallel
     const renamed = await _detectAndResolveIdCollisions();
     _syncLastRenamed = renamed.length;
-    await spPushData(true);
+    if (renamed.length > 0) {
+      // Push again with renumbered IDs
+      await spPushData(true);
+    }
+
+    // ── STEP 3: PULL LATEST FROM REMOTE ──────────
+    // Now safe to pull — our changes are already in SharePoint.
+    // Smart-merge will preserve any in-progress edits via _editingRecords.
+    await _spPollRemote();
+
     _clearNewlyCreatedFlags();
+    _captureSyncedSnapshot(); // remember current state as the synced baseline
     _syncLastTs = Date.now();
     _syncState = 'synced';
     _syncLastError = '';
@@ -8979,6 +9095,7 @@ setTimeout(() => {
       _syncLastTs = Date.now();
       _syncState = 'synced';
       _clearNewlyCreatedFlags();
+      try { _captureSyncedSnapshot(); } catch(e) {} // remember state after push
       try { updateSyncStatusButton(); } catch(e) {}
       return result;
     } catch(e) {
