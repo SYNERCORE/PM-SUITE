@@ -11735,6 +11735,26 @@ async function spPullData() {
       localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
     }
     _spApplyRemote(cleanData, _ts, _by);
+
+    // ── CRITICAL: Also fetch all sub-lists (Tasks, Projects, etc.) ──
+    // The main blob only has settings/business units now — actual data lives in sub-lists.
+    let subListReport = '';
+    try {
+      spSetStatus('syncing', 'Downloading sub-lists from SharePoint...');
+      const subListResults = await _spFetchAllSubLists(token);
+      const summary = [];
+      Object.entries(SHIC_LIST_CONFIG).forEach(([listName, cfg]) => {
+        const remoteList = subListResults[cfg.dataKey];
+        if (!Array.isArray(remoteList)) return;
+        AppState.data[cfg.dataKey] = remoteList;
+        if (remoteList.length > 0) summary.push(remoteList.length + ' ' + cfg.name.toLowerCase());
+      });
+      if (summary.length > 0) subListReport = ' · ' + summary.join(', ');
+      AppState.save();
+    } catch(e) {
+      console.warn('[SP] Sub-list pull during manual Pull failed:', e.message);
+    }
+
     _spLastSync = new Date().toISOString();
     localStorage.setItem('shic_sp_lastsync', _spLastSync);
     spSetStatus('connected', 'Last sync: ' + fmtSyncTime(_spLastSync));
@@ -11742,7 +11762,9 @@ async function spPullData() {
     _spOfflineQueue = false;
     localStorage.removeItem('shic_sp_offlinequeue');
     clearTimeout(_spRetryTimer);
-    showToast('Data loaded from SharePoint' + (_by ? ' (by ' + _by + ')' : '') + ' ✓', 'success');
+    showToast('Data loaded from SharePoint' + (_by ? ' (by ' + _by + ')' : '') + subListReport + ' ✓', 'success', 5000);
+    // Refresh whatever page user is on
+    if (typeof _refreshCurrentView === 'function') _refreshCurrentView();
     spUpdateSyncInfo();
   } catch (e) {
     spSetStatus('error', 'Pull failed: ' + e.message);
@@ -11839,9 +11861,10 @@ async function _spPollRemote() {
     const hash = _spHash(data) + _ts;
     const mainBlobChanged = hash !== _spDataHash;
 
-    // ── CRITICAL: Always pull sub-lists, even if main blob unchanged ──
+    // ── CRITICAL: Always pull and SMART-MERGE sub-lists ──
     // Other users may have updated SHIC_Tasks, SHIC_Projects, SHIC_Actions etc.
     // without touching the main blob (since those data arrays live in dedicated lists).
+    // Smart merge preserves local _newlyCreated (unsynced) and _deleted (soft-delete) markers.
     let subListsChanged = false;
     try {
       const subListResults = await _spFetchAllSubLists(token);
@@ -11849,30 +11872,49 @@ async function _spPollRemote() {
         const remoteList = subListResults[cfg.dataKey];
         if (!Array.isArray(remoteList)) return; // fetch failed or list missing
         const localList = AppState.data[cfg.dataKey] || [];
-        // Detect if remote is meaningfully different from local
-        // Compare by IDs + record hashes
+
         const localById = {};
         localList.forEach(r => { if (r && r.id) localById[r.id] = r; });
         const remoteById = {};
         remoteList.forEach(r => { if (r && r.id) remoteById[r.id] = r; });
-        // Count differences
-        let differs = false;
-        const allIds = new Set([...Object.keys(localById), ...Object.keys(remoteById)]);
-        for (const id of allIds) {
-          const l = localById[id];
-          const r = remoteById[id];
-          if (!l || !r) { differs = true; break; }
-          // Compare JSON to detect content changes
-          if (JSON.stringify(l) !== JSON.stringify(r)) { differs = true; break; }
-        }
-        if (differs) {
-          subListsChanged = true;
-          // Apply remote sub-list (merge with local soft-deleted markers)
-          if (!_spHasLocalEdits()) {
-            // Safe to overwrite — merge in remote
-            AppState.data[cfg.dataKey] = remoteList;
-            console.log('[SP] Sub-list ' + listName + ' updated from remote (' + remoteList.length + ' records)');
+
+        const merged = [];
+        const seen = new Set();
+
+        // 1. Keep all local records that are NOT in remote yet:
+        //    - _newlyCreated (user created locally, not yet pushed)
+        //    - _deleted (user soft-deleted locally, not yet propagated)
+        localList.forEach(r => {
+          if (!r || !r.id) return;
+          if (r._newlyCreated) {
+            merged.push(r);
+            seen.add(r.id);
+            return;
           }
+          if (r._deleted) {
+            // Keep soft-delete marker even if remote still has the record
+            merged.push(r);
+            seen.add(r.id);
+            return;
+          }
+        });
+
+        // 2. Add ALL remote records (this is the truth source)
+        //    unless we already have a local soft-delete / newly-created with the same ID
+        remoteList.forEach(r => {
+          if (!r || !r.id || seen.has(r.id)) return;
+          merged.push(r);
+          seen.add(r.id);
+        });
+
+        // 3. Detect if merged differs from current local — if yes, apply
+        const currentJSON = JSON.stringify(localList);
+        const mergedJSON = JSON.stringify(merged);
+        if (currentJSON !== mergedJSON) {
+          subListsChanged = true;
+          AppState.data[cfg.dataKey] = merged;
+          const added = merged.length - localList.filter(r => r && (r._newlyCreated || r._deleted)).length - (localList.length - localList.filter(r => r && (r._newlyCreated || r._deleted)).length);
+          console.log('[SP] Sub-list ' + listName + ' merged: local=' + localList.length + ' remote=' + remoteList.length + ' merged=' + merged.length);
         }
       });
     } catch(e) {
@@ -11882,18 +11924,17 @@ async function _spPollRemote() {
     // ── Apply changes ──
     if (!mainBlobChanged && !subListsChanged) return; // truly nothing new
 
-    // Don't overwrite main blob if user has pending local changes
-    if (_spHasLocalEdits()) {
-      if (mainBlobChanged) {
-        _spPendingRemote = { data, _ts, _by };
-      }
+    // Save merged sub-lists immediately (they preserved local unsynced + deleted markers)
+    if (subListsChanged) {
+      AppState.save();
+      _refreshCurrentView();
+    }
+
+    // Main blob is more cautious: only apply if user has no local edits
+    if (mainBlobChanged && _spHasLocalEdits()) {
+      _spPendingRemote = { data, _ts, _by };
       if (_by && _by !== _spAccount?.username)
         showToast('⚠ ' + _by + ' updated SharePoint while you have unsaved changes', 'warning', 5000);
-      // But still apply sub-list changes (they were merged above safely)
-      if (subListsChanged) {
-        AppState.save();
-        _refreshCurrentView();
-      }
       return;
     }
 
