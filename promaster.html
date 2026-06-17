@@ -7968,7 +7968,7 @@ ${renderSpPanel()}
           <div style="font-size:10px;color:var(--text-secondary)">${APP_CODENAME} Edition</div>
         </div>
         <div style="margin-left:auto;text-align:right">
-          <div style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:var(--accent-amber)">v${APP_VERSION}</div>
+          <div style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:var(--accent-amber)">v${HARDENING_VERSION}</div>
           <div style="font-size:9px;color:var(--text-muted)">Build ${APP_BUILD}</div>
         </div>
       </div>
@@ -11176,13 +11176,33 @@ function _spApplyRemote(data, _ts, _by) {
         showToast('↓ Merged remote changes from ' + _by + ' — your local edits preserved', 'info', 4000);
     }, 400);
   } else {
-    // No local edits — only full replace if remote is richer than local
-    const localCount = _dataRecordCount(AppState.data);
-    const remoteCount = _dataRecordCount(data);
-    if (remoteCount >= localCount) {
-      AppState.data = Object.assign(getDefaultData(), data);
+    // No local edits — apply main-blob remote data
+    // NOTE: Sub-list data (projects, tasks, etc.) is handled separately by the sub-list pull.
+    // The main blob now only carries settings, businessUnits, trades after the multi-list migration.
+    // So we only compare counts of NON-OFFLOADED arrays for the safety check.
+    const offloadedKeys = new Set(SHIC_OFFLOADED_KEYS || []);
+    const countNonOffloaded = (d) => {
+      if (!d) return 0;
+      return (SHIC_DATA_ARRAY_KEYS||[]).reduce((s,k) => {
+        if (offloadedKeys.has(k)) return s; // skip — these come from sub-lists
+        return s + (Array.isArray(d[k]) ? d[k].length : 0);
+      }, 0);
+    };
+    const localCount = countNonOffloaded(AppState.data);
+    const remoteCount = countNonOffloaded(data);
+    // Always apply main-blob data when no local edits — sub-lists handle bulk arrays separately.
+    // The "skip if local has more" check no longer makes sense after multi-list migration.
+    // We only skip if the main blob would clearly cause an obvious regression (e.g., 50+ records vs 0).
+    if (remoteCount === 0 && localCount > 5) {
+      console.log('[SP] Skipped remote main-blob replace — remote main blob is empty but local has ' + localCount + ' non-offloaded records');
     } else {
-      console.log('[SP] Skipped remote replace — local has more records (' + localCount + ' vs ' + remoteCount + ')');
+      // Merge main blob fields (settings, businessUnits, trades) but preserve sub-list arrays
+      const merged = Object.assign({}, data);
+      offloadedKeys.forEach(k => {
+        // Keep local sub-list data (it was already merged from sub-list pull)
+        if (Array.isArray(AppState.data[k])) merged[k] = AppState.data[k];
+      });
+      AppState.data = Object.assign(getDefaultData(), merged);
     }
     if (typeof migrateData === 'function') migrateData();
     if (typeof _origSaveForFb === 'function') _origSaveForFb();
@@ -13922,13 +13942,13 @@ async function checkForUpdates(){
           <a href="${data.html_url||'#'}" target="_blank" style="margin-left:10px;font-size:11px;color:var(--accent-blue)"><i class="fas fa-download" style="margin-right:4px"></i>Download</a>`;
         showToast(`Update available: v${latest}. Download from the About panel.`,'info',5000);
       }else{
-        el.innerHTML=`<span style="color:var(--accent-green)"><i class="fas fa-check-circle" style="margin-right:5px"></i>You have the latest version (v${APP_VERSION})</span>`;
+        el.innerHTML=`<span style="color:var(--accent-green)"><i class="fas fa-check-circle" style="margin-right:5px"></i>You have the latest version (v${HARDENING_VERSION})</span>`;
         showToast('Already on the latest version','success',2000);
       }
     }
   }catch(e){
     if(el)el.innerHTML=`<span style="color:var(--text-muted)"><i class="fas fa-info-circle" style="margin-right:5px"></i>Update check unavailable — ${e.name==='TimeoutError'?'no internet':'server unreachable'}</span>
-      <div style="font-size:10px;margin-top:4px">Current: v${APP_VERSION} (Build ${APP_BUILD}) &middot; Manual check: see your download source</div>`;
+      <div style="font-size:10px;margin-top:4px">Current: v${HARDENING_VERSION} (Build ${APP_BUILD}) &middot; Manual check: see your download source</div>`;
   }
 }
 
@@ -14138,7 +14158,7 @@ function exportAllData(){
   const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
-  a.download=`shic_backup_${new Date().toISOString().slice(0,10)}_v${APP_VERSION}.json`;
+  a.download=`shic_backup_${new Date().toISOString().slice(0,10)}_v${HARDENING_VERSION}.json`;
   a.click();
   showToast('Data exported as JSON backup','success');
 }
@@ -18947,6 +18967,526 @@ async function saveAssetHistory() {
 const SOFT_DELETE_RETENTION_DAYS = 30;
 
 // Mark a record as soft-deleted (used by new delete handlers)
+
+// ═══════════════════════════════════════════════════════════════════════
+// ── TIER 1 + 3 HARDENING MODULE ───────────────────────────────────────
+// Diagnostics · Version banner · Reset · Audit log · Error boundary
+// Pre-sync snapshot · Daily SP backup
+// ═══════════════════════════════════════════════════════════════════════
+
+const HARDENING_VERSION = '5.0.0';
+const HARDENING_BUILD_DATE = '2026-06-17';
+
+// ── 1. AUDIT LOG ──────────────────────────────────────────
+// Captures sync events, errors, conflicts, ID renames, deletes, restores.
+// Stored locally (last 500 entries) + optionally pushed to SP audit list.
+const AUDIT_LOG_KEY = 'shic_audit_log';
+const AUDIT_LOG_MAX = 500;
+let _auditLog = [];
+
+function _loadAuditLog() {
+  try { _auditLog = JSON.parse(localStorage.getItem(AUDIT_LOG_KEY) || '[]'); } catch(e) { _auditLog = []; }
+}
+function _saveAuditLog() {
+  try {
+    if (_auditLog.length > AUDIT_LOG_MAX) _auditLog = _auditLog.slice(-AUDIT_LOG_MAX);
+    localStorage.setItem(AUDIT_LOG_KEY, JSON.stringify(_auditLog));
+  } catch(e) {
+    // Quota — drop the oldest half
+    _auditLog = _auditLog.slice(-Math.floor(AUDIT_LOG_MAX / 2));
+    try { localStorage.setItem(AUDIT_LOG_KEY, JSON.stringify(_auditLog)); } catch(e2) {}
+  }
+}
+
+function auditLog(category, message, details) {
+  const entry = {
+    ts: Date.now(),
+    iso: new Date().toISOString(),
+    category, // 'sync', 'error', 'conflict', 'collision', 'delete', 'restore', 'auth', 'backup', 'reset'
+    message: String(message || ''),
+    details: details || null,
+    user: (typeof _currentUserProfile !== 'undefined' && _currentUserProfile?.email) || (typeof _currentUser !== 'undefined' && _currentUser?.email) || 'unknown',
+    page: (typeof AppState !== 'undefined' && AppState.currentPage) || '',
+    version: HARDENING_VERSION,
+  };
+  _auditLog.push(entry);
+  _saveAuditLog();
+  // Mirror to console at appropriate level
+  if (category === 'error') console.error('[Audit]', message, details);
+  else if (category === 'conflict' || category === 'collision') console.warn('[Audit]', message, details);
+  else console.log('[Audit]', message);
+}
+_loadAuditLog();
+auditLog('boot', 'App loaded v' + HARDENING_VERSION);
+
+// ── 2. GLOBAL ERROR BOUNDARY ──────────────────────────────
+// Catches uncaught errors and promise rejections → toast + audit log
+window.addEventListener('error', (e) => {
+  try {
+    const msg = e?.error?.message || e?.message || 'Unknown error';
+    const stack = e?.error?.stack || '';
+    auditLog('error', msg, { stack: stack.substring(0, 1000), file: e.filename, line: e.lineno });
+    // Show friendly toast (avoid loops by not toasting on the toast itself)
+    if (typeof showToast === 'function' && !msg.includes('showToast')) {
+      showToast('Something went wrong. Check Diagnostics → Audit Log for details.', 'error', 5000);
+    }
+  } catch(_) {}
+});
+window.addEventListener('unhandledrejection', (e) => {
+  try {
+    const msg = e?.reason?.message || String(e?.reason || 'Unhandled promise rejection');
+    auditLog('error', msg, { stack: (e?.reason?.stack || '').substring(0, 1000), type: 'promise' });
+    if (typeof showToast === 'function' && !msg.includes('SP') && !msg.includes('Graph')) {
+      showToast('An operation failed. Check Diagnostics for details.', 'warning', 4000);
+    }
+  } catch(_) {}
+});
+
+// ── 3. VERSION BANNER ─────────────────────────────────────
+// Bottom-right pill showing version + last sync time
+function _ensureVersionBanner() {
+  if (document.getElementById('versionBanner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'versionBanner';
+  banner.style.cssText = 'position:fixed;bottom:8px;right:12px;background:rgba(13,17,23,.85);backdrop-filter:blur(8px);color:var(--text-muted);padding:5px 10px;border-radius:14px;font-size:9px;font-family:var(--font-mono);z-index:998;border:1px solid var(--border);cursor:pointer;transition:all .2s;opacity:.6;display:flex;align-items:center;gap:6px';
+  banner.title = 'Click to open Diagnostics';
+  banner.onclick = () => navigate('settings').then ? navigate('settings').then(()=>setTimeout(showDiagnostics,200)) : (navigate('settings'), setTimeout(showDiagnostics, 300));
+  banner.onmouseenter = () => { banner.style.opacity = '1'; };
+  banner.onmouseleave = () => { banner.style.opacity = '.6'; };
+  document.body.appendChild(banner);
+  _updateVersionBanner();
+  setInterval(_updateVersionBanner, 30000);
+}
+function _updateVersionBanner() {
+  const b = document.getElementById('versionBanner');
+  if (!b) return;
+  let syncInfo = '';
+  if (typeof _syncLastTs !== 'undefined' && _syncLastTs) {
+    const ago = Math.floor((Date.now() - _syncLastTs) / 1000);
+    if (ago < 60) syncInfo = ' · synced ' + ago + 's ago';
+    else if (ago < 3600) syncInfo = ' · synced ' + Math.floor(ago/60) + 'm ago';
+    else syncInfo = ' · synced ' + Math.floor(ago/3600) + 'h ago';
+  }
+  b.innerHTML = '<span style="color:var(--accent-blue);font-weight:700">v' + HARDENING_VERSION + '</span>' + syncInfo;
+}
+setTimeout(_ensureVersionBanner, 500);
+
+// ── 4. PRE-SYNC SNAPSHOT (Tier 3 #9) ──────────────────────
+// Saves AppState.data before every sync. If next load detects corruption
+// (e.g., empty arrays where there shouldn't be), offers restore.
+const PRESYNC_KEY = 'shic_presync_backup';
+function _savePreSyncSnapshot() {
+  try {
+    const snap = {
+      ts: Date.now(),
+      iso: new Date().toISOString(),
+      data: AppState.data,
+      version: HARDENING_VERSION,
+    };
+    localStorage.setItem(PRESYNC_KEY, JSON.stringify(snap));
+  } catch(e) {
+    // Quota error — silently skip (don't break sync)
+    console.warn('[Snapshot] Could not save pre-sync snapshot:', e.message);
+  }
+}
+function _detectDataCorruption() {
+  // Heuristic: if previously had data and now everything is empty
+  try {
+    const snap = JSON.parse(localStorage.getItem(PRESYNC_KEY) || 'null');
+    if (!snap || !snap.data) return null;
+    const arrays = ['projects','tasks','equipment','tools','vehicles','consumables','manpower'];
+    const prevTotal = arrays.reduce((s, k) => s + (snap.data[k]?.length || 0), 0);
+    const currTotal = arrays.reduce((s, k) => s + (AppState.data[k]?.length || 0), 0);
+    // If previous had >50 records and current has 0, something's wrong
+    if (prevTotal > 50 && currTotal === 0) {
+      return { snap, prevTotal, currTotal };
+    }
+    return null;
+  } catch(e) { return null; }
+}
+function _offerRestoreSnapshot() {
+  const corruption = _detectDataCorruption();
+  if (!corruption) return false;
+  const ageMin = Math.floor((Date.now() - corruption.snap.ts) / 60000);
+  if (confirm(
+    '⚠ Possible data corruption detected\n\n' +
+    'Your local data appears to have been wiped.\n' +
+    'Previous snapshot has ' + corruption.prevTotal + ' records (from ' + ageMin + ' minutes ago).\n' +
+    'Current state has ' + corruption.currTotal + ' records.\n\n' +
+    'Restore from snapshot?'
+  )) {
+    AppState.data = corruption.snap.data;
+    AppState.save();
+    auditLog('restore', 'Restored from pre-sync snapshot', { prevTotal: corruption.prevTotal });
+    location.reload();
+    return true;
+  }
+  return false;
+}
+setTimeout(() => { try { _offerRestoreSnapshot(); } catch(e) {} }, 3000);
+
+// Hook pre-sync snapshot into spPushData
+(function hookPreSyncSnapshot() {
+  if (typeof spPushData !== 'function' || spPushData._presyncHooked) return;
+  spPushData._presyncHooked = true;
+  const orig = window.spPushData;
+  window.spPushData = async function(...args) {
+    try { _savePreSyncSnapshot(); } catch(e) {}
+    return await orig.apply(this, args);
+  };
+})();
+
+// ── 5. DAILY BACKUP TO SHAREPOINT (Tier 3 #10) ───────────
+// Once per day per user, push full AppState.data to SHIC_Documents/Backups/
+const DAILY_BACKUP_KEY = 'shic_last_backup_date';
+async function _runDailyBackup() {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const lastBackup = localStorage.getItem(DAILY_BACKUP_KEY);
+    if (lastBackup === today) return; // already done today
+    if (typeof _spConnected === 'undefined' || !_spConnected) return;
+    if (typeof getSpToken !== 'function') return;
+    const token = await getSpToken();
+    if (!token || !_spSiteId) return;
+
+    // Build backup JSON
+    const backup = {
+      version: HARDENING_VERSION,
+      backupDate: today,
+      backedUpAt: new Date().toISOString(),
+      backedUpBy: _currentUserProfile?.email || _currentUser?.email || 'unknown',
+      recordCounts: {},
+      data: AppState.data,
+    };
+    ['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
+     'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement',
+     'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
+     'assetHistory'].forEach(k => {
+      backup.recordCounts[k] = (AppState.data[k] || []).length;
+    });
+
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const fileName = 'backup-' + today + '-' + (_currentUserProfile?.email || 'unknown').split('@')[0] + '.json';
+
+    // Upload via SP upload helper if available
+    if (typeof spUploadFile === 'function') {
+      await spUploadFile(blob, 'Backups', fileName);
+      localStorage.setItem(DAILY_BACKUP_KEY, today);
+      auditLog('backup', 'Daily backup uploaded', { fileName, sizeKB: Math.round(blob.size / 1024) });
+      console.log('[Backup] Daily backup uploaded: ' + fileName);
+    }
+  } catch(e) {
+    auditLog('error', 'Daily backup failed: ' + e.message);
+    console.warn('[Backup] Failed:', e.message);
+  }
+}
+// Run on login (after data load + SP connection) — defer 30s to avoid blocking startup
+setTimeout(_runDailyBackup, 30000);
+
+// ── 6. DIAGNOSTICS PANEL ──────────────────────────────────
+function showDiagnostics() {
+  const counts = {};
+  const arrays = ['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
+    'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs',
+    'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
+    'assetHistory','assetUtilization','idChangeRequests','notifications','activities','projectIdHistory'];
+  arrays.forEach(k => { counts[k] = (AppState.data[k] || []).length; });
+
+  const pending = (typeof _getPendingItems === 'function') ? _getPendingItems() : [];
+  const editingNow = (typeof _editingRecords !== 'undefined') ? Object.keys(_editingRecords).reduce((s, k) => s + Object.keys(_editingRecords[k]||{}).length, 0) : 0;
+  const failedLists = (typeof _getFailedLists === 'function') ? _getFailedLists() : [];
+  const lsSize = (() => {
+    try {
+      let total = 0;
+      for (const k in localStorage) total += (localStorage[k]?.length || 0);
+      return Math.round(total / 1024);
+    } catch(e) { return 0; }
+  })();
+
+  const recentLog = _auditLog.slice(-50).reverse();
+  const errorCount = _auditLog.filter(e => e.category === 'error').length;
+  const conflictCount = _auditLog.filter(e => e.category === 'conflict' || e.category === 'collision').length;
+
+  $('#genericModalTitle').textContent = 'Diagnostics';
+  $('#genericModalBody').innerHTML = `
+    <div style="max-height:65vh;overflow-y:auto">
+
+      <!-- HEADER STATUS -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+        <div style="padding:8px 10px;background:var(--bg-hover);border-radius:7px">
+          <div style="font-size:9px;color:var(--text-muted);letter-spacing:1px">VERSION</div>
+          <div style="font-size:13px;font-weight:700;color:var(--accent-blue)">v${HARDENING_VERSION}</div>
+        </div>
+        <div style="padding:8px 10px;background:var(--bg-hover);border-radius:7px">
+          <div style="font-size:9px;color:var(--text-muted);letter-spacing:1px">SYNC STATE</div>
+          <div style="font-size:13px;font-weight:700;color:${_syncState==='synced'?'var(--accent-green)':_syncState==='pending'?'var(--accent-amber)':_syncState==='error'?'var(--accent-red)':'var(--text-muted)'}">${(typeof _syncState !== 'undefined' ? _syncState : 'unknown').toUpperCase()}</div>
+        </div>
+        <div style="padding:8px 10px;background:var(--bg-hover);border-radius:7px">
+          <div style="font-size:9px;color:var(--text-muted);letter-spacing:1px">PENDING</div>
+          <div style="font-size:13px;font-weight:700;color:${pending.length>0?'var(--accent-amber)':'var(--accent-green)'}">${pending.length}</div>
+        </div>
+        <div style="padding:8px 10px;background:var(--bg-hover);border-radius:7px">
+          <div style="font-size:9px;color:var(--text-muted);letter-spacing:1px">STORAGE</div>
+          <div style="font-size:13px;font-weight:700">${lsSize} KB</div>
+        </div>
+      </div>
+
+      <!-- ACTIONS -->
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px">
+        <button class="btn btn-primary btn-sm" onclick="_diagExportBundle()"><i class="fas fa-download"></i> Export Bundle</button>
+        <button class="btn btn-secondary btn-sm" onclick="_diagViewLog()"><i class="fas fa-list"></i> Full Audit Log</button>
+        <button class="btn btn-secondary btn-sm" onclick="_diagForceReSnapshot()"><i class="fas fa-camera"></i> Reset Baseline</button>
+        <button class="btn btn-danger btn-sm" onclick="_diagResetToFresh()"><i class="fas fa-exclamation-triangle"></i> Reset to Fresh</button>
+        <button class="btn btn-secondary btn-sm" onclick="_runDailyBackup().then(()=>showToast('Backup triggered','info'))" title="Force daily backup now"><i class="fas fa-shield"></i> Backup Now</button>
+      </div>
+
+      <!-- RECORD COUNTS -->
+      <details open style="margin-bottom:10px">
+        <summary style="cursor:pointer;font-weight:700;font-size:12px;padding:8px 12px;background:var(--bg-hover);border-radius:7px">📊 Record Counts</summary>
+        <div style="padding:10px;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:11px">
+          ${Object.entries(counts).filter(([k,v])=>v>0).map(([k,v]) => `<div style="display:flex;justify-content:space-between;padding:4px 8px;background:var(--bg-hover);border-radius:4px"><span style="color:var(--text-muted)">${k}</span><strong>${v}</strong></div>`).join('')}
+        </div>
+      </details>
+
+      <!-- SYNC INTERNALS -->
+      <details style="margin-bottom:10px">
+        <summary style="cursor:pointer;font-weight:700;font-size:12px;padding:8px 12px;background:var(--bg-hover);border-radius:7px">🔄 Sync Internals</summary>
+        <div style="padding:10px;font-size:10px;font-family:var(--font-mono)">
+          <div>_spConnected: <strong>${typeof _spConnected !== 'undefined' ? _spConnected : 'undefined'}</strong></div>
+          <div>_spLastWriteTs: <strong>${typeof _spLastWriteTs !== 'undefined' ? new Date(_spLastWriteTs).toISOString() : '-'}</strong></div>
+          <div>_syncLastTs: <strong>${typeof _syncLastTs !== 'undefined' && _syncLastTs ? new Date(_syncLastTs).toISOString() : '-'}</strong></div>
+          <div>_syncLastError: <strong style="color:var(--accent-red)">${typeof _syncLastError !== 'undefined' ? _syncLastError : '-'}</strong></div>
+          <div>_syncLastRenamed: <strong>${typeof _syncLastRenamed !== 'undefined' ? _syncLastRenamed : 0}</strong></div>
+          <div>_spListIdMaps: <strong>${typeof _spListIdMaps !== 'undefined' ? Object.keys(_spListIdMaps).length + ' lists' : '-'}</strong></div>
+          <div>Active edits: <strong>${editingNow}</strong></div>
+          <div>Failed lists (last 10 min): <strong style="color:${failedLists.length>0?'var(--accent-red)':'var(--text-muted)'}">${failedLists.length}${failedLists.length>0?' — '+failedLists.map(f=>f.list).join(', '):''}</strong></div>
+        </div>
+      </details>
+
+      <!-- RECENT AUDIT LOG -->
+      <details ${errorCount > 0 ? 'open' : ''}>
+        <summary style="cursor:pointer;font-weight:700;font-size:12px;padding:8px 12px;background:var(--bg-hover);border-radius:7px">📋 Recent Activity <span style="font-weight:400;color:var(--text-muted);font-size:10px">· ${_auditLog.length} entries · ${errorCount} errors · ${conflictCount} conflicts</span></summary>
+        <div style="padding:10px;max-height:240px;overflow-y:auto">
+          ${recentLog.slice(0, 30).map(e => {
+            const colors = { error:'#f85149', conflict:'#f0a450', collision:'#f0a450', sync:'#388bfd', boot:'#8b949e', backup:'#3fb950', restore:'#3fb950', reset:'#bc8cff', delete:'#f85149', auth:'#388bfd' };
+            const c = colors[e.category] || '#8b949e';
+            return `<div style="padding:6px 8px;border-left:2px solid ${c};margin-bottom:4px;font-size:10px;background:var(--bg-hover)">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="color:${c};font-weight:700;text-transform:uppercase;font-size:9px">${e.category}</span>
+                <span style="color:var(--text-muted);font-size:9px">${new Date(e.ts).toLocaleString()}</span>
+              </div>
+              <div style="margin-top:2px">${e.message}</div>
+              ${e.details ? `<details style="margin-top:3px"><summary style="cursor:pointer;font-size:9px;color:var(--text-muted)">details</summary><pre style="font-size:9px;background:rgba(0,0,0,.3);padding:5px;border-radius:3px;margin-top:3px;overflow-x:auto">${JSON.stringify(e.details, null, 2).substring(0, 400)}</pre></details>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+      </details>
+    </div>
+  `;
+  $('#genericModalFooter').innerHTML = `<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
+  openModal('genericModal');
+}
+
+function _diagExportBundle() {
+  const bundle = {
+    exported: new Date().toISOString(),
+    version: HARDENING_VERSION,
+    user: _currentUserProfile?.email || 'unknown',
+    syncState: {
+      _spConnected: typeof _spConnected !== 'undefined' ? _spConnected : null,
+      _syncState: typeof _syncState !== 'undefined' ? _syncState : null,
+      _spLastWriteTs: typeof _spLastWriteTs !== 'undefined' ? _spLastWriteTs : null,
+      _syncLastTs: typeof _syncLastTs !== 'undefined' ? _syncLastTs : null,
+      _syncLastError: typeof _syncLastError !== 'undefined' ? _syncLastError : null,
+      _spDataHash: typeof _spDataHash !== 'undefined' ? _spDataHash : null,
+    },
+    recordCounts: {},
+    pendingItems: typeof _getPendingItems === 'function' ? _getPendingItems() : [],
+    auditLog: _auditLog,
+    editingRecords: typeof _editingRecords !== 'undefined' ? _editingRecords : null,
+  };
+  ['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
+   'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement',
+   'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
+   'assetHistory'].forEach(k => {
+    bundle.recordCounts[k] = (AppState.data[k] || []).length;
+  });
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'shic-diagnostics-' + new Date().toISOString().split('T')[0] + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  showToast('Diagnostics bundle downloaded', 'success');
+}
+
+function _diagViewLog() {
+  $('#genericModalTitle').textContent = 'Full Audit Log (' + _auditLog.length + ' entries)';
+  const logs = [..._auditLog].reverse();
+  $('#genericModalBody').innerHTML = `
+    <div style="max-height:65vh;overflow-y:auto;font-family:var(--font-mono);font-size:10px">
+      ${logs.map(e => {
+        const colors = { error:'#f85149', conflict:'#f0a450', collision:'#f0a450', sync:'#388bfd', boot:'#8b949e', backup:'#3fb950', restore:'#3fb950', reset:'#bc8cff' };
+        const c = colors[e.category] || '#8b949e';
+        return `<div style="padding:6px 10px;border-left:3px solid ${c};margin-bottom:4px;background:var(--bg-hover)">
+          <div style="color:var(--text-muted);font-size:9px">${e.iso} · ${e.user}</div>
+          <div><span style="color:${c};font-weight:700">[${e.category}]</span> ${e.message}</div>
+          ${e.details ? `<pre style="font-size:9px;background:rgba(0,0,0,.3);padding:5px;border-radius:3px;margin-top:3px;overflow-x:auto">${JSON.stringify(e.details, null, 2).substring(0, 600)}</pre>` : ''}
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+  $('#genericModalFooter').innerHTML = `
+    <button class="btn btn-secondary" onclick="_clearAuditLog()" style="color:var(--accent-red)"><i class="fas fa-trash"></i> Clear Log</button>
+    <button class="btn btn-secondary" onclick="showDiagnostics()">Back</button>`;
+  openModal('genericModal');
+}
+
+function _clearAuditLog() {
+  if (!confirm('Clear all audit log entries? This is irreversible.')) return;
+  _auditLog = [];
+  _saveAuditLog();
+  showToast('Audit log cleared', 'warning');
+  showDiagnostics();
+}
+
+function _diagForceReSnapshot() {
+  if (!confirm('Reset sync baseline?\n\nThis tells the app that the current local state IS the latest synced state. Use this if the sync indicator is stuck on amber despite no actual changes.')) return;
+  try {
+    if (typeof _captureSyncedSnapshot === 'function') _captureSyncedSnapshot();
+    auditLog('reset', 'Sync baseline manually reset');
+    if (typeof updateSyncStatusButton === 'function') updateSyncStatusButton();
+    showToast('Sync baseline reset', 'success');
+  } catch(e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+
+async function _diagResetToFresh() {
+  if (!confirm(
+    '⚠ RESET TO FRESH STATE ⚠\n\n' +
+    'This will:\n' +
+    '• Clear all local data (cache)\n' +
+    '• Re-download everything from SharePoint\n' +
+    '• Discard any unsynced changes\n\n' +
+    'Use ONLY when local data is corrupted.\n\n' +
+    'Continue?'
+  )) return;
+  if (!confirm('Last warning: ALL unsynced changes will be LOST. Continue?')) return;
+
+  try {
+    auditLog('reset', 'User initiated reset to fresh state');
+    // Save pre-reset snapshot in case user wants to recover
+    _savePreSyncSnapshot();
+    // Clear local data
+    AppState.data = getDefaultData();
+    AppState.save();
+    // Clear sync state
+    if (typeof _spDataHash !== 'undefined') _spDataHash = '';
+    if (typeof _spLastWriteTs !== 'undefined') _spLastWriteTs = 0;
+    if (typeof _spListIdMaps !== 'undefined') Object.keys(_spListIdMaps).forEach(k => delete _spListIdMaps[k]);
+    if (typeof _lastSyncedSnapshot !== 'undefined') _lastSyncedSnapshot = {};
+    showToast('Local data cleared. Pulling fresh from SharePoint...', 'info', 3000);
+    closeModal('genericModal');
+    // Trigger fresh pull
+    if (typeof spPullData === 'function') {
+      await spPullData();
+      auditLog('reset', 'Fresh pull from SharePoint completed');
+      showToast('Reset complete · fresh data loaded', 'success', 4000);
+    } else {
+      location.reload();
+    }
+  } catch(e) {
+    auditLog('error', 'Reset to fresh failed: ' + e.message);
+    showToast('Reset failed: ' + e.message + ' · refreshing page', 'error', 4000);
+    setTimeout(() => location.reload(), 2000);
+  }
+}
+
+// ── 7. HOOK AUDIT LOG INTO KEY EVENTS ─────────────────────
+// Wrap sync/push/pull to log events
+setTimeout(() => {
+  try {
+    if (typeof _doFullSync === 'function' && !_doFullSync._auditHooked) {
+      _doFullSync._auditHooked = true;
+      const orig = _doFullSync;
+      window._doFullSync = async function() {
+        auditLog('sync', 'Full sync started');
+        const before = Date.now();
+        try {
+          await orig.apply(this, arguments);
+          auditLog('sync', 'Full sync completed in ' + (Date.now() - before) + 'ms', { renamed: _syncLastRenamed });
+        } catch(e) {
+          auditLog('error', 'Sync failed: ' + e.message);
+          throw e;
+        }
+      };
+    }
+    if (typeof _showIdRenameSummary === 'function' && !_showIdRenameSummary._auditHooked) {
+      _showIdRenameSummary._auditHooked = true;
+      const orig = _showIdRenameSummary;
+      window._showIdRenameSummary = function(renamed) {
+        auditLog('collision', renamed.length + ' record(s) renumbered for ID collision', { renamed: renamed.map(r => ({ from: r.oldId, to: r.newId, type: r.arrayKey })) });
+        return orig.apply(this, arguments);
+      };
+    }
+  } catch(e) { console.warn('[Audit] Hook setup failed:', e.message); }
+}, 1500);
+
+// ── 8. SETTINGS PANEL ENTRY ───────────────────────────────
+// Add Diagnostics button to Settings page
+function _injectDiagnosticsButton() {
+  // Check if Settings page has been rendered and add the button there
+  const settingsEl = document.getElementById('settings');
+  if (!settingsEl || !settingsEl.querySelector || settingsEl.querySelector('#diagPanelBtn')) return;
+  const sectionHeader = settingsEl.querySelector('.section-header');
+  if (!sectionHeader) return;
+  const btnArea = sectionHeader.querySelector('div:last-child') || sectionHeader;
+  if (btnArea.querySelector('#diagPanelBtn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'diagPanelBtn';
+  btn.className = 'btn btn-secondary btn-sm';
+  btn.innerHTML = '<i class="fas fa-stethoscope"></i> Diagnostics';
+  btn.style.cssText = 'background:rgba(188,140,255,.12);border-color:rgba(188,140,255,.4);color:#bc8cff';
+  btn.onclick = showDiagnostics;
+  btnArea.appendChild(btn);
+}
+// Re-inject after each render
+const _origNavigate = typeof navigate === 'function' ? navigate : null;
+if (_origNavigate) {
+  setTimeout(() => {
+    document.addEventListener('click', (e) => {
+      if (e.target?.closest && e.target.closest('[onclick*="navigate(\'settings\')"]')) {
+        setTimeout(_injectDiagnosticsButton, 200);
+      }
+    });
+  }, 1000);
+}
+// Also try after render
+setInterval(() => {
+  try {
+    if (AppState.currentPage === 'settings') _injectDiagnosticsButton();
+  } catch(e) {}
+}, 2000);
+
+// ── 9. COMMAND PALETTE INTEGRATION ────────────────────────
+// Add Diagnostics to Cmd+K palette if it exists
+setTimeout(() => {
+  try {
+    if (typeof commandPaletteItems !== 'undefined' && Array.isArray(commandPaletteItems)) {
+      commandPaletteItems.push({
+        label: 'Diagnostics',
+        icon: 'fas fa-stethoscope',
+        keywords: 'diagnostics debug audit log error troubleshoot health',
+        fn: showDiagnostics,
+      });
+    }
+  } catch(e) {}
+}, 2000);
+
+console.log('[Hardening] Tier 1 + 3 module loaded · v' + HARDENING_VERSION);
+
 function softDelete(arrayKey, id) {
   const list = AppState.data[arrayKey] || [];
   const idx = list.findIndex(r => r && r.id === id);
