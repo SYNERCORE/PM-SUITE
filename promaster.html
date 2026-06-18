@@ -344,6 +344,13 @@ canvas{display:block}
   </div>
   <div class="sidebar-nav" id="sidebarNav"></div>
   <div class="sidebar-footer">
+    <div class="nav-item" onclick="navigate('deletionRequests')" title="Deletion Requests">
+      <span class="nav-icon" style="position:relative">
+        <i class="fas fa-clipboard-check"></i>
+        <span id="delReqBadge" style="position:absolute;top:-3px;right:-5px;background:var(--accent-amber);color:#000;font-size:9px;font-weight:700;border-radius:8px;padding:1px 5px;display:none">0</span>
+      </span>
+      <span class="nav-label">Deletion Requests</span>
+    </div>
     <div class="nav-item" onclick="navigate('trash')" title="Trash">
       <span class="nav-icon"><i class="fas fa-trash"></i></span>
       <span class="nav-label">Trash</span>
@@ -401,6 +408,7 @@ canvas{display:block}
 <div id="calendar" class="page"></div>
     <div id="reports" class="page"></div>
     <div id="masterlist" class="page"></div>
+    <div id="deletionRequests" class="page"></div>
     <div id="trash" class="page"></div>
     <div id="settings" class="page"></div>
   </div>
@@ -617,6 +625,7 @@ const SHIC_LIST_CONFIG = {
   'SHIC_DailyLogs':        { dataKey: 'dailyMeetingLogs',    idField: 'LogId',     name: 'Daily Logs',        hasProject: true  },
   // Workflows & system
   'SHIC_IdChangeRequests': { dataKey: 'idChangeRequests',    idField: 'ReqId',     name: 'ID Change Requests',hasProject: false },
+  'SHIC_DeletionRequests': { dataKey: 'deletionRequests',    idField: 'ReqId',     name: 'Deletion Requests', hasProject: false },
   'SHIC_Notifications':    { dataKey: 'notifications',       idField: 'NotifId',   name: 'Notifications',     hasProject: false },
   'SHIC_Activities':       { dataKey: 'activities',          idField: 'ActId',     name: 'Activities',        hasProject: false },
   'SHIC_ProjectIdHistory': { dataKey: 'projectIdHistory',    idField: 'HistId',    name: 'Project ID History',hasProject: false },
@@ -691,6 +700,7 @@ function getDefaultData(){
     businessUnits:[], // [{id,name,color,description}]
     dailyMeetingLogs:[], // [{id,date,projectId,status,remarks,targetActivity,update,progressSnapshot,flagged,savedBy}]
     idChangeRequests:[], // [{id,projectId,oldId,newId,requestedBy,requestedAt,reason,status,approvedBy,approvedAt,rejectedAt,rejectionReason}]
+    deletionRequests:[], // [{id,arrayKey,recordId,recordType,recordLabel,requestedBy,requestedByEmail,requestedAt,reason,status,reviewedBy,reviewedAt,rejectionReason}]
     libraryDocs:[], // [{id,name,number,rev,category,description,tags,fileName,fileType,fileUrl,fileWebUrl,spDriveId,spItemId,size,status,uploadedBy,uploadedAt,supersededBy,revisionOf}]
     projectIdHistory:[], // [{projectId(current),oldId,newId,changedBy,changedAt,reason}]
   };
@@ -1133,7 +1143,8 @@ const map={dashboard:renderDashboard,projects:renderProjects,tasks:renderTasks,g
 resources:renderResources,manpower:renderManpower,materials:renderMaterials,procurement:renderProcurement,
 costs:renderCosts,qaqc:renderQAQC,risks:renderRisks,actions:renderActions,documents:renderDocuments,
 progress:renderProgress,kpi:renderKPI,dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist,prospects:renderProspects,library:renderLibrary,
-trash:typeof renderTrash==='function'?renderTrash:null};
+trash:typeof renderTrash==='function'?renderTrash:null,
+deletionRequests:typeof renderDeletionRequests==='function'?renderDeletionRequests:null};
 if(map[pid])map[pid]();}
 
 function toggleSidebar(){
@@ -1957,7 +1968,12 @@ $('#projectModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">End Date</label><input class="form-input" type="date" id="pEnd" value="${p?.endDate||''}" oninput="_recalcProjDates('end')"></div>
 <div class="form-group"><label class="form-label">Budget (${AppState.data.settings?.currency||'PHP'})</label><input class="form-input" type="number" id="pBudget" value="${p?.budget||''}"></div>
 <div class="form-group"><label class="form-label">Project Manager</label><input class="form-input" id="pPM" value="${p?.pm||''}" placeholder="PM name"></div>
-<div class="form-group"><label class="form-label">Status</label><select class="form-select" id="pStatus">${['prospect','planned','active','on-hold','completed','archived'].map(s=>`<option value="${s}" ${p?.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+<div class="form-group"><label class="form-label">Status</label><select class="form-select" id="pStatus">${(function(){
+  const cur=p?.status||'active';
+  const allowed=(typeof getAllowedStatusTransitions==='function')?getAllowedStatusTransitions(cur):['active','planned','on-hold','completed','archived'];
+  const labels={prospect:'Prospect',planned:'Planned',active:'Active','on-hold':'On Hold',completed:'Completed',archived:'Archived'};
+  return allowed.map(s=>'<option value="'+s+'"'+(s===cur?' selected':'')+'>'+labels[s]+(s===cur?'':' (transition)')+'</option>').join('');
+})()}</select>${(typeof isAdminUser==='function'&&!isAdminUser()&&p?.id)?'<div style="font-size:9px;color:var(--text-muted);margin-top:3px"><i class="fas fa-lock" style="margin-right:3px;font-size:8px"></i>Status flow: prospect → planned → active → completed → archived (admin can override)</div>':''}</div>
 <div class="form-group"><label class="form-label">Priority</label><select class="form-select" id="pPri">${['critical','high','medium','low'].map(s=>`<option value="${s}" ${p?.priority===s?'selected':''}>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Discipline</label><input class="form-input" id="pDisc" value="${p?.discipline||''}" placeholder="e.g., Civil/Structural"></div>
 <div class="form-group"><label class="form-label">Progress % (Actual)</label><input class="form-input" type="number" id="pProg" value="${p?.progress||0}" min="0" max="100"></div>
@@ -1978,6 +1994,19 @@ async function saveProject(id){
 const newId=$('#pId').value.trim();
 // Capture duration for storage (computed from start/end if needed)
 const _durVal = parseInt($('#pDuration')?.value, 10);
+// Phase 2: validate status change against lock rules
+if (id) {
+  const existing = (AppState.data.projects||[]).find(p => p.id === id);
+  const newStatus = $('#pStatus')?.value;
+  if (existing && newStatus && existing.status !== newStatus) {
+    if (!validateStatusChange(existing.status, newStatus, existing.name)) {
+      // Revert the dropdown
+      const sel = document.getElementById('pStatus');
+      if (sel) sel.value = existing.status;
+      return;
+    }
+  }
+}
 // Fix #2: check for external changes before save
 if (id) {
   const proceed = await _checkConflictBeforeSave('project_'+id, id, 'projects');
@@ -2023,14 +2052,7 @@ if(isProspect){renderProspects();navigate('prospects');}else{renderProjects();}
 showToast(id?'Project updated':(isProspect?'Prospect created':'Project created'),'success');}
 
 function deleteProject(id){
-  if(!confirm('Delete this project? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.')) return;
-  if(softDelete('projects', id)){
-    AppState.save();
-    if (typeof buildSidebar==='function') buildSidebar();
-    if (typeof renderProjects==='function') renderProjects();
-    showToast('Project moved to Trash','warning');
-  }
-  return;
+  return requestOrDelete('projects', id);
   // Original code below (no longer reached) ────────────
   _origDeleteProject(id);
 }
@@ -2170,9 +2192,341 @@ function showProspectForm(id=null){
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════
+// ── DELETE PERMISSION + REQUEST SYSTEM (Phase 3) ─────────
+// Admins delete directly; users submit deletion requests.
+// Approved requests → soft-delete (Trash); admin can purge.
+// ═══════════════════════════════════════════════════════════
+
+// Generate a unique deletion request ID
+function _genDelReqId() {
+  const list = AppState.data.deletionRequests || [];
+  let maxN = 0;
+  list.forEach(r => {
+    const m = (r.id||'').match(/^DEL-(\d+)$/);
+    if (m) { const n = parseInt(m[1], 10); if (n > maxN) maxN = n; }
+  });
+  return 'DEL-' + String(maxN + 1).padStart(4, '0');
+}
+
+// Friendly label for a record type
+const _DEL_TYPE_LABELS = {
+  projects: 'Project', tasks: 'Task', actions: 'Action Item', risks: 'Risk',
+  qaqc: 'QA/QC Item', costs: 'Cost Item', documents: 'Document',
+  libraryDocs: 'Library Document', resourceAllocations: 'Resource Allocation',
+  resourceUsageLogs: 'Usage Log', dailyMeetingLogs: 'Daily Log',
+  procurement: 'Procurement Item', materials: 'Material',
+  manpower: 'Manpower', equipment: 'Equipment', tools: 'Tool',
+  vehicles: 'Vehicle', consumables: 'Consumable', thirdParty: 'Third Party',
+  assetHistory: 'Asset History', assetUtilization: 'Asset Utilization',
+};
+
+// Get record label for display
+function _getRecordLabel(arrayKey, id) {
+  const list = AppState.data[arrayKey] || [];
+  const r = list.find(x => x && x.id === id);
+  if (!r) return id;
+  return r.name || r.description || r.title || id;
+}
+
+// ── Unified delete entry point ─────────────────────────────
+// Called from all "delete" buttons. Admins delete directly;
+// users see a "Request Deletion" form.
+function requestOrDelete(arrayKey, id, customConfirmText) {
+  if (isAdminUser()) {
+    // Admins: direct soft-delete (Trash safety net)
+    const recordLabel = _getRecordLabel(arrayKey, id);
+    const typeLabel = _DEL_TYPE_LABELS[arrayKey] || arrayKey;
+    const msg = customConfirmText || ('Delete this ' + typeLabel + '?\n\n' + recordLabel + '\n\nIt will be moved to Trash and can be restored within ' + SOFT_DELETE_RETENTION_DAYS + ' days.');
+    if (!confirm(msg)) return false;
+    if (typeof softDelete === 'function' && softDelete(arrayKey, id)) {
+      AppState.save();
+      if (typeof auditLog === 'function') auditLog('delete', 'Admin soft-deleted ' + typeLabel + ' ' + id, { recordLabel });
+      showToast(typeLabel + ' moved to Trash', 'warning');
+      // Trigger re-render
+      try { if (AppState.currentPage && typeof navigate === 'function') {
+        const cur = AppState.currentPage;
+        setTimeout(() => navigate(cur), 100);
+      } } catch(e) {}
+      return true;
+    }
+    return false;
+  }
+  // Non-admin: open request modal
+  showDeletionRequestModal(arrayKey, id);
+  return false;
+}
+
+// ── Deletion request modal ─────────────────────────────────
+function showDeletionRequestModal(arrayKey, id) {
+  const recordLabel = _getRecordLabel(arrayKey, id);
+  const typeLabel = _DEL_TYPE_LABELS[arrayKey] || arrayKey;
+  // Check for existing pending request
+  const existing = (AppState.data.deletionRequests||[]).find(r =>
+    r.arrayKey === arrayKey && r.recordId === id && r.status === 'pending'
+  );
+  if (existing) {
+    showToast('Deletion already requested · awaiting admin review', 'info', 4000);
+    return;
+  }
+
+  $('#genericModalTitle').textContent = 'Request Deletion';
+  $('#genericModalBody').innerHTML = `
+    <div style="padding:11px 13px;background:rgba(240,164,80,.08);border:1px solid rgba(240,164,80,.25);border-radius:8px;margin-bottom:14px">
+      <div style="font-weight:700;color:var(--accent-amber);margin-bottom:4px"><i class="fas fa-clipboard-check" style="margin-right:5px"></i>Admin approval required</div>
+      <div style="font-size:11px;color:var(--text-secondary)">Only admins can delete. Submit a request and an admin will review it.</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Record</label>
+      <div style="padding:9px 12px;background:var(--bg-hover);border-radius:6px;font-size:11px">
+        <span style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">${typeLabel}</span><br>
+        <strong>${id}</strong> — ${recordLabel}
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Reason for deletion <span style="font-weight:400;color:var(--text-muted);font-size:10px">· optional but recommended</span></label>
+      <textarea class="form-input" id="delReqReason" rows="3" placeholder="e.g., Duplicate record, created in error, no longer relevant..."></textarea>
+    </div>
+  `;
+  $('#genericModalFooter').innerHTML = `
+    <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+    <button class="btn btn-primary" onclick="submitDeletionRequest('${arrayKey}','${id}')"><i class="fas fa-paper-plane"></i> Submit Request</button>
+  `;
+  openModal('genericModal');
+}
+
+// ── Submit a deletion request ─────────────────────────────
+function submitDeletionRequest(arrayKey, id) {
+  const reason = ($('#delReqReason')?.value || '').trim();
+  const recordLabel = _getRecordLabel(arrayKey, id);
+  if (!AppState.data.deletionRequests) AppState.data.deletionRequests = [];
+  const req = {
+    id: _genDelReqId(),
+    arrayKey,
+    recordId: id,
+    recordType: _DEL_TYPE_LABELS[arrayKey] || arrayKey,
+    recordLabel,
+    requestedBy: _currentUserProfile?.name || _currentUserProfile?.email || 'unknown',
+    requestedByEmail: _currentUserProfile?.email || '',
+    requestedAt: new Date().toISOString(),
+    reason,
+    status: 'pending',
+    reviewedBy: '',
+    reviewedAt: '',
+    rejectionReason: '',
+    _newlyCreated: true,
+  };
+  AppState.data.deletionRequests.push(req);
+  AppState.save();
+  if (typeof auditLog === 'function') auditLog('delete_request', 'Deletion requested: ' + req.recordType + ' ' + id, { reason, recordLabel });
+  closeModal('genericModal');
+  showToast('Deletion request submitted · awaiting admin review', 'success', 4000);
+}
+
+// ── Render the Deletion Requests page ─────────────────────
+function renderDeletionRequests() {
+  const isAdmin = isAdminUser();
+  const all = AppState.data.deletionRequests || [];
+  const myRequests = all.filter(r => r.requestedByEmail === (_currentUserProfile?.email||''));
+  const pending = all.filter(r => r.status === 'pending');
+
+  const reqs = isAdmin ? all : myRequests;
+  const pendingCount = isAdmin ? pending.length : myRequests.filter(r => r.status === 'pending').length;
+
+  // Sort: pending first, then by requestedAt desc
+  reqs.sort((a, b) => {
+    if (a.status === 'pending' && b.status !== 'pending') return -1;
+    if (b.status === 'pending' && a.status !== 'pending') return 1;
+    return (b.requestedAt||'').localeCompare(a.requestedAt||'');
+  });
+
+  $('#deletionRequests').innerHTML = `
+    <div class="section-header" style="margin-bottom:14px">
+      <div>
+        <div class="section-title"><i class="fas fa-clipboard-check" style="color:var(--accent-amber);margin-right:8px"></i>Deletion Requests</div>
+        <div class="section-sub">${isAdmin ? 'All requests' : 'Your requests'} · ${pendingCount} pending</div>
+      </div>
+    </div>
+    ${reqs.length === 0 ? `
+      <div class="empty-state"><i class="fas fa-clipboard"></i><p>${isAdmin ? 'No deletion requests' : 'You have no deletion requests'}</p></div>
+    ` : `
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${reqs.map(r => {
+          const statusColor = r.status === 'pending' ? '#f0a450' : r.status === 'approved' ? '#3fb950' : '#f85149';
+          return `<div class="card" style="padding:12px 14px;border-left:3px solid ${statusColor}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px">
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+                  <span style="font-family:var(--font-mono);font-size:10px;color:var(--accent-blue);font-weight:700">${r.id}</span>
+                  <span style="font-size:9px;padding:2px 8px;border-radius:8px;background:${statusColor}22;color:${statusColor};font-weight:700;text-transform:uppercase">${r.status}</span>
+                  <span style="font-size:10px;color:var(--text-muted)">${r.recordType}</span>
+                </div>
+                <div style="font-weight:600;font-size:13px;line-height:1.3">${r.recordLabel}</div>
+                <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:2px">${r.recordId}</div>
+                ${r.reason ? `<div style="margin-top:6px;padding:6px 9px;background:var(--bg-hover);border-radius:5px;font-size:11px;color:var(--text-secondary);font-style:italic">"${r.reason}"</div>` : ''}
+                <div style="font-size:10px;color:var(--text-muted);margin-top:5px">
+                  <i class="fas fa-user" style="margin-right:3px"></i>${r.requestedBy} · <i class="fas fa-clock" style="margin:0 3px"></i>${new Date(r.requestedAt).toLocaleString()}
+                  ${r.reviewedBy ? '· <i class="fas fa-gavel" style="margin:0 3px"></i>Reviewed by ' + r.reviewedBy : ''}
+                </div>
+                ${r.rejectionReason ? `<div style="margin-top:5px;padding:6px 9px;background:rgba(248,81,73,.08);border-radius:5px;font-size:11px;color:var(--accent-red)"><strong>Rejected:</strong> ${r.rejectionReason}</div>` : ''}
+              </div>
+              ${(isAdmin && r.status === 'pending') ? `
+                <div style="display:flex;gap:5px;flex-shrink:0">
+                  <button class="btn btn-success btn-sm" onclick="approveDeletionRequest('${r.id}')"><i class="fas fa-check"></i> Approve</button>
+                  <button class="btn btn-danger btn-sm" onclick="rejectDeletionRequest('${r.id}')"><i class="fas fa-times"></i> Reject</button>
+                </div>
+              ` : ''}
+              ${(!isAdmin && r.status === 'pending') ? `
+                <button class="btn btn-secondary btn-sm" onclick="cancelDeletionRequest('${r.id}')" title="Cancel my request"><i class="fas fa-trash"></i></button>
+              ` : ''}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    `}
+  `;
+}
+
+// ── Approve a deletion request (admin) ────────────────────
+function approveDeletionRequest(reqId) {
+  const req = (AppState.data.deletionRequests||[]).find(r => r.id === reqId);
+  if (!req) return;
+  if (!isAdminUser()) { showToast('Admins only', 'error'); return; }
+  if (!confirm('Approve deletion of ' + req.recordType + ' "' + req.recordLabel + '"?\n\nIt will be moved to Trash and can still be restored within ' + SOFT_DELETE_RETENTION_DAYS + ' days.')) return;
+  // Soft-delete the record
+  if (typeof softDelete === 'function') softDelete(req.arrayKey, req.recordId);
+  req.status = 'approved';
+  req.reviewedBy = _currentUserProfile?.name || 'admin';
+  req.reviewedAt = new Date().toISOString();
+  AppState.save();
+  if (typeof auditLog === 'function') auditLog('delete_approved', 'Approved deletion: ' + req.recordType + ' ' + req.recordId, { requestId: reqId, requester: req.requestedBy });
+  showToast(req.recordType + ' moved to Trash', 'success');
+  renderDeletionRequests();
+}
+
+// ── Reject a deletion request (admin) ─────────────────────
+function rejectDeletionRequest(reqId) {
+  const req = (AppState.data.deletionRequests||[]).find(r => r.id === reqId);
+  if (!req) return;
+  if (!isAdminUser()) { showToast('Admins only', 'error'); return; }
+  const reason = prompt('Reason for rejecting this request?\n\nThis will be visible to the requester.', '');
+  if (reason === null) return; // user cancelled
+  req.status = 'rejected';
+  req.reviewedBy = _currentUserProfile?.name || 'admin';
+  req.reviewedAt = new Date().toISOString();
+  req.rejectionReason = (reason || '').trim() || 'No reason provided';
+  AppState.save();
+  if (typeof auditLog === 'function') auditLog('delete_rejected', 'Rejected deletion: ' + req.recordType + ' ' + req.recordId, { requestId: reqId, requester: req.requestedBy, reason: req.rejectionReason });
+  showToast('Request rejected', 'warning');
+  renderDeletionRequests();
+}
+
+// ── Cancel my own pending request ─────────────────────────
+function cancelDeletionRequest(reqId) {
+  if (!confirm('Cancel this deletion request?')) return;
+  AppState.data.deletionRequests = (AppState.data.deletionRequests||[]).filter(r => r.id !== reqId);
+  AppState.save();
+  showToast('Request cancelled', 'info');
+  renderDeletionRequests();
+}
+
+// ── Check if a record has a pending deletion request ──────
+function hasPendingDeletionRequest(arrayKey, id) {
+  return (AppState.data.deletionRequests||[]).some(r =>
+    r.arrayKey === arrayKey && r.recordId === id && r.status === 'pending'
+  );
+}
+
+
+
+// Update deletion request badge in sidebar
+function updateDeletionRequestBadge() {
+  try {
+    const badge = document.getElementById('delReqBadge');
+    if (!badge) return;
+    const isAdmin = (typeof isAdminUser === 'function') && isAdminUser();
+    const all = AppState.data.deletionRequests || [];
+    const count = isAdmin
+      ? all.filter(r => r.status === 'pending').length
+      : all.filter(r => r.requestedByEmail === (_currentUserProfile?.email||'') && r.status === 'pending').length;
+    if (count > 0) {
+      badge.textContent = count;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch(e) {}
+}
+// Auto-update badge every 10 seconds
+setInterval(updateDeletionRequestBadge, 10000);
+setTimeout(updateDeletionRequestBadge, 1500);
+
+// ── PROJECT STATUS LOCK (admin override) ──────────────────
+// Flow: prospect → planned → active → completed → archived
+// Side state: on-hold (Active ↔ On Hold for users)
+// Admins can transition anywhere.
+// ═══════════════════════════════════════════════════════════
+
+const STATUS_CHAIN = ['prospect', 'planned', 'active', 'completed', 'archived'];
+
+// Returns true if the current user is an admin
+function isAdminUser() {
+  if (typeof _currentUserProfile === 'undefined' || !_currentUserProfile) return false;
+  return _currentUserProfile.isAdmin === true ||
+         _currentUserProfile.role === 'admin' ||
+         _currentUserProfile.role === 'Admin';
+}
+
+// Returns true if user can move project from oldStatus to newStatus
+function canChangeStatus(oldStatus, newStatus) {
+  if (oldStatus === newStatus) return true; // no-op
+  if (isAdminUser()) return true; // admins can do anything
+  // Special case: on-hold transitions
+  if (oldStatus === 'active' && newStatus === 'on-hold') return true;
+  if (oldStatus === 'on-hold' && newStatus === 'active') return true;
+  // Otherwise — forward only in the main chain
+  const oldIdx = STATUS_CHAIN.indexOf(oldStatus);
+  const newIdx = STATUS_CHAIN.indexOf(newStatus);
+  if (oldIdx === -1 || newIdx === -1) return false;
+  return newIdx > oldIdx; // strictly forward
+}
+
+// Returns array of statuses the user can transition to from current
+function getAllowedStatusTransitions(currentStatus) {
+  if (isAdminUser()) {
+    return ['prospect', 'planned', 'active', 'on-hold', 'completed', 'archived'];
+  }
+  const allowed = [currentStatus];
+  const idx = STATUS_CHAIN.indexOf(currentStatus);
+  if (idx >= 0) {
+    // All statuses ahead in the chain
+    for (let i = idx + 1; i < STATUS_CHAIN.length; i++) allowed.push(STATUS_CHAIN[i]);
+  }
+  if (currentStatus === 'active') allowed.push('on-hold');
+  if (currentStatus === 'on-hold') allowed.push('active');
+  return [...new Set(allowed)]; // dedupe
+}
+
+// Wrap status changes: returns true if allowed, shows toast + returns false if not
+function validateStatusChange(oldStatus, newStatus, recordLabel) {
+  if (canChangeStatus(oldStatus, newStatus)) return true;
+  const msg = isAdminUser()
+    ? 'Status change blocked unexpectedly'
+    : 'Only an admin can change status from "' + oldStatus + '" to "' + newStatus + '". You can only move forward in: ' + STATUS_CHAIN.join(' → ');
+  showToast(msg, 'warning', 5000);
+  if (typeof auditLog === 'function') auditLog('status_lock', 'Blocked status change', { from: oldStatus, to: newStatus, record: recordLabel });
+  return false;
+}
+
+
 function convertProspectToProject(id){
   const p = (AppState.data.projects||[]).find(x => x.id === id);
   if (!p) return;
+  // Safety: ensure no stale _deleted flag
+  delete p._deleted; delete p._deletedAt; delete p._deletedBy;
   const newIdRaw = prompt('Convert prospect "' + p.name + '" to a real project.\n\nEnter the new Project ID (e.g., JO-033-SW-PGPC-26-0129):', p.id.startsWith('PROSPECT-') ? '' : p.id);
   if (!newIdRaw) return;
   const newId = newIdRaw.trim();
@@ -2189,7 +2543,9 @@ function convertProspectToProject(id){
   const proj = (AppState.data.projects||[]).find(x => x.id === newId);
   if (proj) proj.status = 'planned';
   AppState.save();
+  window._suppressDeletionTracking = false; // re-enable normal deletion tracking
   showToast('Prospect converted to planned project: ' + newId, 'success');
+  if (typeof auditLog === 'function') auditLog('convert', 'Prospect ' + oldId + ' converted to ' + newId);
   navigate('projects');
 }
 
@@ -2201,6 +2557,8 @@ function convertProspectToProject(id){
 function _cascadeUpdateProjectId(oldId, newId, changedBy, reason) {
   if (oldId === newId) return;
   console.log('[ID Change] Cascading update:', oldId, '->', newId);
+  // Suppress save-hook deletion tracking during cascade — old ID is being renamed, not deleted
+  window._suppressDeletionTracking = true;
   const data = AppState.data;
   let updatedCount = { project: 0, tasks: 0, costs: 0, qaqc: 0, risks: 0, actions: 0,
     documents: 0, allocations: 0, usageLogs: 0, dailyLogs: 0, procurement: 0,
@@ -2227,6 +2585,13 @@ function _cascadeUpdateProjectId(oldId, newId, changedBy, reason) {
     });
   });
 
+  // Clear any stale deletion tracking for the old ID (it was renamed, not deleted)
+  if (typeof _spDeletedIds !== 'undefined' && _spDeletedIds) {
+    Object.keys(_spDeletedIds).forEach(k => {
+      if (_spDeletedIds[k] && _spDeletedIds[k][oldId]) delete _spDeletedIds[k][oldId];
+    });
+    try { localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds)); } catch(e) {}
+  }
   // Update history
   if (!data.projectIdHistory) data.projectIdHistory = [];
   data.projectIdHistory.push({
@@ -2527,14 +2892,7 @@ if(id){const i=(AppState.data.tasks||[]).findIndex(x=>x.id===id);AppState.data.t
 else AppState.data.tasks.push(t);
 AppState.save();closeModal('taskModal');renderTaskView();showToast(id?'Task updated':'Task created','success');}
 
-function deleteTask(id){
-  if(!confirm('Delete task? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.'))return;
-  if(softDelete('tasks', id)){
-    AppState.save();
-    if(typeof renderTaskView==='function') renderTaskView();
-    showToast('Task moved to Trash','warning');
-  }
-}
+function deleteTask(id){ return requestOrDelete('tasks', id); }
 
 // ── GLOBAL GANTT MODULE ───────────────────────────────────
 
@@ -5644,24 +6002,8 @@ if(!a.description){showToast('Description required','error');return;}
 AppState.data.actions.push(a);AppState.save();closeModal('genericModal');renderActions();showToast('Action created','success');buildSidebar();}
 
 function closeAction(id){const a=(AppState.data.actions||[]).find(a=>a.id===id);if(a){a.status='closed';AppState.save();renderActions();showToast('Action closed','success');buildSidebar();}}
-function deleteAction(id){
-  if(!confirm('Delete action? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.'))return;
-  if(softDelete('actions', id)){
-    AppState.save();
-    if(typeof renderActions==='function')renderActions();
-    if(typeof buildSidebar==='function')buildSidebar();
-    showToast('Action moved to Trash','warning');
-  }
-}
-function deleteRisk(id){
-  if(!confirm('Delete risk? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.'))return;
-  if(softDelete('risks', id)){
-    AppState.save();
-    if(typeof renderRisks==='function')renderRisks();
-    if(typeof buildSidebar==='function')buildSidebar();
-    showToast('Risk moved to Trash','warning');
-  }
-}
+function deleteAction(id){ return requestOrDelete('actions', id); }
+function deleteRisk(id){ return requestOrDelete('risks', id); }
 
 // ── DOCUMENTS MODULE ─────────────────────────────────────
 
@@ -6216,10 +6558,10 @@ async function deleteDoc(id){
   if(!d){showToast('Document not found','error');return;}
   const wasRequested=d.deletionRequested?(' (requested by '+d.deletionRequestedBy+')'):'';
   if(!confirm('Delete document'+wasRequested+'?\n\nIt will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days. The SharePoint file will be deleted when permanently purged.\nDocument: '+d.name))return;
-  if(softDelete('documents', id)){
-    AppState.save();
+  // Route via permission system
+  const proceeded = requestOrDelete('documents', id);
+  if(proceeded){
     if(typeof renderDocuments==='function')renderDocuments();
-    showToast('Document moved to Trash','warning');
   }
 }
 
@@ -12628,6 +12970,8 @@ function _spDetectDeletions(prevData, newData) {
     const prev = prevData[key] || [];
     const next = newData[key] || [];
     if (prev.length <= next.length) return; // no deletions
+    // Skip tracking during cascade (ID rename, not deletion)
+    if (window._suppressDeletionTracking) return;
     const nextIds = new Set(next.map(r => r.id));
     prev.forEach(r => {
       if (r.id && !nextIds.has(r.id)) {
@@ -15842,14 +16186,7 @@ function updateCostField(id,field,val){
   const c=(AppState.data.costs||[]).find(c=>c.id===id);
   if(c){c[field]=val;AppState.save();}
 }
-function deleteCostItem(id){
-  if(!confirm('Delete cost item? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.'))return;
-  if(softDelete('costs', id)){
-    AppState.save();
-    if(typeof renderDetailCosts==='function')renderDetailCosts();
-    showToast('Cost item moved to Trash','warning');
-  }
-}
+function deleteCostItem(id){ return requestOrDelete('costs', id); }
 function showAddCostItem(){
   $('#genericModalTitle').textContent='Add Cost Item';
   $('#genericModalBody').innerHTML=`<div class="form-grid">
@@ -16046,14 +16383,7 @@ function renderDetailQAQC(){
   </div>`;
 }
 function updateQAQCField(id,field,val){const q=(AppState.data.qaqc||[]).find(q=>q.id===id);if(q){q[field]=val;AppState.save();showToast('Updated','success');}}
-function deleteQAQCItem(id){
-  if(!confirm('Delete IR? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.'))return;
-  if(softDelete('qaqc', id)){
-    AppState.save();
-    if(typeof renderDetailQAQC==='function')renderDetailQAQC();
-    showToast('IR moved to Trash','warning');
-  }
-}
+function deleteQAQCItem(id){ return requestOrDelete('qaqc', id); }
 
 function renderDetailRisks(){
   const risks=(AppState.data.risks||[]).filter(r=>r.projectId===detailProjectId);
@@ -16389,21 +16719,7 @@ function updateAlloc(id,field,val){
   const a=(AppState.data.resourceAllocations||[]).find(a=>a.id===id);
   if(a){a[field]=val;AppState.save();}
 }
-function deleteAlloc(id){
-  if(!confirm('Remove allocation? It will be moved to Trash and can be restored within '+SOFT_DELETE_RETENTION_DAYS+' days.'))return;
-  if(softDelete('resourceAllocations', id)){
-    // Also soft-delete linked usage logs
-    (AppState.data.resourceUsageLogs||[]).forEach(l => {
-      if(l.allocationId===id) {
-        l._deleted=true; l._deletedAt=new Date().toISOString();
-        l._deletedBy=_currentUserProfile?.name||_currentUser?.email||'unknown';
-      }
-    });
-    AppState.save();
-    if(typeof renderDetailAllocation==='function')renderDetailAllocation();
-    showToast('Allocation moved to Trash','warning');
-  }
-}
+function deleteAlloc(id){ return requestOrDelete('resourceAllocations', id); }
 
 // ── ALLOCATE RESOURCE MODAL ────────────────────────────────
 function showAllocateResource(pid){
@@ -19995,7 +20311,13 @@ function renderTrash() {
 }
 
 function showTrashFor(arrayKey, label) {
-  const items = getTrashed(arrayKey).sort((a,b) => (b._deletedAt||'').localeCompare(a._deletedAt||''));
+  let items = getTrashed(arrayKey);
+  // Non-admins only see items they deleted themselves
+  if (typeof isAdminUser === 'function' && !isAdminUser()) {
+    const me = (_currentUserProfile?.email||_currentUserProfile?.name||'').toLowerCase();
+    items = items.filter(r => (r._deletedBy||'').toLowerCase().includes(me));
+  }
+  items.sort((a,b) => (b._deletedAt||'').localeCompare(a._deletedAt||''));
   $('#genericModalTitle').textContent = 'Trash · ' + label;
   $('#genericModalBody').innerHTML = `
     <div style="max-height:60vh;overflow-y:auto">
@@ -20033,6 +20355,10 @@ function _restoreItem(arrayKey, id, label) {
 }
 
 function _purgeItem(arrayKey, id, label) {
+  if (typeof isAdminUser === 'function' && !isAdminUser()) {
+    showToast('Only admins can permanently delete records', 'warning', 4000);
+    return;
+  }
   if (!confirm('Permanently delete this ' + label + '?\n\nThis CANNOT be undone.')) return;
   if (purgeFromTrash(arrayKey, id)) {
     AppState.save();
@@ -20042,6 +20368,10 @@ function _purgeItem(arrayKey, id, label) {
 }
 
 function purgeAllTrash() {
+  if (typeof isAdminUser === 'function' && !isAdminUser()) {
+    showToast('Only admins can permanently delete records', 'warning', 4000);
+    return;
+  }
   if (!confirm('Permanently delete ALL items in trash?\n\nThis CANNOT be undone.')) return;
   const arrays = ['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
     'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs',
