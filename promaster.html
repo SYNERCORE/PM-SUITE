@@ -8749,9 +8749,16 @@ function _detectContentChanges() {
       }
     });
 
-    // Soft-deleted records
+    // Soft-deleted records — only mark pending if NOT yet captured in snapshot
+    // (otherwise they show as "pending" forever after they've been pushed)
     list.filter(r => r && r._deleted).forEach(r => {
-      changes.push({ dataKey: k, recordId: r.id, type: 'deleted', label: r.description||r.name||r.title||r.id });
+      const clean = { ...r };
+      delete clean._newlyCreated;
+      delete clean._localCreatedAt;
+      const hash = _quickHash(JSON.stringify(clean));
+      if (snap[r.id] !== hash) {
+        changes.push({ dataKey: k, recordId: r.id, type: 'deleted', label: r.description||r.name||r.title||r.id });
+      }
     });
   });
   return changes;
@@ -9160,7 +9167,9 @@ setTimeout(() => {
       _syncLastTs = Date.now();
       _syncState = 'synced';
       _clearNewlyCreatedFlags();
-      try { _captureSyncedSnapshot(); } catch(e) {} // remember state after push
+      // ALWAYS recapture snapshot after push — even if push had nothing to do,
+      // this clears any stale "pending" state from before
+      try { _captureSyncedSnapshot(); } catch(e) {}
       try { updateSyncStatusButton(); } catch(e) {}
       return result;
     } catch(e) {
