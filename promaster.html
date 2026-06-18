@@ -1382,58 +1382,414 @@ ctx.fillText(p.id.replace('PRJ-','P'),x+bW/2,H-4);});}
 
 
 let projectFilter='all',projectSearch='',projectBUFilter='all';
-function renderProjects(){
-const el=$('#projects');
-el.innerHTML=`<div class="section-header" style="margin-bottom:14px">
-<div><div class="section-title">Project Master List</div><div class="section-sub">${(AppState.data.projects||[]).filter(p=>p.status!=='prospect').length} projects</div></div>
-<div style="display:flex;gap:7px;align-items:center">
-<button class="btn btn-secondary btn-sm" onclick="exportCSV((AppState.data.projects||[]).map(p=>[p.id,p.name,p.client,p.status,p.progress+'%',p.budget,p.spent]),['ID','Name','Client','Status','Progress','Budget','Spent'],'projects.csv')"><i class="fas fa-download"></i> Export</button>
-<button class="btn btn-primary btn-sm" onclick="showProjectForm()"><i class="fas fa-plus"></i> New Project</button>
-</div></div>
-<div class="filters-bar">
-${['all','active','completed','planned'].map(f=>`<button class="btn btn-sm ${projectFilter===f?'btn-primary':'btn-secondary'}" onclick="filterProjects('${f}')">${f.charAt(0).toUpperCase()+f.slice(1)}</button>`).join('')}
-<select class="form-select" style="height:30px;width:160px" id="projBUFilter" onchange="projectBUFilter=this.value;renderProjCards()&&($('#projectsGrid').innerHTML=renderProjCards())">
-  <option value="all">All Business Units</option>
-  <option value="">Main Company</option>
-  ${(AppState.data.businessUnits||[]).map(bu=>`<option value="${bu.id}" ${typeof projectBUFilter!=='undefined'&&projectBUFilter===bu.id?'selected':''}>${bu.name}</option>`).join('')}
-</select>
-<div class="search-bar" style="margin-left:auto"><i class="fas fa-search"></i><input type="text" placeholder="Search..." value="${projectSearch}" oninput="searchProjects(this.value)"></div>
-</div>
-<div class="grid grid-3" id="projectsGrid">${renderProjCards()}</div>`;}
 
-function renderProjCards(){
-let ps=(AppState.data.projects||[]).filter(p=>!p._deleted && p.status!=='prospect'); // exclude soft-deleted + prospects
-if(projectFilter!=='all')ps=ps.filter(p=>p.status===projectFilter);
-if(typeof projectBUFilter!=='undefined'&&projectBUFilter!=='all'){
-  ps=ps.filter(p=>(p.businessUnit||'')===(projectBUFilter||'')); 
+// ═══════════════════════════════════════════════════════════
+// ── HYBRID PROJECT OVERVIEW (Table / List / Cards) ───────
+// Groups by Status (default) or by BU
+// Stable sort: project start date (oldest first)
+// View + Group + Collapse state persisted in localStorage
+// ═══════════════════════════════════════════════════════════
+
+// State helpers — persist user preferences
+const _projPrefs = {
+  get view() { return localStorage.getItem('shic_proj_view') || (window.innerWidth < 768 ? 'list' : 'table'); },
+  set view(v) { localStorage.setItem('shic_proj_view', v); },
+  get groupBy() { return localStorage.getItem('shic_proj_groupby') || 'status'; },
+  set groupBy(v) { localStorage.setItem('shic_proj_groupby', v); },
+  get sortCol() { return localStorage.getItem('shic_proj_sortcol') || 'startDate'; },
+  set sortCol(v) { localStorage.setItem('shic_proj_sortcol', v); },
+  get sortDir() { return localStorage.getItem('shic_proj_sortdir') || 'asc'; },
+  set sortDir(v) { localStorage.setItem('shic_proj_sortdir', v); },
+  getCollapsed() {
+    try { return JSON.parse(localStorage.getItem('shic_proj_collapsed') || '[]'); } catch(e) { return []; }
+  },
+  setCollapsed(arr) { localStorage.setItem('shic_proj_collapsed', JSON.stringify(arr)); },
+  isCollapsed(key) { return this.getCollapsed().includes(key); },
+  toggleCollapsed(key) {
+    const arr = this.getCollapsed();
+    const idx = arr.indexOf(key);
+    if (idx >= 0) arr.splice(idx, 1);
+    else arr.push(key);
+    this.setCollapsed(arr);
+  },
+};
+
+// Status color + ordering for grouping
+const _PROJ_STATUS_ORDER = ['active','planned','on-hold','completed','archived'];
+const _PROJ_STATUS_COLORS = {
+  'active':'#3fb950','planned':'#388bfd','on-hold':'#f0a450',
+  'completed':'#8b949e','archived':'#6e7681',
+};
+const _PROJ_STATUS_LABELS = {
+  'active':'ACTIVE','planned':'PLANNED','on-hold':'ON HOLD',
+  'completed':'COMPLETED','archived':'ARCHIVED',
+};
+const _PROJ_DEFAULT_COLLAPSED = ['status:completed','status:archived'];
+
+// Initialize default collapsed state on first load
+(function _initProjCollapse() {
+  if (!localStorage.getItem('shic_proj_collapsed')) {
+    _projPrefs.setCollapsed(_PROJ_DEFAULT_COLLAPSED);
+  }
+})();
+
+// View switcher handlers
+function setProjView(v) { _projPrefs.view = v; renderProjects(); }
+function setProjGroupBy(v) { _projPrefs.groupBy = v; renderProjects(); }
+function setProjSort(col) {
+  if (_projPrefs.sortCol === col) {
+    _projPrefs.sortDir = _projPrefs.sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _projPrefs.sortCol = col;
+    _projPrefs.sortDir = 'asc';
+  }
+  renderProjects();
 }
-if(projectSearch)ps=ps.filter(p=>p.name.toLowerCase().includes(projectSearch.toLowerCase())||p.client.toLowerCase().includes(projectSearch.toLowerCase()));
-if(!ps.length)return`<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-folder-open"></i><p>No projects found</p></div>`;
-return ps.map(p=>{
-const bu=Math.round((p.spent/p.budget)*100);
-const dl=daysBetween(new Date().toISOString().split('T')[0],p.endDate);
-return`<div class="project-card">
-<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
-<div><div class="project-card-id">${p.id}${p.discipline?'<span class="project-card-id-discipline">'+p.discipline+'</span>':''}</div><div class="project-card-name">${p.name}</div><div class="project-card-client"><i class="fas fa-building" style="font-size:9px"></i> ${p.client}</div>
-${p.businessUnit?(()=>{const bu=(AppState.data.businessUnits||[]).find(b=>b.id===p.businessUnit);return bu?`<div style="margin-top:3px"><span style="font-size:9px;padding:1px 7px;border-radius:10px;background:${bu.color||'#388bfd'}22;color:${bu.color||'#388bfd'};font-weight:600;border:1px solid ${bu.color||'#388bfd'}44"><i class="fas fa-layer-group" style="margin-right:3px;font-size:8px"></i>${bu.name}</span></div>`:'';})():''}
-</div>
-<div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">${sBadge(p.status)}${pBadge(p.priority)}</div></div>
-<div style="margin:10px 0">
-<div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="font-size:10px;color:var(--text-secondary)">Progress</span><span style="font-size:11px;font-weight:700;font-family:var(--font-mono)">${p.progress}%</span></div>
-<div class="progress-bar" style="height:7px"><div class="progress-fill" style="width:${p.progress}%;background:${pColor(p.progress)};border-radius:4px"></div></div></div>
-<div style="display:flex;gap:14px;padding-top:10px;border-top:1px solid var(--border)">
-<div style="text-align:center"><div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${fmtNum(p.budget)}</div><div style="font-size:9px;color:var(--text-secondary)">Budget</div></div>
-<div style="text-align:center"><div style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:${bu>90?'var(--accent-red)':'var(--accent-green)'}">${bu}%</div><div style="font-size:9px;color:var(--text-secondary)">Spent</div></div>
-<div style="text-align:center"><div style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:${dl<30&&dl>0?'var(--accent-amber)':dl<=0?'var(--accent-red)':'inherit'}">${dl<0?'OD':dl+'d'}</div><div style="font-size:9px;color:var(--text-secondary)">Left</div></div>
-<div style="text-align:center;margin-left:auto"><div style="font-size:11px;font-weight:700">${p.pm.split(' ')[0]}</div><div style="font-size:9px;color:var(--text-secondary)">PM</div></div></div>
-<div style="display:flex;justify-content:flex-end;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-<button class="btn btn-primary btn-sm" onclick="showProjectDetail('${p.id}')"><i class="fas fa-eye"></i> View</button>
-<button class="btn btn-secondary btn-sm" onclick="showProjectForm('${p.id}')"><i class="fas fa-edit"></i> Edit</button>
-<button class="btn btn-danger btn-sm" onclick="deleteProject('${p.id}')"><i class="fas fa-trash"></i></button>
-</div></div>`;}).join('');}
+function toggleProjGroup(key) {
+  _projPrefs.toggleCollapsed(key);
+  renderProjects();
+}
+
+// Get filtered + sorted projects
+function _getFilteredProjects() {
+  let ps = (AppState.data.projects || []).filter(p => p && !p._deleted && p.status !== 'prospect');
+  if (typeof projectFilter !== 'undefined' && projectFilter !== 'all') ps = ps.filter(p => p.status === projectFilter);
+  if (typeof projectBUFilter !== 'undefined' && projectBUFilter !== 'all') {
+    ps = ps.filter(p => (p.businessUnit||'') === (projectBUFilter||''));
+  }
+  if (typeof projectSearch !== 'undefined' && projectSearch) {
+    const q = projectSearch.toLowerCase();
+    ps = ps.filter(p => (p.name||'').toLowerCase().includes(q) || (p.client||'').toLowerCase().includes(q) || (p.id||'').toLowerCase().includes(q));
+  }
+  return _sortProjects(ps);
+}
+
+function _sortProjects(arr) {
+  const col = _projPrefs.sortCol;
+  const dir = _projPrefs.sortDir === 'asc' ? 1 : -1;
+  const sorted = [...arr].sort((a, b) => {
+    let va = a[col], vb = b[col];
+    if (col === 'progress') { va = a.progress||0; vb = b.progress||0; }
+    else if (col === 'budget') { va = a.budget||0; vb = b.budget||0; }
+    else if (col === 'startDate' || col === 'endDate') { va = va || ''; vb = vb || ''; }
+    else { va = String(va||'').toLowerCase(); vb = String(vb||'').toLowerCase(); }
+    if (va < vb) return -1 * dir;
+    if (va > vb) return 1 * dir;
+    return 0;
+  });
+  return sorted;
+}
+
+// Get a project's BU info
+function _getProjBU(p) {
+  if (!p.businessUnit) return { id: '_main', name: 'Main Company', color: '#388bfd' };
+  const bu = (AppState.data.businessUnits||[]).find(b => b.id === p.businessUnit);
+  if (!bu) return { id: '_unknown', name: 'Unknown BU', color: '#8b949e' };
+  return { id: bu.id, name: bu.name, color: bu.color || '#388bfd' };
+}
+
+// Group projects per current groupBy preference
+function _groupProjects(projects) {
+  const groupBy = _projPrefs.groupBy;
+  if (groupBy === 'none') return [{ key: 'all', label: '', projects, isFlat: true }];
+
+  if (groupBy === 'status') {
+    const groups = {};
+    projects.forEach(p => {
+      const s = p.status || 'active';
+      if (!groups[s]) groups[s] = [];
+      groups[s].push(p);
+    });
+    return _PROJ_STATUS_ORDER
+      .filter(s => groups[s] && groups[s].length > 0)
+      .map(s => ({
+        key: 'status:' + s,
+        label: _PROJ_STATUS_LABELS[s] || s.toUpperCase(),
+        color: _PROJ_STATUS_COLORS[s] || '#388bfd',
+        projects: groups[s],
+      }));
+  }
+
+  if (groupBy === 'bu') {
+    // Outer: BU, Inner: Status
+    const buGroups = {};
+    projects.forEach(p => {
+      const bu = _getProjBU(p);
+      if (!buGroups[bu.id]) buGroups[bu.id] = { bu, projects: [] };
+      buGroups[bu.id].projects.push(p);
+    });
+    // For each BU, build status sub-groups
+    return Object.values(buGroups)
+      .sort((a, b) => a.bu.name.localeCompare(b.bu.name))
+      .map(g => {
+        const statusGroups = {};
+        g.projects.forEach(p => {
+          const s = p.status || 'active';
+          if (!statusGroups[s]) statusGroups[s] = [];
+          statusGroups[s].push(p);
+        });
+        return {
+          key: 'bu:' + g.bu.id,
+          label: g.bu.name,
+          color: g.bu.color,
+          projects: g.projects,
+          subgroups: _PROJ_STATUS_ORDER
+            .filter(s => statusGroups[s] && statusGroups[s].length > 0)
+            .map(s => ({
+              key: 'bu:' + g.bu.id + ':status:' + s,
+              label: _PROJ_STATUS_LABELS[s],
+              color: _PROJ_STATUS_COLORS[s],
+              projects: statusGroups[s],
+            })),
+        };
+      });
+  }
+  return [];
+}
+
+// ═══ MAIN ENTRY ════════════════════════════════════════════
+function renderProjects() {
+  const el = $('#projects');
+  const totalProjects = (AppState.data.projects||[]).filter(p => p && !p._deleted && p.status !== 'prospect').length;
+  const view = _projPrefs.view;
+  const groupBy = _projPrefs.groupBy;
+
+  el.innerHTML = `
+    <div class="section-header" style="margin-bottom:14px">
+      <div>
+        <div class="section-title">Project Master List</div>
+        <div class="section-sub">${totalProjects} project${totalProjects!==1?'s':''}</div>
+      </div>
+      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="exportCSV((AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='prospect').map(p=>[p.id,p.name,p.client,p.status,p.progress+'%',p.budget,p.spent]),['ID','Name','Client','Status','Progress','Budget','Spent'],'projects.csv')"><i class="fas fa-download"></i> Export</button>
+        <button class="btn btn-primary btn-sm" onclick="showProjectForm()"><i class="fas fa-plus"></i> New Project</button>
+      </div>
+    </div>
+
+    <!-- Filters bar -->
+    <div class="filters-bar" style="flex-wrap:wrap;gap:7px">
+      ${['all','active','completed','planned'].map(f => `<button class="btn btn-sm ${(typeof projectFilter!=='undefined'?projectFilter:'all')===f?'btn-primary':'btn-secondary'}" onclick="filterProjects('${f}')">${f.charAt(0).toUpperCase()+f.slice(1)}</button>`).join('')}
+      <select class="form-select" style="height:30px;width:160px" id="projBUFilter" onchange="projectBUFilter=this.value;renderProjects()">
+        <option value="all">All Business Units</option>
+        <option value="" ${typeof projectBUFilter!=='undefined'&&projectBUFilter===''?'selected':''}>Main Company</option>
+        ${(AppState.data.businessUnits||[]).map(bu => `<option value="${bu.id}" ${typeof projectBUFilter!=='undefined'&&projectBUFilter===bu.id?'selected':''}>${bu.name}</option>`).join('')}
+      </select>
+      <div class="search-bar" style="margin-left:auto">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Search ID, name, client..." value="${typeof projectSearch!=='undefined'?projectSearch:''}" oninput="searchProjects(this.value)">
+      </div>
+    </div>
+
+    <!-- View + Group controls -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:11px;color:var(--text-muted);font-weight:600">Group by:</span>
+        <select class="form-select" style="height:28px;font-size:11px;width:120px" onchange="setProjGroupBy(this.value)">
+          <option value="status" ${groupBy==='status'?'selected':''}>Status</option>
+          <option value="bu" ${groupBy==='bu'?'selected':''}>Business Unit</option>
+          <option value="none" ${groupBy==='none'?'selected':''}>None (flat)</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:5px;background:var(--bg-hover);border-radius:7px;padding:2px">
+        <button class="btn btn-sm" style="height:26px;padding:0 10px;border:none;background:${view==='table'?'var(--accent-blue)':'transparent'};color:${view==='table'?'#fff':'var(--text-muted)'};font-weight:600" onclick="setProjView('table')" title="Table view"><i class="fas fa-table"></i> Table</button>
+        <button class="btn btn-sm" style="height:26px;padding:0 10px;border:none;background:${view==='list'?'var(--accent-blue)':'transparent'};color:${view==='list'?'#fff':'var(--text-muted)'};font-weight:600" onclick="setProjView('list')" title="List view"><i class="fas fa-list"></i> List</button>
+        <button class="btn btn-sm" style="height:26px;padding:0 10px;border:none;background:${view==='cards'?'var(--accent-blue)':'transparent'};color:${view==='cards'?'#fff':'var(--text-muted)'};font-weight:600" onclick="setProjView('cards')" title="Cards view"><i class="fas fa-th"></i> Cards</button>
+      </div>
+    </div>
+
+    <!-- Content area -->
+    <div id="projectsContent">${_renderProjGroups()}</div>
+  `;
+}
+
+// Render groups + dispatch to view renderer
+function _renderProjGroups() {
+  const projects = _getFilteredProjects();
+  if (!projects.length) {
+    return `<div class="empty-state"><i class="fas fa-folder-open"></i><p>No projects match these filters</p></div>`;
+  }
+  const groups = _groupProjects(projects);
+  if (groups.length === 1 && groups[0].isFlat) {
+    // No grouping
+    return _renderProjView(groups[0].projects);
+  }
+  return groups.map(g => _renderGroupSection(g, false)).join('');
+}
+
+function _renderGroupSection(group, isSubgroup) {
+  const collapsed = _projPrefs.isCollapsed(group.key);
+  const count = group.projects.length;
+  const headerStyle = isSubgroup
+    ? 'padding:7px 12px;margin:6px 0 4px 14px;background:var(--bg-hover);border-radius:6px;font-size:11px'
+    : 'padding:9px 14px;margin:12px 0 6px;background:linear-gradient(90deg,'+(group.color||'#388bfd')+'22, transparent);border-left:3px solid '+(group.color||'#388bfd')+';border-radius:6px;font-size:12px';
+
+  let content = '';
+  if (!collapsed) {
+    if (group.subgroups && group.subgroups.length) {
+      // BU group with status subgroups
+      content = group.subgroups.map(sub => _renderGroupSection(sub, true)).join('');
+    } else {
+      content = _renderProjView(group.projects);
+    }
+  }
+  return `
+    <div class="proj-group" data-key="${group.key}">
+      <div style="${headerStyle};cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleProjGroup('${group.key}')">
+        <i class="fas fa-chevron-${collapsed?'right':'down'}" style="font-size:9px;color:${group.color||'#388bfd'};width:9px"></i>
+        <span style="font-weight:700;color:${group.color||'#388bfd'};letter-spacing:.5px">${group.label}</span>
+        <span style="font-size:10px;color:var(--text-muted);background:var(--bg-hover);padding:1px 7px;border-radius:8px;font-weight:600">${count}</span>
+      </div>
+      ${content}
+    </div>`;
+}
+
+// Dispatch to the right view renderer
+function _renderProjView(projects) {
+  const view = _projPrefs.view;
+  if (view === 'table') return _renderProjTable(projects);
+  if (view === 'list') return _renderProjList(projects);
+  return _renderProjCards(projects);
+}
+
+// ═══ TABLE VIEW ═══════════════════════════════════════════
+function _renderProjTable(projects) {
+  const col = _projPrefs.sortCol;
+  const dir = _projPrefs.sortDir;
+  const sortIcon = c => c === col ? `<i class="fas fa-caret-${dir==='asc'?'up':'down'}" style="margin-left:4px;color:var(--accent-blue)"></i>` : '';
+  const cols = [
+    { k:'id', label:'ID', w:'150px' },
+    { k:'name', label:'Name', w:'auto' },
+    { k:'client', label:'Client', w:'120px' },
+    { k:'phase', label:'Phase', w:'80px' },
+    { k:'status', label:'Status', w:'90px' },
+    { k:'progress', label:'Progress', w:'130px' },
+    { k:'budget', label:'Budget', w:'110px' },
+    { k:'startDate', label:'Start', w:'95px' },
+    { k:'endDate', label:'End', w:'95px' },
+    { k:'_health', label:'Health', w:'60px', nosort:true },
+    { k:'_actions', label:'', w:'50px', nosort:true },
+  ];
+  const today = new Date().toISOString().split('T')[0];
+  return `
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;background:var(--bg-card)">
+        <thead style="position:sticky;top:0;background:var(--bg-primary);z-index:1">
+          <tr>
+            ${cols.map(c => `<th style="text-align:left;padding:8px 10px;font-weight:700;font-size:10px;letter-spacing:.5px;color:var(--text-muted);border-bottom:1px solid var(--border);white-space:nowrap;${c.w!=='auto'?'width:'+c.w:''};${c.nosort?'':'cursor:pointer;user-select:none'}" ${c.nosort?'':`onclick="setProjSort('${c.k}')"`}>${c.label}${!c.nosort?sortIcon(c.k):''}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${projects.map(p => {
+            const dl = (typeof daysBetween === 'function') ? daysBetween(today, p.endDate) : 0;
+            const overdue = p.endDate && p.endDate < today && p.status !== 'completed';
+            const flagged = p._flagged;
+            const health = flagged ? '<i class="fas fa-flag" style="color:var(--accent-red)" title="Flagged"></i>'
+              : overdue ? '<i class="fas fa-exclamation-triangle" style="color:var(--accent-amber)" title="Overdue"></i>'
+              : '<i class="fas fa-check-circle" style="color:var(--accent-green)" title="On track"></i>';
+            const statusColor = _PROJ_STATUS_COLORS[p.status] || '#388bfd';
+            const progColor = (typeof pColor === 'function') ? pColor(p.progress) : '#388bfd';
+            return `<tr style="border-bottom:1px solid var(--border);transition:background .15s" onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background=''">
+              <td style="padding:8px 10px;font-family:var(--font-mono);font-size:10px;color:var(--accent-blue);font-weight:700;cursor:pointer;white-space:nowrap" onclick="showProjectDetail('${p.id}')" title="Open project detail">${p.id}</td>
+              <td style="padding:8px 10px;font-weight:600;cursor:pointer;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="showProjectDetail('${p.id}')" title="${(p.name||'').replace(/"/g,'&quot;')}">${p.name||'-'}</td>
+              <td style="padding:8px 10px;color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(p.client||'').replace(/"/g,'&quot;')}">${p.client||'-'}</td>
+              <td style="padding:8px 10px"><span style="font-size:9px;padding:2px 7px;border-radius:8px;background:var(--bg-hover);color:var(--text-secondary);text-transform:capitalize">${p.phase||'-'}</span></td>
+              <td style="padding:8px 10px"><span style="font-size:9px;padding:2px 8px;border-radius:8px;background:${statusColor}22;color:${statusColor};font-weight:700;text-transform:uppercase">${p.status||'-'}</span></td>
+              <td style="padding:8px 10px">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <div style="flex:1;height:5px;background:var(--bg-hover);border-radius:3px;overflow:hidden"><div style="width:${p.progress||0}%;height:100%;background:${progColor}"></div></div>
+                  <span style="font-size:10px;font-family:var(--font-mono);font-weight:700;width:30px;text-align:right">${p.progress||0}%</span>
+                </div>
+              </td>
+              <td style="padding:8px 10px;font-family:var(--font-mono);font-size:10px;font-weight:600">${(typeof fmtNum==='function')?fmtNum(p.budget||0):p.budget||0}</td>
+              <td style="padding:8px 10px;font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)">${p.startDate||'-'}</td>
+              <td style="padding:8px 10px;font-family:var(--font-mono);font-size:10px;color:${overdue?'var(--accent-red);font-weight:700':'var(--text-secondary)'}">${p.endDate||'-'}</td>
+              <td style="padding:8px 10px;text-align:center">${health}</td>
+              <td style="padding:8px 10px;text-align:right">
+                <button class="btn btn-secondary btn-sm btn-icon" style="height:24px;width:24px;font-size:10px" onclick="event.stopPropagation();showProjectForm('${p.id}')" title="Edit"><i class="fas fa-pen"></i></button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ═══ LIST VIEW ════════════════════════════════════════════
+function _renderProjList(projects) {
+  const today = new Date().toISOString().split('T')[0];
+  return `<div style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px">
+    ${projects.map(p => {
+      const dl = (typeof daysBetween === 'function') ? daysBetween(today, p.endDate) : 0;
+      const overdue = p.endDate && p.endDate < today && p.status !== 'completed';
+      const statusColor = _PROJ_STATUS_COLORS[p.status] || '#388bfd';
+      const progColor = (typeof pColor === 'function') ? pColor(p.progress) : '#388bfd';
+      const bu = _getProjBU(p);
+      return `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;cursor:pointer;transition:transform .1s,border-color .15s" onmouseenter="this.style.borderColor='var(--accent-blue)'" onmouseleave="this.style.borderColor='var(--border)'" onclick="showProjectDetail('${p.id}')">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <span style="width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0"></span>
+          <span style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--accent-blue)">${p.id}</span>
+          <span style="font-size:10px;padding:1px 7px;border-radius:8px;background:${statusColor}22;color:${statusColor};font-weight:700;text-transform:uppercase">${p.status||'-'}</span>
+          <span style="font-size:10px;color:var(--text-muted)">· ${p.client||'-'}${p.phase?' · '+p.phase:''}</span>
+          ${p._flagged?'<i class="fas fa-flag" style="color:var(--accent-red);margin-left:auto"></i>':''}
+          ${overdue?'<i class="fas fa-exclamation-triangle" style="color:var(--accent-amber);margin-left:auto"></i>':''}
+          <button class="btn btn-secondary btn-sm btn-icon" style="height:24px;width:24px;font-size:10px;margin-left:${(p._flagged||overdue)?'5px':'auto'}" onclick="event.stopPropagation();showProjectForm('${p.id}')" title="Edit"><i class="fas fa-pen"></i></button>
+        </div>
+        <div style="font-size:13px;font-weight:600;line-height:1.3;margin-bottom:6px">${p.name||'-'}</div>
+        <div style="display:flex;align-items:center;gap:10px;font-size:10px;color:var(--text-muted)">
+          <div style="flex:1;display:flex;align-items:center;gap:6px">
+            <div style="flex:1;height:5px;background:var(--bg-hover);border-radius:3px;overflow:hidden"><div style="width:${p.progress||0}%;height:100%;background:${progColor}"></div></div>
+            <span style="font-family:var(--font-mono);font-weight:700;color:var(--text-primary);min-width:30px;text-align:right">${p.progress||0}%</span>
+          </div>
+          <span>${(typeof fmtNum==='function')?'₱'+fmtNum(p.budget||0):p.budget||0}</span>
+          ${p.endDate?`<span style="${overdue?'color:var(--accent-red);font-weight:700':''}"><i class="fas fa-calendar" style="margin-right:3px;font-size:9px"></i>${p.endDate}</span>`:''}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+// ═══ CARDS VIEW (preserved from original) ═════════════════
+function _renderProjCards(projects) {
+  if (!projects.length) return '';
+  return `<div class="grid grid-3" style="margin-bottom:10px">${projects.map(p => {
+    const bu = Math.round((p.spent/p.budget)*100) || 0;
+    const dl = (typeof daysBetween === 'function') ? daysBetween(new Date().toISOString().split('T')[0], p.endDate) : 0;
+    return `<div class="project-card">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
+        <div>
+          <div class="project-card-id">${p.id}${p.discipline?'<span class="project-card-id-discipline">'+p.discipline+'</span>':''}</div>
+          <div class="project-card-name">${p.name}</div>
+          <div class="project-card-client"><i class="fas fa-building" style="font-size:9px"></i> ${p.client}</div>
+          ${p.businessUnit?(()=>{const b=(AppState.data.businessUnits||[]).find(x=>x.id===p.businessUnit);return b?`<div style="margin-top:3px"><span style="font-size:9px;padding:1px 7px;border-radius:10px;background:${b.color||'#388bfd'}22;color:${b.color||'#388bfd'};font-weight:600;border:1px solid ${b.color||'#388bfd'}44"><i class="fas fa-layer-group" style="margin-right:3px;font-size:8px"></i>${b.name}</span></div>`:'';})():''}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">${typeof sBadge==='function'?sBadge(p.status):p.status}${typeof pBadge==='function'?pBadge(p.priority):''}</div>
+      </div>
+      <div style="margin:10px 0">
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span style="font-size:10px;color:var(--text-secondary)">Progress</span>
+          <span style="font-size:11px;font-weight:700;font-family:var(--font-mono)">${p.progress}%</span>
+        </div>
+        <div class="progress-bar" style="height:7px"><div class="progress-fill" style="width:${p.progress}%;background:${typeof pColor==='function'?pColor(p.progress):'#388bfd'};border-radius:4px"></div></div>
+      </div>
+      <div style="display:flex;gap:14px;padding-top:10px;border-top:1px solid var(--border)">
+        <div style="text-align:center"><div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${typeof fmtNum==='function'?fmtNum(p.budget):p.budget}</div><div style="font-size:9px;color:var(--text-secondary)">Budget</div></div>
+        <div style="text-align:center"><div style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:${bu>90?'var(--accent-red)':'var(--accent-green)'}">${bu}%</div><div style="font-size:9px;color:var(--text-secondary)">Spent</div></div>
+        <div style="text-align:center"><div style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:${dl<30&&dl>0?'var(--accent-amber)':dl<=0?'var(--accent-red)':'inherit'}">${dl<0?'OD':dl+'d'}</div><div style="font-size:9px;color:var(--text-secondary)">Left</div></div>
+        <div style="text-align:center;margin-left:auto"><div style="font-size:11px;font-weight:700">${(p.pm||'').split(' ')[0]||'-'}</div><div style="font-size:9px;color:var(--text-secondary)">PM</div></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        <button class="btn btn-primary btn-sm" onclick="showProjectDetail('${p.id}')"><i class="fas fa-eye"></i> View</button>
+        <button class="btn btn-secondary btn-sm" onclick="showProjectForm('${p.id}')"><i class="fas fa-pen"></i> Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteProject('${p.id}')"><i class="fas fa-trash"></i></button>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+
 
 function filterProjects(f){projectFilter=f;renderProjects();}
-function searchProjects(v){projectSearch=v;$('#projectsGrid').innerHTML=renderProjCards();}
+function searchProjects(v){projectSearch=v;const c=$('#projectsContent');if(c)c.innerHTML=_renderProjGroups();}
 
 
 // ═══════════════════════════════════════════════════════════
