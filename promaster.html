@@ -1132,7 +1132,8 @@ if (!window._snapshotCaptured) {
 const map={dashboard:renderDashboard,projects:renderProjects,tasks:renderTasks,gantt:renderGantt,
 resources:renderResources,manpower:renderManpower,materials:renderMaterials,procurement:renderProcurement,
 costs:renderCosts,qaqc:renderQAQC,risks:renderRisks,actions:renderActions,documents:renderDocuments,
-progress:renderProgress,kpi:renderKPI,dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist,prospects:renderProspects,library:renderLibrary};
+progress:renderProgress,kpi:renderKPI,dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist,prospects:renderProspects,library:renderLibrary,
+trash:typeof renderTrash==='function'?renderTrash:null};
 if(map[pid])map[pid]();}
 
 function toggleSidebar(){
