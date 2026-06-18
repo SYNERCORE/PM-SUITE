@@ -19141,9 +19141,13 @@ setTimeout(() => { try { _offerRestoreSnapshot(); } catch(e) {} }, 3000);
 const DAILY_BACKUP_KEY = 'shic_last_backup_date';
 async function _runDailyBackup() {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    // Use LOCAL date, not UTC — otherwise PHT users get double backups around midnight UTC
+    const d = new Date();
+    const today = d.getFullYear() + '-' +
+                  String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                  String(d.getDate()).padStart(2, '0');
     const lastBackup = localStorage.getItem(DAILY_BACKUP_KEY);
-    if (lastBackup === today) return; // already done today
+    if (lastBackup === today) return; // already done today (in user's local timezone)
     if (typeof _spConnected === 'undefined' || !_spConnected) return;
     if (typeof getSpToken !== 'function') return;
     const token = await getSpToken();
