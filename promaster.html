@@ -10701,7 +10701,6 @@ async function connectSharePoint() {
             AppState.data = Object.assign(getDefaultData(), cleanData);
             if (typeof migrateData === 'function') migrateData();
             AppState.save();
-            else if (typeof _origSave === 'function') _origSave();
             _spOfflineQueue = false;
             localStorage.removeItem('shic_sp_offlinequeue');
             setTimeout(() => {
@@ -10959,7 +10958,6 @@ function _spApplyRemote(data, _ts, _by) {
     AppState.data = Object.assign(getDefaultData(), merged);
     if (typeof migrateData === 'function') migrateData();
     AppState.save();
-    else if (typeof _origSave === 'function') _origSave();
     setTimeout(() => {
       try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
       try { buildSidebar(); } catch(e) {}
@@ -10997,7 +10995,6 @@ function _spApplyRemote(data, _ts, _by) {
     }
     if (typeof migrateData === 'function') migrateData();
     AppState.save();
-    else if (typeof _origSave === 'function') _origSave();
     setTimeout(() => {
       try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
       try { buildSidebar(); } catch(e) {}
@@ -12330,7 +12327,6 @@ async function spAutoInit() {
       AppState.data = Object.assign(getDefaultData(), merged);
       if (typeof migrateData === 'function') migrateData();
       AppState.save();
-      else AppState.save();
       _spOfflineQueue = false;
       localStorage.removeItem('shic_sp_offlinequeue');
       setTimeout(() => {
