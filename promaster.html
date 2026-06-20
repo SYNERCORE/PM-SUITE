@@ -10898,7 +10898,30 @@ const t={id:id||'TSK-'+(Date.now()%100000).toString().padStart(5,'0'),projectId:
 if(!t.name){showToast('Task name required','error');return;}
 if(id){const i=(AppState.data.tasks||[]).findIndex(x=>x.id===id);AppState.data.tasks[i]={...AppState.data.tasks[i],...t};}
 else AppState.data.tasks.push(t);
+_applyCPMDates(_tProjId);
 AppState.save();closeModal('taskModal');renderTaskView();showToast(id?'Task updated':'Task created','success');}
+
+// After any task save, run CPM on the project and write _ES/_EF back to
+// startDate/endDate for tasks that are CPM-scheduled (have predecessors or
+// only a duration with no manual dates). Anchor tasks (predecessors='' and
+// manual dates set) keep their dates.
+function _applyCPMDates(projId){
+  if(!window.SHICCPMEngine)return;
+  const proj=(AppState.data.projects||[]).find(p=>p.id===projId);
+  const pt=(AppState.data.tasks||[]).filter(t=>t.projectId===projId&&!t._deleted);
+  if(!pt.length)return;
+  const result=SHICCPMEngine.runFullCPM(pt,proj);
+  if(result.hasCycle)return; // don't write back if cycle exists
+  result.tasks.forEach(ct=>{
+    if(!ct._ES||!ct._EF)return;
+    const hasPreds=(ct.predecessors||'').trim().length>0;
+    if(!hasPreds)return; // keep manual dates for anchor tasks
+    const i=(AppState.data.tasks||[]).findIndex(x=>x.id===ct.id);
+    if(i<0)return;
+    AppState.data.tasks[i].startDate=ct._ES;
+    AppState.data.tasks[i].endDate=ct._EF;
+  });
+}
 
 function deleteTask(id){ return requestOrDelete('tasks', id); }
 
