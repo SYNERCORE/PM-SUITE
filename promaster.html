@@ -992,6 +992,117 @@ const Repo = {
 // Expose globally so all view files can use it without imports
 window.Repo = Repo;
 
+// ── COLOR PALETTES ────────────────────────────────────────────
+const PALETTES = {
+  dark: {
+    label:'Dark', icon:'🌑',
+    swatches:['#0d1117','#161b22','#388bfd','#3fb950','#f0a450'],
+    vars:{
+      '--bg-primary':'#0d1117','--bg-secondary':'#161b22','--bg-card':'#1c2333',
+      '--bg-hover':'#21262d','--border':'#30363d',
+      '--text-primary':'#e6edf3','--text-secondary':'#8b949e','--text-muted':'#484f58',
+      '--accent-blue':'#388bfd','--accent-amber':'#f0a450','--accent-green':'#3fb950',
+      '--accent-red':'#f85149','--accent-purple':'#bc8cff','--accent-cyan':'#39d3f2','--accent-orange':'#fb8f44',
+    }
+  },
+  light: {
+    label:'Light', icon:'☀️',
+    swatches:['#f0f4f8','#ffffff','#0969da','#1a7f37','#9a6700'],
+    vars:{
+      '--bg-primary':'#f0f4f8','--bg-secondary':'#ffffff','--bg-card':'#ffffff',
+      '--bg-hover':'#f6f8fa','--border':'#d0d7de',
+      '--text-primary':'#1f2328','--text-secondary':'#57606a','--text-muted':'#9198a1',
+      '--accent-blue':'#0969da','--accent-amber':'#9a6700','--accent-green':'#1a7f37',
+      '--accent-red':'#cf222e','--accent-purple':'#8250df','--accent-cyan':'#0598bc','--accent-orange':'#bc4c00',
+    }
+  },
+  ocean: {
+    label:'Ocean', icon:'🌊',
+    swatches:['#020c1b','#0a192f','#64ffda','#57cbff','#f6c90e'],
+    vars:{
+      '--bg-primary':'#020c1b','--bg-secondary':'#0a192f','--bg-card':'#112240',
+      '--bg-hover':'#172a45','--border':'#1d3557',
+      '--text-primary':'#ccd6f6','--text-secondary':'#8892b0','--text-muted':'#495670',
+      '--accent-blue':'#64ffda','--accent-amber':'#f6c90e','--accent-green':'#57cbff',
+      '--accent-red':'#ff6b6b','--accent-purple':'#c792ea','--accent-cyan':'#80ffea','--accent-orange':'#ffb347',
+    }
+  },
+  forest: {
+    label:'Forest', icon:'🌿',
+    swatches:['#0b1e14','#132a1e','#57cc99','#80ed99','#ffd166'],
+    vars:{
+      '--bg-primary':'#0b1e14','--bg-secondary':'#132a1e','--bg-card':'#1a3828',
+      '--bg-hover':'#1f4230','--border':'#2d5a3d',
+      '--text-primary':'#d4f1c0','--text-secondary':'#86b876','--text-muted':'#4a7a54',
+      '--accent-blue':'#57cc99','--accent-amber':'#ffd166','--accent-green':'#80ed99',
+      '--accent-red':'#ef233c','--accent-purple':'#c77dff','--accent-cyan':'#48cae4','--accent-orange':'#f4845f',
+    }
+  },
+  sunset: {
+    label:'Sunset', icon:'🌅',
+    swatches:['#1a0a00','#2d1200','#ff6b35','#ffd166','#06d6a0'],
+    vars:{
+      '--bg-primary':'#1a0a00','--bg-secondary':'#2d1200','--bg-card':'#3d1a00',
+      '--bg-hover':'#4a2200','--border':'#6b3300',
+      '--text-primary':'#ffe8cc','--text-secondary':'#cc9966','--text-muted':'#7a4a22',
+      '--accent-blue':'#ff6b35','--accent-amber':'#ffd166','--accent-green':'#06d6a0',
+      '--accent-red':'#ef233c','--accent-purple':'#d8b4fe','--accent-cyan':'#67e8f9','--accent-orange':'#ff6b35',
+    }
+  },
+  midnight: {
+    label:'Midnight', icon:'🌌',
+    swatches:['#0a0014','#130026','#c084fc','#818cf8','#34d399'],
+    vars:{
+      '--bg-primary':'#0a0014','--bg-secondary':'#130026','--bg-card':'#1a0033',
+      '--bg-hover':'#220040','--border':'#3b0066',
+      '--text-primary':'#e8d5ff','--text-secondary':'#b388ff','--text-muted':'#6a3d99',
+      '--accent-blue':'#c084fc','--accent-amber':'#fbbf24','--accent-green':'#34d399',
+      '--accent-red':'#f87171','--accent-purple':'#818cf8','--accent-cyan':'#67e8f9','--accent-orange':'#fb923c',
+    }
+  },
+};
+
+function applyPalette(name) {
+  const palette = PALETTES[name];
+  if (!palette) return;
+  const root = document.documentElement;
+  root.setAttribute('data-theme', name === 'light' ? 'light' : 'dark');
+  Object.entries(palette.vars).forEach(([k,v]) => root.style.setProperty(k, v));
+  localStorage.setItem('shic_palette', name);
+  window._currentPalette = name;
+  // Refresh swatch picker if settings page is open
+  const picker = document.getElementById('palettePicker');
+  if (picker) _renderPalettePicker(picker);
+}
+
+function _renderPalettePicker(container) {
+  const current = window._currentPalette || localStorage.getItem('shic_palette') || 'dark';
+  container.innerHTML = Object.entries(PALETTES).map(([key, p]) => {
+    const active = key === current;
+    return `<div onclick="applyPalette('${key}')" title="${p.label}" style="
+      cursor:pointer;border-radius:10px;padding:12px;border:2px solid ${active?'var(--accent-blue)':'var(--border)'};
+      background:${active?'rgba(56,139,253,.1)':'var(--bg-hover)'};
+      transition:all .2s;position:relative;text-align:center;min-width:100px;flex:1
+    ">
+      ${active?`<div style="position:absolute;top:6px;right:6px;width:16px;height:16px;background:var(--accent-blue);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff"><i class="fas fa-check"></i></div>`:''}
+      <div style="font-size:20px;margin-bottom:6px">${p.icon}</div>
+      <div style="display:flex;gap:3px;justify-content:center;margin-bottom:6px">
+        ${p.swatches.map(c=>`<div style="width:14px;height:14px;border-radius:50%;background:${c};border:1px solid rgba(255,255,255,.15)"></div>`).join('')}
+      </div>
+      <div style="font-size:11px;font-weight:600;color:${active?'var(--accent-blue)':'var(--text-primary)'}">${p.label}</div>
+    </div>`;
+  }).join('');
+}
+
+(function _initPalette() {
+  const saved = localStorage.getItem('shic_palette') || 'dark';
+  applyPalette(saved);
+})();
+
+window.applyPalette = applyPalette;
+window.PALETTES = PALETTES;
+window._renderPalettePicker = _renderPalettePicker;
+
 </script>
 <script>
 function showToast(msg,type='info',dur=3500){
@@ -16305,11 +16416,22 @@ ${renderSpPanel()}
   </div>
   <div class="card">
     <div style="font-size:14px;font-weight:600;margin-bottom:14px">Notifications &amp; Preferences</div>
-    ${[['Email Notifications','Receive email alerts for overdue items'],['Push Notifications','Browser push notifications'],['Auto Save','Automatically save changes every 30s'],['Dark Mode','Use dark color scheme']].map(([t,d],i)=>`
+    ${[['Email Notifications','Receive email alerts for overdue items'],['Push Notifications','Browser push notifications'],['Auto Save','Automatically save changes every 30s']].map(([t,d])=>`
     <div class="settings-item">
       <div class="settings-item-info"><div class="title">${t}</div><div class="desc">${d}</div></div>
-      <label class="toggle"><input type="checkbox" checked ${i===3?'onchange="toggleTheme()"':''}><span class="toggle-slider"></span></label>
+      <label class="toggle"><input type="checkbox" checked><span class="toggle-slider"></span></label>
     </div>`).join('')}
+  </div>
+  <div class="card" style="grid-column:1/-1">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-size:14px;font-weight:600"><i class="fas fa-palette" style="color:var(--accent-purple);margin-right:7px"></i>Appearance — Color Palette</div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Choose a color theme. Your choice is saved automatically.</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="applyPalette('dark')"><i class="fas fa-undo"></i> Reset to Default</button>
+    </div>
+    <div id="palettePicker" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+    <script>setTimeout(()=>{const p=document.getElementById('palettePicker');if(p&&typeof _renderPalettePicker==='function')_renderPalettePicker(p);},50);<\/script>
   </div>
   <div class="card">
     <div style="font-size:14px;font-weight:600;margin-bottom:14px">Local Data Management</div>
