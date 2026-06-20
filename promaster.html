@@ -10958,7 +10958,7 @@ function showPredPicker(currentTaskId){
     </div>
     <div id="pprPreview" style="margin-top:10px;font-size:11px;color:var(--text-secondary);font-family:var(--font-mono);min-height:18px"></div>
     <div class="modal-footer" style="margin-top:12px">
-      <button class="btn btn-secondary" onclick="closeModal('predPickerModal')">Cancel</button>
+      <button class="btn btn-secondary" onclick="$('#predPickerModal')?.classList.remove('open')">Cancel</button>
       <button class="btn btn-primary" onclick="_pprApplyToField()"><i class="fas fa-check"></i> Apply</button>
     </div>
   </div>`;
@@ -10969,11 +10969,11 @@ function showPredPicker(currentTaskId){
     m=document.createElement('div');
     m.id='predPickerModal';
     m.className='modal-overlay';
-    m.innerHTML=`<div class="modal" style="width:640px;max-width:96vw"><div class="modal-header"><h3 class="modal-title">Pick Predecessors</h3><button class="btn btn-secondary btn-sm btn-icon" onclick="closeModal('predPickerModal')"><i class="fas fa-times"></i></button></div><div class="modal-body" id="predPickerBody"></div></div>`;
+    m.innerHTML=`<div class="modal" style="width:640px;max-width:96vw"><div class="modal-header"><h3 class="modal-title">Pick Predecessors</h3><button class="btn btn-secondary btn-sm btn-icon" onclick="$('#predPickerModal')?.classList.remove('open')"><i class="fas fa-times"></i></button></div><div class="modal-body" id="predPickerBody"></div></div>`;
     document.body.appendChild(m);
   }
   $('#predPickerBody').innerHTML=html;
-  m.classList.add('active');
+  m.classList.add('open');
   _pprApply();
 }
 
@@ -11014,7 +11014,7 @@ function _pprApplyToField(){
   });
   const field=$('#tPred');
   if(field)field.value=parts.join(', ');
-  closeModal('predPickerModal');
+  $('#predPickerModal')?.classList.remove('open');
 }
 
 // ── GLOBAL GANTT MODULE ───────────────────────────────────
