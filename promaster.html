@@ -10870,7 +10870,7 @@ $('#taskModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">Planned Hours</label><input class="form-input" type="number" id="tPH" value="${t?.plannedHrs||0}"></div>
 <div class="form-group"><label class="form-label">Actual Hours</label><input class="form-input" type="number" id="tAH" value="${t?.actualHrs||0}"></div>
 <div class="form-group"><label class="form-label">Duration (days) <span style="font-size:10px;color:var(--text-muted)">— CPM scheduling</span></label><input class="form-input" type="number" id="tDur" step="0.5" min="0" value="${t?.durationHrs!=null&&t.durationHrs>0?+(t.durationHrs/(_getTaskProjHPD(t?.projectId||$('#tProj')?.value))).toFixed(1):''}" placeholder="e.g. 5"></div>
-<div class="form-group" style="grid-column:1/-1"><label class="form-label">Predecessors <span style="font-size:10px;color:var(--text-muted)">e.g. TSK-001FS, TSK-002SS+2d, TSK-003FF-1d</span></label><input class="form-input" id="tPred" value="${t?.predecessors||''}" placeholder="Leave blank if no dependencies"></div>
+<div class="form-group" style="grid-column:1/-1"><label class="form-label">Predecessors <span style="font-size:10px;color:var(--text-muted)">e.g. TSK-001FS, TSK-002SS+2d, TSK-003FF-1d</span></label><div style="display:flex;gap:6px"><input class="form-input" id="tPred" value="${t?.predecessors||''}" placeholder="Leave blank if no dependencies" style="flex:1"><button type="button" class="btn btn-secondary btn-sm" style="white-space:nowrap;padding:0 10px" onclick="showPredPicker('${id||''}')"><i class="fas fa-list-ul"></i> Pick</button></div></div>
 <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="tStat">${['todo','inprogress','done','blocked'].map(s=>`<option value="${s}" ${(t?.status||defStatus)===s?'selected':''}>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Priority</label><select class="form-select" id="tPri">${['critical','high','medium','low'].map(s=>`<option value="${s}" ${t?.priority===s?'selected':''}>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Progress % <span id="progVal">${t?.progress||0}%</span></label><input type="range" id="tProg" value="${t?.progress||0}" min="0" max="100" style="width:100%;accent-color:var(--accent-blue)" oninput="$('#progVal').textContent=this.value+'%'"></div>
@@ -10901,6 +10901,121 @@ else AppState.data.tasks.push(t);
 AppState.save();closeModal('taskModal');renderTaskView();showToast(id?'Task updated':'Task created','success');}
 
 function deleteTask(id){ return requestOrDelete('tasks', id); }
+
+function showPredPicker(currentTaskId){
+  const projId=$('#tProj').value;
+  const allTasks=(AppState.data.tasks||[]).filter(t=>t.projectId===projId&&!t._deleted&&t.id!==currentTaskId);
+
+  // Parse existing predecessors into a working set
+  const existing={};
+  ($('#tPred').value||'').split(',').map(s=>s.trim()).filter(Boolean).forEach(entry=>{
+    const m=entry.match(/^(TSK-\d+)(FS|SS|FF|SF)?([+-]\d+d)?$/i);
+    if(m){existing[m[1].toUpperCase()]={type:(m[2]||'FS').toUpperCase(),lag:m[3]||''};}
+  });
+
+  // Build rows
+  const rows=allTasks.map(t=>{
+    const sel=existing[t.id]||null;
+    const chk=sel?'checked':'';
+    const typeVal=sel?sel.type:'FS';
+    const lagVal=sel?sel.lag.replace(/[+-]/,'').replace('d',''):'';
+    const lagSign=sel&&sel.lag.startsWith('-')?'-':'+';
+    return `<tr id="ppr-row-${t.id}">
+      <td style="width:28px;text-align:center"><input type="checkbox" class="ppr-chk" data-id="${t.id}" ${chk} onchange="_pprToggle('${t.id}')"></td>
+      <td style="font-size:11px;font-family:var(--font-mono);color:var(--text-secondary)">${t.wbs||t.id}</td>
+      <td style="font-size:12px">${t.name}</td>
+      <td style="width:90px">
+        <select class="form-select ppr-type" data-id="${t.id}" style="font-size:11px;padding:2px 4px;height:26px" ${sel?'':'disabled'} onchange="_pprApply()">
+          ${['FS','SS','FF','SF'].map(x=>`<option value="${x}" ${typeVal===x?'selected':''}>${x} — ${x==='FS'?'Finish-to-Start':x==='SS'?'Start-to-Start':x==='FF'?'Finish-to-Finish':'Start-to-Finish'}</option>`).join('')}
+        </select>
+      </td>
+      <td style="width:90px">
+        <div style="display:flex;align-items:center;gap:2px">
+          <select class="ppr-lsign" data-id="${t.id}" style="font-size:11px;padding:2px 2px;height:26px;width:38px" ${sel?'':'disabled'} onchange="_pprApply()">
+            <option value="+" ${lagSign==='+'?'selected':''}>+</option>
+            <option value="-" ${lagSign==='-'?'selected':''}>-</option>
+          </select>
+          <input type="number" class="form-input ppr-lag" data-id="${t.id}" value="${lagVal}" min="0" placeholder="0" style="font-size:11px;padding:2px 4px;height:26px;width:46px" ${sel?'':'disabled'} oninput="_pprApply()">
+          <span style="font-size:10px;color:var(--text-muted)">d</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const html=`<div style="padding:0">
+    <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Check tasks to add as predecessors. Set dependency type and lag for each.</p>
+    <div style="max-height:340px;overflow-y:auto;border:1px solid var(--border-primary);border-radius:6px">
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--bg-secondary);position:sticky;top:0;z-index:1">
+        <th style="padding:6px 4px;font-size:11px;font-weight:600;text-align:center;width:28px"></th>
+        <th style="padding:6px 8px;font-size:11px;font-weight:600;text-align:left">WBS / ID</th>
+        <th style="padding:6px 8px;font-size:11px;font-weight:600;text-align:left">Task Name</th>
+        <th style="padding:6px 8px;font-size:11px;font-weight:600">Type</th>
+        <th style="padding:6px 8px;font-size:11px;font-weight:600">Lag</th>
+      </tr></thead>
+      <tbody>${rows||'<tr><td colspan="5" style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px">No other tasks in this project.</td></tr>'}</tbody>
+    </table>
+    </div>
+    <div id="pprPreview" style="margin-top:10px;font-size:11px;color:var(--text-secondary);font-family:var(--font-mono);min-height:18px"></div>
+    <div class="modal-footer" style="margin-top:12px">
+      <button class="btn btn-secondary" onclick="closeModal('predPickerModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="_pprApplyToField()"><i class="fas fa-check"></i> Apply</button>
+    </div>
+  </div>`;
+
+  // Use generic modal
+  let m=$('#predPickerModal');
+  if(!m){
+    m=document.createElement('div');
+    m.id='predPickerModal';
+    m.className='modal-overlay';
+    m.innerHTML=`<div class="modal" style="width:640px;max-width:96vw"><div class="modal-header"><h3 class="modal-title">Pick Predecessors</h3><button class="btn btn-secondary btn-sm btn-icon" onclick="closeModal('predPickerModal')"><i class="fas fa-times"></i></button></div><div class="modal-body" id="predPickerBody"></div></div>`;
+    document.body.appendChild(m);
+  }
+  $('#predPickerBody').innerHTML=html;
+  m.classList.add('active');
+  _pprApply();
+}
+
+function _pprToggle(taskId){
+  const chk=document.querySelector(`.ppr-chk[data-id="${taskId}"]`);
+  const enabled=chk&&chk.checked;
+  document.querySelector(`.ppr-type[data-id="${taskId}"]`).disabled=!enabled;
+  document.querySelector(`.ppr-lsign[data-id="${taskId}"]`).disabled=!enabled;
+  document.querySelector(`.ppr-lag[data-id="${taskId}"]`).disabled=!enabled;
+  _pprApply();
+}
+
+function _pprApply(){
+  const parts=[];
+  document.querySelectorAll('.ppr-chk').forEach(chk=>{
+    if(!chk.checked)return;
+    const id=chk.dataset.id;
+    const type=document.querySelector(`.ppr-type[data-id="${id}"]`)?.value||'FS';
+    const sign=document.querySelector(`.ppr-lsign[data-id="${id}"]`)?.value||'+';
+    const lag=parseInt(document.querySelector(`.ppr-lag[data-id="${id}"]`)?.value)||0;
+    const lagStr=lag>0?`${sign}${lag}d`:'';
+    parts.push(`${id}${type}${lagStr}`);
+  });
+  const preview=$('#pprPreview');
+  if(preview)preview.textContent=parts.length?'Preview: '+parts.join(', '):'No predecessors selected.';
+}
+
+function _pprApplyToField(){
+  const parts=[];
+  document.querySelectorAll('.ppr-chk').forEach(chk=>{
+    if(!chk.checked)return;
+    const id=chk.dataset.id;
+    const type=document.querySelector(`.ppr-type[data-id="${id}"]`)?.value||'FS';
+    const sign=document.querySelector(`.ppr-lsign[data-id="${id}"]`)?.value||'+';
+    const lag=parseInt(document.querySelector(`.ppr-lag[data-id="${id}"]`)?.value)||0;
+    const lagStr=lag>0?`${sign}${lag}d`:'';
+    parts.push(`${id}${type}${lagStr}`);
+  });
+  const field=$('#tPred');
+  if(field)field.value=parts.join(', ');
+  closeModal('predPickerModal');
+}
 
 // ── GLOBAL GANTT MODULE ───────────────────────────────────
 
