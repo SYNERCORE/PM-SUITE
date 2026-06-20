@@ -476,6 +476,38 @@ const APP_CHANGELOG=[
 ];
 // Migration registry — add new migration functions here when adding new data structures
 const DATA_MIGRATIONS={
+  '2.3.0': function(data){
+    // Baseline fields: ensure all projects have baselines array and activeBaseline
+    (data.projects||[]).forEach(p=>{
+      if(!p.baselines)p.baselines=[];
+      if(p.activeBaseline===undefined)p.activeBaseline=null;
+    });
+    return data;
+  },
+  '2.2.0': function(data){
+    // CPM fields: ensure predecessors and durationHrs exist on all tasks
+    (data.tasks||[]).forEach(t=>{
+      if(t.predecessors===undefined)t.predecessors='';
+      if(!t.durationHrs||t.durationHrs<=0){
+        // Derive from existing date span (calendar days * 8hr default)
+        if(t.startDate&&(t.endDate||t.dueDate)){
+          const s=new Date(t.startDate);
+          const e=new Date(t.endDate||t.dueDate);
+          const calDays=Math.max(1,Math.round((e-s)/86400000));
+          t.durationHrs=calDays*8;
+        }else{
+          t.durationHrs=8; // default 1 day
+        }
+      }
+    });
+    // Ensure all projects have a calendar field
+    (data.projects||[]).forEach(p=>{
+      if(!p.calendar){
+        p.calendar={workDays:[1,2,3,4,5],hoursPerDay:8,mode:'standard'};
+      }
+    });
+    return data;
+  },
   '2.1.0': function(data){
     if(!data.procurementLogs)data.procurementLogs=[];
     // Migrate old 'ordered' status to 'po_issued'
@@ -7035,6 +7067,39 @@ async function _checkConflictBeforeSave(modalKey, recordId, dataKey) {
 //   - User edits Start: if Duration set → recompute End; if End set → recompute Duration
 //   - User edits End:   if Duration set → recompute Start; if Start set → recompute Duration
 //   - User edits Duration: prefer Start as anchor → recompute End; else if End set → recompute Start
+const _CAL_PRESETS = {
+  standard:    { workDays:[1,2,3,4,5],         hoursPerDay:8,  mode:'standard'    },
+  extended:    { workDays:[1,2,3,4,5],         hoursPerDay:12, mode:'extended'    },
+  monsat8:     { workDays:[1,2,3,4,5,6],       hoursPerDay:8,  mode:'monsat8'     },
+  monsat12:    { workDays:[1,2,3,4,5,6],       hoursPerDay:12, mode:'monsat12'    },
+  calendar247: { workDays:[0,1,2,3,4,5,6],     hoursPerDay:24, mode:'calendar247' },
+};
+
+function _applyCalPreset(preset) {
+  const custom = document.getElementById('pCalCustom');
+  if (!custom) return;
+  if (preset === 'custom') { custom.style.display = 'block'; return; }
+  custom.style.display = 'none';
+  const p = _CAL_PRESETS[preset];
+  if (!p) return;
+  // Update checkboxes and hours to reflect the preset
+  [0,1,2,3,4,5,6].forEach(i => {
+    const cb = document.getElementById('pCalDay' + i);
+    if (cb) cb.checked = p.workDays.includes(i);
+  });
+  const hpd = document.getElementById('pCalHPD');
+  if (hpd) hpd.value = p.hoursPerDay;
+}
+
+function _readCalendarFromForm() {
+  const preset = document.getElementById('pCalPreset')?.value || 'standard';
+  if (preset !== 'custom' && _CAL_PRESETS[preset]) return _CAL_PRESETS[preset];
+  // custom
+  const workDays = [0,1,2,3,4,5,6].filter(i => document.getElementById('pCalDay'+i)?.checked);
+  const hoursPerDay = parseInt(document.getElementById('pCalHPD')?.value) || 8;
+  return { workDays, hoursPerDay, mode: 'custom' };
+}
+
 function _recalcProjDates(lastEdited) {
   const startEl = document.getElementById('pStart');
   const endEl = document.getElementById('pEnd');
@@ -7124,6 +7189,39 @@ ${(AppState.data.businessUnits||[]).map(bu=>`<option value="${bu.id}" ${p?.busin
 </select></div>
 </div>
 <div class="form-group"><label class="form-label">Description</label><textarea class="form-textarea" id="pDesc">${p?.description||''}</textarea></div>
+
+<!-- ── CPM Calendar ── -->
+<div style="border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:4px">
+  <div style="font-size:12px;font-weight:600;margin-bottom:10px"><i class="fas fa-calendar-alt" style="color:var(--accent-blue);margin-right:6px"></i>Work Calendar <span style="font-size:10px;font-weight:400;color:var(--text-muted)">— used for CPM scheduling</span></div>
+  <div class="form-group">
+    <label class="form-label">Preset</label>
+    <select class="form-select" id="pCalPreset" onchange="_applyCalPreset(this.value)">
+      <option value="standard"   ${(!p?.calendar||p?.calendar?.mode==='standard'  ?'selected':'')}>Standard (Mon–Fri, 8hr)</option>
+      <option value="extended"   ${p?.calendar?.mode==='extended'  ?'selected':''}>Extended Weekday (Mon–Fri, 12hr)</option>
+      <option value="monsat8"    ${p?.calendar?.mode==='monsat8'   ?'selected':''}>Mon–Sat (8hr)</option>
+      <option value="monsat12"   ${p?.calendar?.mode==='monsat12'  ?'selected':''}>Mon–Sat (12hr)</option>
+      <option value="calendar247" ${p?.calendar?.mode==='calendar247'?'selected':''}>Pure Calendar (24/7)</option>
+      <option value="custom"     ${p?.calendar?.mode==='custom'    ?'selected':''}>Custom</option>
+    </select>
+  </div>
+  <div id="pCalCustom" style="display:${p?.calendar?.mode==='custom'?'block':'none'}">
+    <div class="form-group">
+      <label class="form-label">Working Days</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d,i)=>{
+          const checked=(p?.calendar?.workDays||[1,2,3,4,5]).includes(i);
+          return `<label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">
+            <input type="checkbox" id="pCalDay${i}" value="${i}" ${checked?'checked':''}> ${d}</label>`;
+        }).join('')}
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Hours per Day</label>
+      <input class="form-input" type="number" id="pCalHPD" min="1" max="24" value="${p?.calendar?.hoursPerDay||8}" style="width:100px">
+    </div>
+  </div>
+</div>
+
 <div class="modal-footer">
 <button class="btn btn-secondary" onclick="closeModal('projectModal')">Cancel</button>
 <button class="btn btn-primary" onclick="saveProject('${id||''}')"><i class="fas fa-save"></i> ${id?'Update':'Create'}</button>
@@ -7156,7 +7254,7 @@ if (id) {
     return;
   }
 }
-const pr={id:newId,name:$('#pName').value,client:$('#pClient').value,location:$('#pLoc').value,startDate:$('#pStart').value,endDate:$('#pEnd').value,duration:isNaN(_durVal)?undefined:_durVal,budget:parseFloat($('#pBudget').value)||0,pm:$('#pPM').value,status:$('#pStatus').value,priority:$('#pPri').value,discipline:$('#pDisc').value,progress:parseInt($('#pProg').value)||0,description:$('#pDesc').value,businessUnit:$('#pBU')?.value||'',plannedProgress:parseInt($('#pPlannedProg')?.value)||0,spent:0,riskLevel:'medium',phase:'Initiation'};
+const pr={id:newId,name:$('#pName').value,client:$('#pClient').value,location:$('#pLoc').value,startDate:$('#pStart').value,endDate:$('#pEnd').value,duration:isNaN(_durVal)?undefined:_durVal,budget:parseFloat($('#pBudget').value)||0,pm:$('#pPM').value,status:$('#pStatus').value,priority:$('#pPri').value,discipline:$('#pDisc').value,progress:parseInt($('#pProg').value)||0,description:$('#pDesc').value,businessUnit:$('#pBU')?.value||'',plannedProgress:parseInt($('#pPlannedProg')?.value)||0,spent:0,riskLevel:'medium',phase:'Initiation',calendar:_readCalendarFromForm()};
 if(!pr.name){showToast('Project name required','error');return;}
 if(!newId){showToast('Project ID required','error');return;}
 if(id){
@@ -10680,6 +10778,11 @@ function cancelIdChangeRequest(requestId) {
 let taskView='kanban',taskProjectFilter='all';
 </script>
 <script>
+function _getTaskProjHPD(projectId) {
+  const p = (AppState.data.projects||[]).find(p => p.id === projectId);
+  return p?.calendar?.hoursPerDay || 8;
+}
+
 function renderTasks(){
 const el=$('#tasks');
 el.innerHTML=`<div class="section-header" style="margin-bottom:14px">
@@ -10766,6 +10869,8 @@ $('#taskModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">End Date</label><input class="form-input" type="date" id="tEnd" value="${t?.endDate||''}"></div>
 <div class="form-group"><label class="form-label">Planned Hours</label><input class="form-input" type="number" id="tPH" value="${t?.plannedHrs||0}"></div>
 <div class="form-group"><label class="form-label">Actual Hours</label><input class="form-input" type="number" id="tAH" value="${t?.actualHrs||0}"></div>
+<div class="form-group"><label class="form-label">Duration (days) <span style="font-size:10px;color:var(--text-muted)">— CPM scheduling</span></label><input class="form-input" type="number" id="tDur" step="0.5" min="0" value="${t?.durationHrs!=null&&t.durationHrs>0?+(t.durationHrs/(_getTaskProjHPD(t?.projectId||$('#tProj')?.value))).toFixed(1):''}" placeholder="e.g. 5"></div>
+<div class="form-group" style="grid-column:1/-1"><label class="form-label">Predecessors <span style="font-size:10px;color:var(--text-muted)">e.g. TSK-001FS, TSK-002SS+2d, TSK-003FF-1d</span></label><input class="form-input" id="tPred" value="${t?.predecessors||''}" placeholder="Leave blank if no dependencies"></div>
 <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="tStat">${['todo','inprogress','done','blocked'].map(s=>`<option value="${s}" ${(t?.status||defStatus)===s?'selected':''}>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Priority</label><select class="form-select" id="tPri">${['critical','high','medium','low'].map(s=>`<option value="${s}" ${t?.priority===s?'selected':''}>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Progress % <span id="progVal">${t?.progress||0}%</span></label><input type="range" id="tProg" value="${t?.progress||0}" min="0" max="100" style="width:100%;accent-color:var(--accent-blue)" oninput="$('#progVal').textContent=this.value+'%'"></div>
@@ -10786,7 +10891,10 @@ if(id && typeof _genericCheckConflict==='function'){
     return;
   }
 }
-const t={id:id||'TSK-'+(Date.now()%100000).toString().padStart(5,'0'),projectId:$('#tProj').value,wbs:$('#tWbs').value,name:$('#tName').value,assignee:$('#tAss').value,dept:$('#tDept').value,startDate:$('#tStart').value,endDate:$('#tEnd').value,plannedHrs:parseFloat($('#tPH').value)||0,actualHrs:parseFloat($('#tAH').value)||0,status:$('#tStat').value,priority:$('#tPri').value,progress:parseInt($('#tProg').value)||0,milestone:$('#tMile').value==='true'};
+const _tProjId=$('#tProj').value;
+const _tDurDays=parseFloat($('#tDur')?.value)||0;
+const _tHPD=_getTaskProjHPD(_tProjId);
+const t={id:id||'TSK-'+(Date.now()%100000).toString().padStart(5,'0'),projectId:_tProjId,wbs:$('#tWbs').value,name:$('#tName').value,assignee:$('#tAss').value,dept:$('#tDept').value,startDate:$('#tStart').value,endDate:$('#tEnd').value,plannedHrs:parseFloat($('#tPH').value)||0,actualHrs:parseFloat($('#tAH').value)||0,status:$('#tStat').value,priority:$('#tPri').value,progress:parseInt($('#tProg').value)||0,milestone:$('#tMile').value==='true',predecessors:($('#tPred')?.value||'').trim(),durationHrs:_tDurDays>0?_tDurDays*_tHPD:(id?(AppState.data.tasks||[]).find(x=>x.id===id)?.durationHrs||0:0)};
 if(!t.name){showToast('Task name required','error');return;}
 if(id){const i=(AppState.data.tasks||[]).findIndex(x=>x.id===id);AppState.data.tasks[i]={...AppState.data.tasks[i],...t};}
 else AppState.data.tasks.push(t);
@@ -10798,6 +10906,371 @@ function deleteTask(id){ return requestOrDelete('tasks', id); }
 
 </script>
 <script>
+// ── SHIC CPM Engine ───────────────────────────────────────────
+// Pure JS — no UI dependencies. Registered as window.SHICCPMEngine.
+// All dates are YYYY-MM-DD strings. Durations are in working days.
+(function () {
+
+const DEFAULT_CALENDAR = { workDays: [1, 2, 3, 4, 5], hoursPerDay: 8, mode: 'standard' };
+
+function getCalendar(project) {
+  return (project && project.calendar) ? project.calendar : DEFAULT_CALENDAR;
+}
+
+// Advance (or retreat) `workingDays` working days from a date string.
+// Returns a YYYY-MM-DD string.
+function addWorkingDays(dateStr, workingDays, calendar) {
+  if (!dateStr) return dateStr;
+  if (workingDays === 0) return dateStr;
+  const cal = calendar || DEFAULT_CALENDAR;
+  const sign = workingDays > 0 ? 1 : -1;
+  let remaining = Math.abs(workingDays);
+  const dt = new Date(dateStr + 'T00:00:00');
+
+  // If start falls on a non-working day, move to the nearest working day first
+  while (!cal.workDays.includes(dt.getDay())) {
+    dt.setDate(dt.getDate() + sign);
+  }
+
+  while (remaining > 0) {
+    dt.setDate(dt.getDate() + sign);
+    if (cal.workDays.includes(dt.getDay())) remaining--;
+  }
+  return dt.toISOString().split('T')[0];
+}
+
+// Count working days between two YYYY-MM-DD strings (positive = forward).
+function workingDaysBetween(startStr, endStr, calendar) {
+  if (!startStr || !endStr) return 0;
+  const cal = calendar || DEFAULT_CALENDAR;
+  const start = new Date(startStr + 'T00:00:00');
+  const end   = new Date(endStr   + 'T00:00:00');
+  if (start.getTime() === end.getTime()) return 0;
+  const sign = end > start ? 1 : -1;
+  let count = 0;
+  const dt = new Date(start);
+  while (sign > 0 ? dt < end : dt > end) {
+    dt.setDate(dt.getDate() + sign);
+    if (cal.workDays.includes(dt.getDay())) count += sign;
+  }
+  return count;
+}
+
+// Parse "TSK-001FS, TSK-002SS+2d, TSK-003FF-1d" into array of objects.
+function parsePredecessors(predStr) {
+  if (!predStr || !predStr.trim()) return [];
+  return predStr.split(',').map(s => {
+    s = s.trim();
+    if (!s) return null;
+    // Groups: 1=id, 2=link type (optional), 3=lag (optional)
+    const m = s.match(/^([A-Za-z0-9_-]+)\s*(FS|SS|FF|SF)?\s*([+-]\d+d?)?$/i);
+    if (!m) return null;
+    const lagStr = (m[3] || '').replace(/d$/i, '');
+    return {
+      id:      m[1].trim(),
+      type:    (m[2] || 'FS').toUpperCase(),
+      lagDays: lagStr ? parseInt(lagStr, 10) : 0,
+    };
+  }).filter(Boolean);
+}
+
+// Build topological order using Kahn's algorithm.
+// Returns { order, hasCycle, cycleInfo }
+function buildTopoOrder(tasks) {
+  const taskIds  = new Set(tasks.map(t => t.id));
+  const inDegree = new Map(tasks.map(t => [t.id, 0]));
+  const succs    = new Map(tasks.map(t => [t.id, []]));
+
+  for (const task of tasks) {
+    for (const p of parsePredecessors(task.predecessors || '')) {
+      if (!taskIds.has(p.id)) continue;
+      succs.get(p.id).push(task.id);
+      inDegree.set(task.id, (inDegree.get(task.id) || 0) + 1);
+    }
+  }
+
+  const queue = [...inDegree.entries()].filter(([, d]) => d === 0).map(([id]) => id);
+  const order = [];
+
+  while (queue.length) {
+    const id = queue.shift();
+    order.push(id);
+    for (const sid of (succs.get(id) || [])) {
+      const nd = inDegree.get(sid) - 1;
+      inDegree.set(sid, nd);
+      if (nd === 0) queue.push(sid);
+    }
+  }
+
+  const remaining = tasks.filter(t => !order.includes(t.id));
+  const hasCycle  = remaining.length > 0;
+  const cycleInfo = hasCycle
+    ? 'Circular dependency detected: ' + remaining.map(t => t.id + ' (' + (t.name || '') + ')').join(', ')
+    : '';
+
+  return { order, hasCycle, cycleInfo };
+}
+
+// Full CPM: forward + backward pass on the tasks belonging to one project.
+// Returns { tasks, hasCycle, cycleInfo, projectFinish }
+// Computed fields added: _ES, _EF, _LS, _LF, _TF (working days), _isCritical
+// These fields are NEVER saved — recalculated every render.
+function runFullCPM(tasks, project) {
+  const cal          = getCalendar(project);
+  const projectStart = (project && project.startDate) ? project.startDate : new Date().toISOString().split('T')[0];
+
+  // Only include tasks for this project that have not been soft-deleted
+  const ptasks = tasks.filter(t =>
+    (!project || t.projectId === project.id) && !t._deleted
+  );
+
+  if (!ptasks.length) return { tasks: [], hasCycle: false, cycleInfo: '' };
+
+  const { order, hasCycle, cycleInfo } = buildTopoOrder(ptasks);
+  if (hasCycle) return { tasks: ptasks, hasCycle, cycleInfo };
+
+  // Work on copies so we don't mutate AppState
+  const map = new Map(ptasks.map(t => [t.id, { ...t }]));
+
+  // Duration in working days (durationHrs / hoursPerDay, fallback to date span)
+  function getDurDays(t) {
+    if (t.durationHrs && t.durationHrs > 0) return t.durationHrs / cal.hoursPerDay;
+    // Fallback: derive from existing start/end dates
+    if (t.startDate && (t.endDate || t.dueDate)) {
+      const s = t.startDate;
+      const e = t.endDate || t.dueDate;
+      return Math.max(1, workingDaysBetween(s, e, cal));
+    }
+    return 1; // default 1 working day
+  }
+
+  // ── Forward Pass ──────────────────────────────────────────────
+  for (const id of order) {
+    const t    = map.get(id);
+    const preds = parsePredecessors(t.predecessors || '');
+    const dur  = getDurDays(t);
+    let   es   = projectStart;
+
+    for (const p of preds) {
+      const pred = map.get(p.id);
+      if (!pred || !pred._ES) continue;
+      const lag = p.lagDays || 0;
+      let constraint;
+
+      switch (p.type) {
+        case 'FS':
+          constraint = addWorkingDays(pred._EF, lag, cal);
+          break;
+        case 'SS':
+          constraint = addWorkingDays(pred._ES, lag, cal);
+          break;
+        case 'FF':
+          // succ EF >= pred EF + lag  →  succ ES = succ EF - dur
+          constraint = addWorkingDays(addWorkingDays(pred._EF, lag, cal), -dur, cal);
+          break;
+        case 'SF':
+          // succ EF >= pred ES + lag
+          constraint = addWorkingDays(addWorkingDays(pred._ES, lag, cal), -dur, cal);
+          break;
+        default:
+          constraint = addWorkingDays(pred._EF, lag, cal);
+      }
+
+      if (constraint > es) es = constraint;
+    }
+
+    t._ES = es;
+    t._EF = addWorkingDays(es, dur, cal);
+    map.set(id, t);
+  }
+
+  // Project finish = latest EF of all tasks with no successors
+  const allEFs       = [...map.values()].map(t => t._EF).filter(Boolean);
+  const projectFinish = allEFs.reduce((a, b) => (a > b ? a : b), projectStart);
+
+  // Build successor map for backward pass
+  const succMap = new Map(ptasks.map(t => [t.id, []]));
+  for (const t of ptasks) {
+    for (const p of parsePredecessors(t.predecessors || '')) {
+      if (succMap.has(p.id)) succMap.get(p.id).push({ id: t.id, type: p.type, lagDays: p.lagDays });
+    }
+  }
+
+  // ── Backward Pass ─────────────────────────────────────────────
+  for (const id of [...order].reverse()) {
+    const t     = map.get(id);
+    const dur   = getDurDays(t);
+    const succs = succMap.get(id) || [];
+    let   lf    = projectFinish;
+
+    for (const s of succs) {
+      const succ = map.get(s.id);
+      if (!succ || !succ._LS) continue;
+      const lag = s.lagDays || 0;
+      let constraint;
+
+      switch (s.type) {
+        case 'FS':
+          constraint = addWorkingDays(succ._LS, -lag, cal);
+          break;
+        case 'SS':
+          // pred LF = pred LS + dur = (succ LS - lag) + dur
+          constraint = addWorkingDays(addWorkingDays(succ._LS, -lag, cal), dur, cal);
+          break;
+        case 'FF':
+          constraint = addWorkingDays(succ._LF, -lag, cal);
+          break;
+        case 'SF':
+          constraint = addWorkingDays(addWorkingDays(succ._LF, -lag, cal), dur, cal);
+          break;
+        default:
+          constraint = addWorkingDays(succ._LS, -lag, cal);
+      }
+
+      if (constraint < lf) lf = constraint;
+    }
+
+    t._LF = lf;
+    t._LS = addWorkingDays(lf, -dur, cal);
+    t._TF = workingDaysBetween(t._ES, t._LS, cal); // total float in working days
+    t._isCritical = t._TF <= 0;
+    map.set(id, t);
+  }
+
+  return {
+    tasks: [...map.values()],
+    hasCycle: false,
+    cycleInfo: '',
+    projectFinish,
+  };
+}
+
+window.SHICCPMEngine = {
+  DEFAULT_CALENDAR,
+  getCalendar,
+  addWorkingDays,
+  workingDaysBetween,
+  parsePredecessors,
+  buildTopoOrder,
+  runFullCPM,
+};
+
+})();
+
+</script>
+<script>
+// ── SHIC Baseline Engine ─────────────────────────────────────
+(function(){
+  const MAX_BASELINES = 3;
+
+  function _genId(){
+    return 'BL-'+Date.now().toString(36).toUpperCase().slice(-6);
+  }
+
+  function _getProject(projectId){
+    return (AppState.data.projects||[]).find(p=>p.id===projectId);
+  }
+
+  // Capture a snapshot of the current plan for a project
+  function setBaseline(projectId, name){
+    const p=_getProject(projectId);
+    if(!p)return {ok:false,msg:'Project not found'};
+    if(!p.baselines)p.baselines=[];
+    if(p.baselines.length>=MAX_BASELINES)return {ok:false,msg:`Max ${MAX_BASELINES} baselines reached. Delete one first.`};
+
+    const tasks=(AppState.data.tasks||[])
+      .filter(t=>t.projectId===projectId&&!t._deleted)
+      .map(t=>({
+        id:t.id,
+        name:t.name,
+        startDate:t.startDate||'',
+        endDate:t.endDate||t.dueDate||'',
+        durationHrs:t.durationHrs||0,
+        progress:t.progress||0,
+      }));
+
+    const bl={
+      id:_genId(),
+      name:name||('Baseline '+(p.baselines.length+1)),
+      createdAt:new Date().toISOString().split('T')[0],
+      createdBy:(AppState.currentUser?.displayName||AppState.currentUser?.name||''),
+      projectEndDate:p.endDate||'',
+      projectBudget:p.budget||0,
+      tasks,
+    };
+
+    p.baselines.push(bl);
+    if(!p.activeBaseline)p.activeBaseline=bl.id;
+    AppState.save();
+    return {ok:true,baseline:bl};
+  }
+
+  function deleteBaseline(projectId, baselineId){
+    const p=_getProject(projectId);
+    if(!p||!p.baselines)return;
+    p.baselines=p.baselines.filter(b=>b.id!==baselineId);
+    if(p.activeBaseline===baselineId){
+      p.activeBaseline=p.baselines.length?p.baselines[p.baselines.length-1].id:null;
+    }
+    AppState.save();
+  }
+
+  function setActiveBaseline(projectId, baselineId){
+    const p=_getProject(projectId);
+    if(!p)return;
+    p.activeBaseline=baselineId;
+    AppState.save();
+  }
+
+  function getActiveBaseline(projectId){
+    const p=_getProject(projectId);
+    if(!p||!p.activeBaseline||!p.baselines)return null;
+    return p.baselines.find(b=>b.id===p.activeBaseline)||null;
+  }
+
+  function getBaselineTask(projectId, taskId){
+    const bl=getActiveBaseline(projectId);
+    if(!bl)return null;
+    return bl.tasks.find(t=>t.id===taskId)||null;
+  }
+
+  // Returns schedule variance in calendar days (positive = ahead, negative = behind)
+  function calcSV(actualEndDate, baselineEndDate){
+    if(!actualEndDate||!baselineEndDate)return null;
+    const a=new Date(actualEndDate);
+    const b=new Date(baselineEndDate);
+    return Math.round((b-a)/86400000); // positive = finishing earlier than baseline
+  }
+
+  // Cost variance: positive = under budget
+  function calcCV(project){
+    const bl=getActiveBaseline(project.id);
+    if(!bl||!bl.projectBudget)return null;
+    return bl.projectBudget-(project.budget||0);
+  }
+
+  window.SHICBaseline={
+    MAX_BASELINES,
+    setBaseline,
+    deleteBaseline,
+    setActiveBaseline,
+    getActiveBaseline,
+    getBaselineTask,
+    calcSV,
+    calcCV,
+  };
+})();
+
+</script>
+<script>
+// ── Gantt state ───────────────────────────────────────────────
+// ganttFrom, ganttTo, ganttProjFilter, ganttStatusFilter declared in ui.js or here as fallback
+if(typeof ganttFrom==='undefined')var ganttFrom='';
+if(typeof ganttTo==='undefined')var ganttTo='';
+if(typeof ganttProjFilter==='undefined')var ganttProjFilter='all';
+if(typeof ganttStatusFilter==='undefined')var ganttStatusFilter='all';
+var _ganttShowBaseline=true; // baseline ghost bars toggle
+
 function renderGantt(){
   AppState.ensureData();
   const{projects,tasks}=AppState.data;
@@ -10822,11 +11295,28 @@ function renderGantt(){
   const today=new Date().toISOString().split('T')[0];
   const todayPct=Math.max(0,Math.min(100,daysBetween(minDate,today)/totalDays*100));
 
-  // Build month headers
+  const filteredProjects=projects.filter(p=>ganttProjFilter==='all'||p.id===ganttProjFilter);
+
+  // ── CPM Computation ──────────────────────────────────────────
+  const cpmMap=new Map();
+  const cycleErrors=[];
+
+  if(window.SHICCPMEngine){
+    filteredProjects.forEach(p=>{
+      const pt=tasks.filter(t=>t.projectId===p.id&&!t._deleted);
+      if(!pt.length)return;
+      const result=SHICCPMEngine.runFullCPM(pt,p);
+      if(result.hasCycle){
+        cycleErrors.push({project:p.name,msg:result.cycleInfo});
+      }else{
+        result.tasks.forEach(t=>cpmMap.set(t.id,t));
+      }
+    });
+  }
+
+  // ── Month Headers ─────────────────────────────────────────────
   const months=[];const cur2=new Date(mD);
   while(cur2<=xD){
-    const daysInMonth=new Date(cur2.getFullYear(),cur2.getMonth()+1,0).getDate();
-    const mStart=cur2.toISOString().split('T')[0];
     const visStart=new Date(Math.max(+cur2,+mD));
     const visEnd=new Date(Math.min(+(new Date(cur2.getFullYear(),cur2.getMonth()+1,0)),+xD));
     const p1=Math.max(0,daysBetween(minDate,visStart.toISOString().split('T')[0])/totalDays*100);
@@ -10842,13 +11332,18 @@ function renderGantt(){
   const projColors=['#388bfd','#3fb950','#f0a450','#bc8cff','#39d3f2','#fb8f44','#f85149','#ffca28'];
   const todayLine=todayPct>0&&todayPct<100?`<div style="position:absolute;left:${todayPct}%;top:0;bottom:0;width:2px;background:var(--accent-red);z-index:10;pointer-events:none"></div>`:'';
 
-  // Filter projects
-  const filteredProjects=projects.filter(p=>ganttProjFilter==='all'||p.id===ganttProjFilter);
-
-  // Build rows
+  // ── Row Building ─────────────────────────────────────────────
+  const LABEL_W=260;
+  const SV_W=52;  // schedule variance column width
+  const PROJ_H=32;
+  const TASK_H=30;
+  const HEADER_H=34;
   let rows='';
   let totalTasksShown=0;
-  const LABEL_W=260;
+  let currentY=0;
+
+  const taskPos=new Map();
+  const hasBL=!!window.SHICBaseline;
 
   filteredProjects.forEach((p,pi)=>{
     const pc=projColors[pi%projColors.length];
@@ -10858,16 +11353,29 @@ function renderGantt(){
       return true;
     });
 
+    const activeBL=hasBL?SHICBaseline.getActiveBaseline(p.id):null;
+    const showBL=_ganttShowBaseline&&!!activeBL;
+
     const ps=p.startDate||minDate;
     const pe=p.endDate||maxDate;
 
-    // Project bar
+    // Budget variance for project row
+    let cvHtml='';
+    if(showBL){
+      const cv=SHICBaseline.calcCV(p);
+      if(cv!==null){
+        const cvSign=cv>=0?'+':'';
+        const cvColor=cv>=0?'#3fb950':'#f85149';
+        cvHtml=`<span style="font-size:9px;color:${cvColor};font-weight:600;margin-left:4px" title="Budget vs Baseline">${cvSign}₱${Math.abs(cv).toLocaleString()}</span>`;
+      }
+    }
+
     rows+=`<div style="display:flex;background:${pc}11;border-bottom:2px solid ${pc}55" title="${p.name}">
       <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:6px 10px;font-weight:700;font-size:12px;color:${pc};border-right:1px solid var(--border);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:flex;align-items:center;gap:6px">
         <i class="fas fa-folder" style="font-size:10px;flex-shrink:0"></i>${p.id} — ${p.name.substring(0,22)}
         <span style="margin-left:auto;font-size:9px;font-weight:400;color:var(--text-muted)">${pt.length} tasks</span>
       </div>
-      <div style="flex:1;position:relative;height:32px;min-width:0">
+      <div style="flex:1;position:relative;height:${PROJ_H}px;min-width:0">
         ${todayLine}
         <div style="position:absolute;left:${pct(ps)}%;width:${wPct(ps,pe)}%;min-width:6px;top:7px;height:18px;background:${pc}33;border-radius:3px;border:2px solid ${pc}88"></div>
         <div style="position:absolute;left:${pct(ps)}%;width:${Math.min(wPct(ps,pe),wPct(ps,pe)*(p.progress||0)/100)}%;min-width:${(p.progress||0)>0?4:0}px;top:7px;height:18px;background:${pc}bb;border-radius:3px;overflow:hidden;display:flex;align-items:center;padding:0 5px">
@@ -10878,33 +11386,72 @@ function renderGantt(){
         <div>${ps}</div><div>${pe}</div>
       </div>
       <div style="width:75px;min-width:75px;padding:5px 6px;border-left:1px solid var(--border)">${sBadge(p.status||'active')}</div>
+      <div style="width:${SV_W}px;min-width:${SV_W}px;padding:5px 4px;border-left:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1px">
+        ${showBL?`<span style="font-size:8px;color:var(--text-muted)">BL</span>${cvHtml}`:'<span style="font-size:9px;color:var(--text-muted)">—</span>'}
+      </div>
     </div>`;
+    currentY+=PROJ_H;
 
-    // All tasks for this project
     if(!pt.length){
       rows+=`<div style="display:flex;border-bottom:1px solid var(--border)">
         <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:5px 10px 5px 26px;font-size:10px;color:var(--text-muted);border-right:1px solid var(--border);font-style:italic">No tasks match filter</div>
         <div style="flex:1;height:28px;position:relative">${todayLine}</div>
-        <div style="width:161px;min-width:161px;border-left:1px solid var(--border)"></div>
+        <div style="width:${161+SV_W}px;min-width:${161+SV_W}px;border-left:1px solid var(--border)"></div>
       </div>`;
+      currentY+=28;
     }
 
     pt.forEach(t=>{
-      const ts=t.startDate||p.startDate||minDate;
-      const te=t.dueDate||t.endDate||p.endDate||maxDate;
-      const tc=scColor[t.status]||'#8b949e';
-      const overdue=isOverdue(te)&&t.status!=='done';
+      const cpm=cpmMap.get(t.id);
+      const isCrit=cpm?._isCritical||false;
+      const tf=cpm?._TF||0;
+
+      const ts=(cpm?._ES)||t.startDate||p.startDate||minDate;
+      const te=(cpm?._EF)||t.dueDate||t.endDate||p.endDate||maxDate;
+      const tsStr=typeof ts==='object'?ts.toISOString().split('T')[0]:ts;
+      const teStr=typeof te==='object'?te.toISOString().split('T')[0]:te;
+      const lfStr=cpm?._LF?(typeof cpm._LF==='object'?cpm._LF.toISOString().split('T')[0]:cpm._LF):null;
+
+      const tc=isCrit?'#f85149':(scColor[t.status]||'#8b949e');
+      const overdue=isOverdue(teStr)&&t.status!=='done';
       const isMile=!!t.milestone;
+
+      // Baseline ghost bar
+      const blTask=showBL?SHICBaseline.getBaselineTask(p.id,t.id):null;
+      let ghostBar='';
+      let svHtml='<span style="font-size:9px;color:var(--text-muted)">—</span>';
+
+      if(blTask&&blTask.startDate&&blTask.endDate){
+        const bls=blTask.startDate;
+        const ble=blTask.endDate;
+        ghostBar=`<div style="position:absolute;left:${pct(bls)}%;width:${wPct(bls,ble)}%;min-width:3px;top:5px;height:20px;background:rgba(139,148,158,.15);border:1.5px dashed rgba(139,148,158,.5);border-radius:3px;pointer-events:none" title="Baseline: ${bls} → ${ble}"></div>`;
+
+        // SV: positive = finishing earlier than baseline (ahead), negative = behind
+        const sv=SHICBaseline.calcSV(teStr,ble);
+        if(sv!==null){
+          const svColor=sv>=0?'#3fb950':'#f85149';
+          const svSign=sv>=0?'+':'';
+          svHtml=`<span style="font-size:10px;font-weight:700;color:${svColor}" title="Schedule Variance: ${svSign}${sv} days vs baseline">${svSign}${sv}d</span>`;
+        }
+      }
+
+      const rowCenterY=currentY+TASK_H/2;
+      const leftX=pct(tsStr)*10;
+      const rightX=Math.min(1000,(pct(tsStr)+wPct(tsStr,teStr))*10);
+      taskPos.set(t.id,{leftX,rightX,y:rowCenterY});
       totalTasksShown++;
 
       let bar='';
       if(isMile){
-        bar=`<div style="position:absolute;left:calc(${pct(ts)}% - 9px);top:4px;width:18px;height:18px;background:var(--accent-amber);border-radius:2px;transform:rotate(45deg)" title="Milestone: ${t.name}"></div>`;
+        bar=`${ghostBar}<div style="position:absolute;left:calc(${pct(tsStr)}% - 9px);top:4px;width:18px;height:18px;background:${isCrit?'#f85149':'var(--accent-amber)'};border-radius:2px;transform:rotate(45deg)" title="Milestone: ${t.name}"></div>`;
       }else{
-        const lft=pct(ts);
-        const wdt=wPct(ts,te);
+        const lft=pct(tsStr);
+        const wdt=wPct(tsStr,teStr);
         const progW=t.status==='done'?wdt:Math.min(wdt,wdt*((t.progress||0)/100));
+        const floatBar=(tf>0&&lfStr&&lfStr>teStr)?`<div style="position:absolute;left:${pct(teStr)}%;width:${wPct(teStr,lfStr)}%;min-width:2px;top:9px;height:12px;background:rgba(139,148,158,.25);border:1px dashed rgba(139,148,158,.4);border-radius:0 3px 3px 0" title="Float: ${tf.toFixed(1)} working days"></div>`:'';
         bar=`
+          ${ghostBar}
+          ${floatBar}
           <div style="position:absolute;left:${lft}%;width:${wdt}%;min-width:4px;top:7px;height:16px;background:${tc}33;border-radius:3px;border:1px solid ${tc}77"></div>
           ${progW>0?`<div style="position:absolute;left:${lft}%;width:${progW}%;min-width:4px;top:7px;height:16px;background:${tc};border-radius:3px;overflow:hidden;display:flex;align-items:center;padding:0 4px">
             <span style="font-size:8px;color:#fff;white-space:nowrap;overflow:hidden">${t.name}</span>
@@ -10912,32 +11459,92 @@ function renderGantt(){
           ${overdue?`<div style="position:absolute;left:calc(${lft+wdt}% + 2px);top:7px;font-size:9px;color:var(--accent-red)">⚠</div>`:''}`;
       }
 
-      rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${t.name} [${t.status}]">
+      const predCount=(window.SHICCPMEngine&&t.predecessors)?SHICCPMEngine.parsePredecessors(t.predecessors).length:0;
+
+      rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${t.name} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0?' — Float: '+tf.toFixed(1)+'d':''}">
         <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:4px 10px 4px 26px;border-right:1px solid var(--border);overflow:hidden">
           <div style="display:flex;align-items:center;gap:5px">
-            <i class="fas ${isMile?'fa-diamond':'fa-circle'}" style="color:${isMile?'var(--accent-amber)':tc};font-size:${isMile?'9':'5'}px;flex-shrink:0"></i>
-            <span style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${overdue?'var(--accent-red)':'inherit'}">${t.name}</span>
+            <i class="fas ${isMile?'fa-diamond':'fa-circle'}" style="color:${isMile?(isCrit?'#f85149':'var(--accent-amber)'):tc};font-size:${isMile?'9':'5'}px;flex-shrink:0"></i>
+            <span style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${isCrit?'var(--accent-red)':overdue?'var(--accent-red)':'inherit'};font-weight:${isCrit?'600':'400'}">${t.name}</span>
+            ${isCrit?`<span style="flex-shrink:0;width:6px;height:6px;background:var(--accent-red);border-radius:50%" title="Critical Path"></span>`:''}
           </div>
-          ${t.assignee?`<div style="font-size:9px;color:var(--text-muted);padding-left:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.assignee}</div>`:''}
+          <div style="display:flex;gap:4px;align-items:center;padding-left:14px">
+            ${t.assignee?`<span style="font-size:9px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px">${t.assignee}</span>`:''}
+            ${predCount>0?`<span style="font-size:8px;color:var(--accent-cyan);flex-shrink:0"><i class="fas fa-link"></i> ${predCount}</span>`:''}
+          </div>
         </div>
-        <div style="flex:1;position:relative;height:30px;min-width:0">
+        <div style="flex:1;position:relative;height:${TASK_H}px;min-width:0">
           ${todayLine}${bar}
         </div>
         <div style="width:86px;min-width:86px;padding:4px 8px;font-size:9px;font-family:var(--font-mono);border-left:1px solid var(--border);color:${overdue?'var(--accent-red)':'var(--text-secondary)'};line-height:1.5">
-          <div>${ts}</div><div>${te}</div>
+          <div>${tsStr}</div><div>${teStr}</div>
         </div>
         <div style="width:75px;min-width:75px;padding:4px 6px;border-left:1px solid var(--border)">
           <span class="badge" style="background:${tc}22;color:${tc};font-size:9px">${t.status}</span>
           ${t.priority==='critical'?`<span class="badge badge-red" style="font-size:8px;margin-left:2px">!</span>`:''}
         </div>
+        <div style="width:${SV_W}px;min-width:${SV_W}px;padding:4px;border-left:1px solid var(--border);display:flex;align-items:center;justify-content:center">${svHtml}</div>
       </div>`;
+      currentY+=TASK_H;
     });
   });
 
-  // Month header HTML
+  const totalRowsH=currentY;
+
+  // ── Dependency Arrows SVG ─────────────────────────────────────
+  let arrowsSvg='';
+  if(window.SHICCPMEngine&&taskPos.size>0){
+    let defs=`<defs>
+      <marker id="gArr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#8b949e"/></marker>
+      <marker id="rArr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#f85149"/></marker>
+    </defs>`;
+    let paths='';
+
+    const viewTasks=filteredProjects.flatMap(p=>tasks.filter(t=>t.projectId===p.id&&(ganttStatusFilter==='all'||t.status===ganttStatusFilter)));
+
+    viewTasks.forEach(t=>{
+      if(!t.predecessors)return;
+      const preds=SHICCPMEngine.parsePredecessors(t.predecessors);
+      const succPos=taskPos.get(t.id);
+      if(!succPos)return;
+
+      preds.forEach(pr=>{
+        const predPos=taskPos.get(pr.id);
+        if(!predPos)return;
+
+        let sx,sy,ex,ey;
+        switch(pr.type){
+          case 'SS': sx=predPos.leftX;  sy=predPos.y; ex=succPos.leftX;  ey=succPos.y; break;
+          case 'FF': sx=predPos.rightX; sy=predPos.y; ex=succPos.rightX; ey=succPos.y; break;
+          case 'SF': sx=predPos.leftX;  sy=predPos.y; ex=succPos.rightX; ey=succPos.y; break;
+          default:   sx=predPos.rightX; sy=predPos.y; ex=succPos.leftX;  ey=succPos.y;
+        }
+
+        const predCrit=cpmMap.get(pr.id)?._isCritical;
+        const succCrit=cpmMap.get(t.id)?._isCritical;
+        const isCritArrow=predCrit&&succCrit;
+        const color=isCritArrow?'#f85149':'#8b949e';
+        const marker=isCritArrow?'url(#rArr)':'url(#gArr)';
+
+        const mx=(sx+ex)/2;
+        paths+=`<path d="M${sx.toFixed(1)},${sy.toFixed(1)} H${mx.toFixed(1)} V${ey.toFixed(1)} H${ex.toFixed(1)}"
+          stroke="${color}" stroke-width="1.5" fill="none" opacity="0.75" stroke-dasharray="5,3"
+          marker-end="${marker}"/>`;
+      });
+    });
+
+    if(paths){
+      arrowsSvg=`<svg style="position:absolute;top:0;left:${LABEL_W}px;width:calc(100% - ${LABEL_W+161+SV_W}px);height:${totalRowsH}px;pointer-events:none;overflow:visible"
+        viewBox="0 0 1000 ${totalRowsH}" preserveAspectRatio="none">
+        ${defs}${paths}
+      </svg>`;
+    }
+  }
+
+  // ── Month Header HTML ─────────────────────────────────────────
   const monthHeader=`<div style="display:flex;position:sticky;top:0;z-index:8;background:var(--bg-hover);border-bottom:2px solid var(--border)">
     <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:8px 10px;font-size:11px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border)">Activity</div>
-    <div style="flex:1;position:relative;height:34px;min-width:0;overflow:hidden">
+    <div style="flex:1;position:relative;height:${HEADER_H}px;min-width:0;overflow:hidden">
       ${months.map(m=>`<div style="position:absolute;left:${m.l}%;width:${m.w}%;height:100%;border-left:1px solid var(--border);display:flex;align-items:center;padding:0 6px;overflow:hidden;box-sizing:border-box">
         <span style="font-size:10px;font-weight:700;white-space:nowrap">${m.label}</span>
       </div>`).join('')}
@@ -10945,29 +11552,44 @@ function renderGantt(){
     </div>
     <div style="width:86px;min-width:86px;padding:8px 8px;font-size:9px;font-weight:700;color:var(--text-secondary);border-left:1px solid var(--border)">START/END</div>
     <div style="width:75px;min-width:75px;padding:8px 6px;font-size:9px;font-weight:700;color:var(--text-secondary);border-left:1px solid var(--border)">STATUS</div>
+    <div style="width:${SV_W}px;min-width:${SV_W}px;padding:8px 4px;font-size:9px;font-weight:700;color:var(--text-secondary);border-left:1px solid var(--border);text-align:center">SV</div>
   </div>`;
 
   const totalTaskCount=tasks.filter(t=>ganttProjFilter==='all'||t.projectId===ganttProjFilter).length;
+  const critCount=[...cpmMap.values()].filter(t=>t._isCritical).length;
+
+  // Check if any filtered project has a baseline set
+  const anyBaseline=hasBL&&filteredProjects.some(p=>(p.baselines||[]).length>0);
+
+  const cycleBanner=cycleErrors.length?`<div style="background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.4);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--accent-red)">
+    <i class="fas fa-exclamation-triangle" style="margin-right:7px"></i><strong>Circular Dependency Detected</strong>
+    ${cycleErrors.map(e=>`<div style="margin-top:4px;font-size:11px;color:var(--text-secondary)">${e.project}: ${e.msg}</div>`).join('')}
+    <div style="margin-top:6px;font-size:11px">Fix the predecessor links in the affected tasks to continue CPM scheduling.</div>
+  </div>`:'';
 
   $('#gantt').innerHTML=`
   <div class="section-header" style="margin-bottom:14px">
     <div>
-      <div class="section-title">Gantt Chart</div>
-      <div class="section-sub">${totalTasksShown} tasks shown (${totalTaskCount} total) across ${filteredProjects.length} project(s)</div>
+      <div class="section-title">Gantt Chart ${window.SHICCPMEngine?'<span style="font-size:10px;font-weight:400;color:var(--accent-cyan);margin-left:6px"><i class="fas fa-project-diagram"></i> CPM Active</span>':''}</div>
+      <div class="section-sub">${totalTasksShown} tasks shown (${totalTaskCount} total) · ${critCount>0?`<span style="color:var(--accent-red);font-weight:600">${critCount} critical</span> · `:''}${filteredProjects.length} project(s)</div>
     </div>
-    <button class="btn btn-primary btn-sm" onclick="showTaskForm()"><i class="fas fa-plus"></i> Add Task</button>
+    <div style="display:flex;gap:6px">
+      ${hasBL?`<button class="btn btn-secondary btn-sm" onclick="showBaselineManager()" title="Manage baselines"><i class="fas fa-layer-group"></i> Baselines</button>`:''}
+      <button class="btn btn-secondary btn-sm" onclick="exportGanttPDF(ganttProjFilter)" title="Export Gantt to PDF (SY3-F-EPD-002 format)"><i class="fas fa-file-pdf" style="color:#f85149"></i> Export PDF</button>
+      <button class="btn btn-primary btn-sm" onclick="showTaskForm()"><i class="fas fa-plus"></i> Add Task</button>
+    </div>
   </div>
+
+  ${cycleBanner}
 
   <!-- Timeline controls -->
   <div class="card" style="padding:10px 14px;margin-bottom:12px">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:11px;color:var(--text-secondary);font-weight:600">Date Range:</span>
-        <input type="date" class="form-input" style="height:28px;width:130px;font-size:11px" value="${ganttFrom||effFrom}"
-          onchange="ganttFrom=this.value;renderGantt()">
+        <input type="date" class="form-input" style="height:28px;width:130px;font-size:11px" value="${ganttFrom||effFrom}" onchange="ganttFrom=this.value;renderGantt()">
         <span style="font-size:11px;color:var(--text-muted)">→</span>
-        <input type="date" class="form-input" style="height:28px;width:130px;font-size:11px" value="${ganttTo||effTo}"
-          onchange="ganttTo=this.value;renderGantt()">
+        <input type="date" class="form-input" style="height:28px;width:130px;font-size:11px" value="${ganttTo||effTo}" onchange="ganttTo=this.value;renderGantt()">
         <button class="btn btn-secondary btn-sm" onclick="ganttFrom='';ganttTo='';renderGantt()" title="Reset to auto range"><i class="fas fa-undo"></i> Auto</button>
       </div>
       <div style="display:flex;align-items:center;gap:6px">
@@ -10984,6 +11606,12 @@ function renderGantt(){
           ${['todo','in-progress','inprogress','done','on-hold','blocked'].map(s=>`<option value="${s}" ${ganttStatusFilter===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
+      ${anyBaseline?`<div style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" ${_ganttShowBaseline?'checked':''} onchange="_ganttShowBaseline=this.checked;renderGantt()" style="accent-color:var(--accent-cyan)">
+          Show Baseline
+        </label>
+      </div>`:''}
       <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
         <button class="btn btn-secondary btn-sm" onclick="ganttQuickRange(3)" title="Last 3 months">3M</button>
         <button class="btn btn-secondary btn-sm" onclick="ganttQuickRange(6)" title="Last 6 months">6M</button>
@@ -10992,21 +11620,24 @@ function renderGantt(){
       </div>
     </div>
     <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-      ${[['#388bfd','In Progress'],['#3fb950','Done'],['#8b949e','Todo'],['#f85149','Overdue ⚠'],['#f0a450','On Hold'],['var(--accent-amber)','Milestone ◆']].map(([c,l])=>`<div style="display:flex;align-items:center;gap:4px"><div style="width:14px;height:8px;background:${c};border-radius:2px"></div><span style="font-size:10px">${l}</span></div>`).join('')}
+      ${[['#388bfd','In Progress'],['#3fb950','Done'],['#8b949e','Todo'],['#f85149','Critical / Overdue ⚠'],['#f0a450','On Hold'],['var(--accent-amber)','Milestone ◆'],['rgba(139,148,158,.3)','Float'],['rgba(139,148,158,.15)','Baseline ┄']].map(([c,l])=>`<div style="display:flex;align-items:center;gap:4px"><div style="width:14px;height:8px;background:${c};border-radius:2px;border:1.5px dashed ${c.includes('rgba')||c==='rgba(139,148,158,.15)'?'#8b949e':'transparent'}"></div><span style="font-size:10px">${l}</span></div>`).join('')}
       ${todayPct>0&&todayPct<100?`<div style="display:flex;align-items:center;gap:4px"><div style="width:2px;height:14px;background:var(--accent-red)"></div><span style="font-size:10px">Today: ${today}</span></div>`:''}
     </div>
   </div>
 
   <div class="card" style="padding:0;overflow:hidden">
     <div style="overflow-x:auto;overflow-y:auto;max-height:75vh">
-      <div style="min-width:700px">
+      <div style="min-width:700px;position:relative">
         ${monthHeader}
-        ${rows}
+        <div style="position:relative">
+          ${rows}
+          ${arrowsSvg}
+        </div>
       </div>
     </div>
     <div style="padding:7px 14px;font-size:10px;color:var(--text-secondary);border-top:1px solid var(--border);display:flex;justify-content:space-between">
       <span>Timeline: ${minDate} → ${maxDate} (${totalDays} days)</span>
-      <span>${totalTasksShown} tasks displayed</span>
+      <span>${totalTasksShown} tasks displayed${anyBaseline&&_ganttShowBaseline?' · <span style="color:var(--accent-cyan)">Baseline active</span>':''}</span>
     </div>
   </div>`;
 }
@@ -11020,142 +11651,455 @@ function ganttQuickRange(months){
   renderGantt();
 }
 
+// ── Baseline Manager Modal ────────────────────────────────────
+function showBaselineManager(){
+  if(!window.SHICBaseline)return;
+  const projects=AppState.data.projects||[];
+  const target=ganttProjFilter!=='all'?projects.filter(p=>p.id===ganttProjFilter):projects;
 
+  const projectRows=target.map(p=>{
+    const bls=p.baselines||[];
+    const blList=bls.length?bls.map(bl=>{
+      const isActive=p.activeBaseline===bl.id;
+      return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:${isActive?'rgba(56,139,253,.08)':'var(--bg-primary)'};border-radius:6px;border:1px solid ${isActive?'rgba(56,139,253,.3)':'var(--border)'};margin-bottom:5px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600;color:var(--text-primary)">${bl.name}</div>
+          <div style="font-size:10px;color:var(--text-muted)">${bl.createdAt}${bl.createdBy?' · '+bl.createdBy:''} · ${bl.tasks.length} tasks</div>
+        </div>
+        ${isActive?`<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:10px;background:rgba(56,139,253,.15);color:#79c0ff">Active</span>`:`<button class="btn btn-secondary btn-sm" onclick="_blSetActive('${p.id}','${bl.id}')" style="font-size:10px;padding:3px 8px">Set Active</button>`}
+        <button class="btn btn-danger btn-sm" onclick="_blDelete('${p.id}','${bl.id}')" style="font-size:10px;padding:3px 8px" title="Delete baseline"><i class="fas fa-trash"></i></button>
+      </div>`;
+    }).join(''):`<div style="font-size:11px;color:var(--text-muted);padding:8px 0;font-style:italic">No baselines yet.</div>`;
 
+    const canAdd=bls.length<SHICBaseline.MAX_BASELINES;
 
-let resTab='personnel';
+    return `<div style="margin-bottom:16px">
+      <div style="font-size:12px;font-weight:700;color:var(--accent-blue);margin-bottom:8px"><i class="fas fa-folder" style="margin-right:5px"></i>${p.id} — ${p.name}</div>
+      ${blList}
+      ${canAdd?`<div style="display:flex;gap:6px;margin-top:6px">
+        <input class="form-input" id="blName_${p.id}" placeholder="Baseline name (e.g. Rev-0)" style="height:30px;font-size:11px;flex:1">
+        <button class="btn btn-primary btn-sm" onclick="_blCreate('${p.id}')" style="font-size:11px;white-space:nowrap"><i class="fas fa-plus"></i> Set Baseline</button>
+      </div>`:`<div style="font-size:10px;color:var(--accent-amber);margin-top:4px"><i class="fas fa-info-circle"></i> Max ${SHICBaseline.MAX_BASELINES} baselines reached. Delete one to add a new baseline.</div>`}
+    </div>`;
+  }).join('<hr style="border-color:var(--border);margin:12px 0">');
 
-// ── Sync Resource status from active allocations ──────────────────────────
-function _syncResourceStatuses(){
-  AppState.ensureData();
-  const allocs=AppState.data.resourceAllocations||[];
-  const activeAllocs=allocs.filter(a=>a.status==='active'||a.status==='planned');
+  $('#genericModalTitle').textContent='Baseline Manager';
+  $('#genericModalBody').innerHTML=`
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;line-height:1.6">
+      A baseline captures the current planned dates for all tasks. Once set, ghost bars appear on the Gantt and the <strong>SV</strong> column shows schedule variance per task.
+    </div>
+    ${projectRows}
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>
+    </div>`;
+  openModal('genericModal');
+}
 
-  // Build map: resourceId → [projectIds]
-  const allocMap={};
-  activeAllocs.forEach(a=>{
-    if(!allocMap[a.resourceId])allocMap[a.resourceId]=[];
-    if(!allocMap[a.resourceId].includes(a.projectId))
-      allocMap[a.resourceId].push(a.projectId);
+function _blCreate(projectId){
+  const nameEl=document.getElementById('blName_'+projectId);
+  const name=(nameEl?.value||'').trim()||null;
+  const result=SHICBaseline.setBaseline(projectId,name);
+  if(!result.ok){showToast(result.msg,'error');return;}
+  showToast('Baseline set: '+result.baseline.name,'success');
+  showBaselineManager();
+  renderGantt();
+}
+
+function _blDelete(projectId,baselineId){
+  if(!confirm('Delete this baseline? This cannot be undone.'))return;
+  SHICBaseline.deleteBaseline(projectId,baselineId);
+  showToast('Baseline deleted','success');
+  showBaselineManager();
+  renderGantt();
+}
+
+function _blSetActive(projectId,baselineId){
+  SHICBaseline.setActiveBaseline(projectId,baselineId);
+  showToast('Active baseline updated','success');
+  showBaselineManager();
+  renderGantt();
+}
+
+</script>
+<script>
+// ── SHIC Gantt PDF Export  (SY3-F-EPD-002 format) ────────────
+(function(){
+
+function _wbsDepth(wbs){
+  if(!wbs||typeof wbs!=='string')return 0;
+  return(wbs.match(/\./g)||[]).length;
+}
+function _fmtDate(d){
+  if(!d)return'';
+  const dt=new Date(d);
+  if(isNaN(dt))return d;
+  return`${dt.getMonth()+1}/${dt.getDate()}/${String(dt.getFullYear()).slice(-2)}`;
+}
+function _durDays(startDate,endDate,durationHrs,hpd){
+  if(durationHrs>0)return+(durationHrs/(hpd||8)).toFixed(1);
+  if(startDate&&endDate)return Math.max(1,Math.round((new Date(endDate)-new Date(startDate))/86400000)+1);
+  return 1;
+}
+
+function _loadJsPDF(){
+  return new Promise((res,rej)=>{
+    if(window.jspdf){res();return;}
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    s.onload=res;s.onerror=rej;
+    document.head.appendChild(s);
   });
-  window._resourceAllocMap=allocMap; // cache for rendering
+}
 
-  // Update resource statuses based on active allocations
-  let changed=false;
-  ['resources','equipment','tools','vehicles'].forEach(key=>{
-    (AppState.data[key]||[]).forEach(r=>{
-      const projects=allocMap[r.id]||[];
-      if(projects.length>0&&r.status==='available'){
-        r.status='in-use';
-        r._allocatedTo=projects;
-        changed=true;
-      }else if(projects.length===0&&r._allocatedTo&&r._allocatedTo.length>0){
-        r.status='available';
-        r._allocatedTo=[];
-        changed=true;
-      }
-      if(projects.length>0)r._allocatedTo=projects;
+async function exportGanttPDF(projectId){
+  showToast('Preparing PDF…','info');
+  try{ await _loadJsPDF(); }
+  catch(e){ showToast('Failed to load PDF library. Check internet connection.','error'); return; }
+
+  const {jsPDF}=window.jspdf;
+  const allProjects=AppState.data.projects||[];
+  const allTasks=AppState.data.tasks||[];
+
+  const filter=projectId||(typeof ganttProjFilter!=='undefined'?ganttProjFilter:'all');
+  const targets=filter==='all'?allProjects:allProjects.filter(p=>p.id===filter);
+  if(!targets.length){showToast('No projects to export','error');return;}
+
+  // ── Page constants (landscape A4) ─────────────────────────
+  const PW=297,PH=210;
+  const ML=8,MR=8,MT=8,MB=13;
+  const CW=PW-ML-MR;
+
+  // Table column widths (mm)
+  const C_ID=10,C_NAME=82,C_DUR=18,C_START=21,C_FINISH=21,C_PCT=14;
+  const TABLE_W=C_ID+C_NAME+C_DUR+C_START+C_FINISH+C_PCT;
+  const GANTT_X=ML+TABLE_W+1;
+  const GANTT_W=CW-TABLE_W-1;
+
+  const DOC_H=20;   // letterhead height
+  const MH_H=6;     // month header row
+  const WK_H=5;     // week header row
+  const ROW_H=5.8;
+  const FOOTER_H=10;
+  const USABLE=PH-MT-MB-DOC_H-MH_H-WK_H-FOOTER_H;
+  const RPP=Math.floor(USABLE/ROW_H);
+
+  // Colours
+  const BLU=[56,139,253],GRN=[63,185,80],RED=[248,81,73];
+  const AMB=[240,164,80],GRY=[139,148,158];
+  const NAVY=[15,20,35],BORDER=[185,190,198];
+  const LTBG=[247,248,250],PROJBG=[232,240,252];
+  const HBGD=[28,38,58],HBGL=[38,50,72];
+  const WHITE=[255,255,255],TEXT=[28,34,44],TMUT=[105,115,130];
+
+  const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+  let pageSeq=1;
+  let firstProject=true;
+
+  // Arrow head helper (draws small filled triangle pointing right)
+  function _arrowHead(x,y,color){
+    doc.setFillColor(...color);
+    doc.triangle(x,y-1,x,y+1,x+1.8,y,'F');
+  }
+
+  targets.forEach(project=>{
+    const tasks=allTasks.filter(t=>t.projectId===project.id&&!t._deleted);
+    const hpd=project.calendar?.hoursPerDay||8;
+
+    // Build rows
+    const rows=[];
+    rows.push({type:'proj',d:project,depth:0});
+    const sorted=[...tasks].sort((a,b)=>{
+      if(a.wbs&&b.wbs)return a.wbs.localeCompare(b.wbs,undefined,{numeric:true});
+      return(a.startDate||'').localeCompare(b.startDate||'');
     });
-  });
-  if(changed) AppState.save();
-}
+    sorted.forEach(t=>rows.push({type:'task',d:t,depth:_wbsDepth(t.wbs)}));
 
-// ── Sync Procurement → allocated materials in projects ─────────────────────
-function _syncProcurementAllocations(){
-  AppState.ensureData();
-  if(!AppState.data.resourceAllocations)AppState.data.resourceAllocations=[];
+    // Date range
+    const allD=[project.startDate,project.endDate,...tasks.flatMap(t=>[t.startDate,t.endDate||t.dueDate])].filter(d=>d&&/^\d{4}/.test(d));
+    if(!allD.length)return;
+    const dMin=allD.reduce((a,b)=>a<b?a:b);
+    const dMax=allD.reduce((a,b)=>a>b?a:b);
+    const rStart=new Date(dMin);rStart.setDate(1);
+    const rEnd=new Date(dMax);rEnd.setDate(rEnd.getDate()+18);
+    const totalMs=rEnd-rStart;
 
-  const mats=AppState.data.materials||[];
-  let changed=false;
+    const xPct=ds=>{if(!ds)return 0;return Math.max(0,Math.min(1,(new Date(ds)-rStart)/totalMs));};
+    const todayPct=xPct(new Date().toISOString().split('T')[0]);
 
-  mats.forEach(m=>{
-    if(!m.projectId||m.projectId==='N/A')return;
-    // Check if an allocation record already exists for this material+project
-    const exists=AppState.data.resourceAllocations.some(a=>
-      a.resourceId===m.id&&a.projectId===m.projectId&&a.resourceType==='Material'
-    );
-    if(!exists){
-      const alloc={
-        id:'RA-MAT-'+m.id+'-'+m.projectId,
-        projectId:m.projectId,
-        resourceId:m.id,
-        resourceName:m.name,
-        resourceType:'Material',
-        unit:m.unit||'unit',
-        allocatedQty:m.qty||0,
-        plannedCost:(m.qty||0)*(m.unitCost||0),
-        actualCost:0,
-        status:m.status==='delivered'?'active':'planned',
-        role:m.category||'Material',
-        week:'',
-        notes:'Auto-synced from Materials',
-        _autoSynced:true
-      };
-      AppState.data.resourceAllocations.push(alloc);
-      changed=true;
-    }else{
-      // Update qty/cost if material changed
-      const a=AppState.data.resourceAllocations.find(a=>
-        a.resourceId===m.id&&a.projectId===m.projectId&&a.resourceType==='Material'
-      );
-      if(a&&(a.allocatedQty!==m.qty||a.plannedCost!==(m.qty||0)*(m.unitCost||0))){
-        a.allocatedQty=m.qty||0;
-        a.plannedCost=(m.qty||0)*(m.unitCost||0);
-        a.status=m.status==='delivered'?'active':'planned';
-        changed=true;
+    const months=[];
+    {const c=new Date(rStart);while(c<=rEnd){months.push({dt:new Date(c),p:xPct(c.toISOString().split('T')[0])});c.setMonth(c.getMonth()+1);}}
+    const weeks=[];
+    {const c=new Date(rStart);while(c<=rEnd){weeks.push({day:c.getDate(),p:xPct(c.toISOString().split('T')[0])});c.setDate(c.getDate()+7);}}
+
+    // ── Paginate ───────────────────────────────────────────────
+    let ri=0,localPg=0;
+    while(ri<rows.length){
+      if(!firstProject||localPg>0){doc.addPage();pageSeq++;}
+      firstProject=false;
+
+      const Y0=MT;
+
+      // ── Letterhead (no logo) ───────────────────────────────
+      doc.setFillColor(...WHITE);
+      doc.rect(ML,Y0,CW,DOC_H,'F');
+
+      // Center: JO # + title
+      doc.setFont('helvetica','bold');doc.setFontSize(9);
+      doc.setTextColor(...NAVY);
+      doc.text(project.id||'',PW/2,Y0+7,{align:'center'});
+      doc.setFontSize(8);
+      const titleLines=doc.splitTextToSize((project.name||'').toUpperCase(),140);
+      doc.text(titleLines[0]||'',PW/2,Y0+13,{align:'center'});
+      if(titleLines[1])doc.text(titleLines[1],PW/2,Y0+18,{align:'center'});
+
+      // Right: form ref + address
+      const rx=ML+CW;
+      doc.setFont('helvetica','bold');doc.setFontSize(7.5);
+      doc.setTextColor(...NAVY);
+      doc.text('SY3-F-EPD-002',rx,Y0+5,{align:'right'});
+      doc.setFont('helvetica','normal');doc.setFontSize(6);
+      doc.text('REV.01/04-10-2022',rx,Y0+9,{align:'right'});
+      doc.setFontSize(5.8);doc.setTextColor(...TMUT);
+      doc.text('153 Arnaldo Highway, Barangay Santiago, General Trias, Cavite, Philippines',rx,Y0+13.5,{align:'right'});
+      doc.text('Tel. No.: (046) 683-7580 • (046) 683-7581  TeleFax No.: 046 412-5513',rx,Y0+17.5,{align:'right'});
+
+      // Letterhead border
+      doc.setDrawColor(...BORDER);doc.setLineWidth(0.3);
+      doc.rect(ML,Y0,CW,DOC_H,'S');
+
+      // ── Column + Timeline Headers ──────────────────────────
+      const CHY=Y0+DOC_H;
+
+      doc.setFillColor(...HBGD);
+      doc.rect(ML,CHY,TABLE_W,MH_H+WK_H,'F');
+
+      doc.setFont('helvetica','bold');doc.setFontSize(6.5);
+      doc.setTextColor(...WHITE);
+      const cols=[['ID',C_ID],['Task Name',C_NAME],['Duration',C_DUR],['Start',C_START],['Finish',C_FINISH],['% Complete',C_PCT]];
+      let cx=ML;
+      cols.forEach(([lbl,w])=>{
+        doc.text(lbl,cx+w/2,CHY+(MH_H+WK_H)/2+1.5,{align:'center'});
+        cx+=w;
+      });
+
+      // Gantt timeline bg
+      doc.setFillColor(...HBGD);doc.rect(GANTT_X,CHY,GANTT_W,MH_H,'F');
+      doc.setFillColor(...HBGL);doc.rect(GANTT_X,CHY+MH_H,GANTT_W,WK_H,'F');
+
+      // Month labels
+      doc.setFont('helvetica','bold');doc.setFontSize(6.5);doc.setTextColor(...WHITE);
+      for(let mi=0;mi<months.length-1;mi++){
+        const m=months[mi],mn=months[mi+1];
+        const mx=GANTT_X+m.p*GANTT_W;
+        const mw=(mn.p-m.p)*GANTT_W;
+        if(mw<4)continue;
+        const lbl=m.dt.toLocaleString('en',{month:'short'})+' \''+String(m.dt.getFullYear()).slice(-2);
+        doc.text(lbl,mx+mw/2,CHY+MH_H-1.5,{align:'center'});
+        doc.setDrawColor(70,90,120);doc.setLineWidth(0.15);
+        doc.line(mx,CHY,mx,CHY+MH_H+WK_H);
       }
+
+      // Week day ticks
+      doc.setFont('helvetica','normal');doc.setFontSize(4.5);doc.setTextColor(195,210,230);
+      weeks.forEach(w=>{
+        const wx=GANTT_X+w.p*GANTT_W;
+        doc.setDrawColor(75,95,125);doc.setLineWidth(0.1);
+        doc.line(wx,CHY+MH_H,wx,CHY+MH_H+WK_H);
+        if(wx>GANTT_X+1)doc.text(String(w.day),wx+0.5,CHY+MH_H+WK_H-1);
+      });
+
+      // ── Task Rows + collect bar positions for arrows ───────
+      const firstRowY=CHY+MH_H+WK_H;
+      const rowsThisPage=Math.min(RPP,rows.length-ri);
+
+      // barPos: taskId → {lx (left x), rx (right x), cy (center y)}
+      const barPos=new Map();
+
+      for(let i=0;i<rowsThisPage;i++){
+        const row=rows[ri+i];
+        const ry=firstRowY+i*ROW_H;
+        const isProj=row.type==='proj';
+        const t=row.d;
+
+        // Row bg
+        if(isProj){
+          doc.setFillColor(...PROJBG);doc.rect(ML,ry,CW,ROW_H,'F');
+        }else if(i%2===0){
+          doc.setFillColor(...LTBG);doc.rect(ML,ry,CW,ROW_H,'F');
+        }
+
+        const midY=ry+ROW_H-1.8;
+
+        // ID
+        if(!isProj){
+          doc.setFont('helvetica','normal');doc.setFontSize(5.8);doc.setTextColor(...TMUT);
+          doc.text(t.wbs||String(t.id||''),ML+C_ID-1,midY,{align:'right'});
+        }
+
+        // Name
+        const indent=isProj?0:Math.min(row.depth,3)*3;
+        const nameMaxW=C_NAME-indent-2;
+        if(isProj||row.depth===0){
+          doc.setFont('helvetica','bold');doc.setFontSize(isProj?7:6.5);doc.setTextColor(...NAVY);
+        }else{
+          doc.setFont('helvetica','normal');doc.setFontSize(6);doc.setTextColor(...TEXT);
+        }
+        doc.text(doc.splitTextToSize(t.name||'',nameMaxW)[0]||'',ML+C_ID+indent,midY);
+
+        if(!isProj){
+          doc.setFont('helvetica','normal');doc.setFontSize(6);doc.setTextColor(...TEXT);
+          const dur=_durDays(t.startDate,t.endDate||t.dueDate,t.durationHrs,hpd);
+          doc.text(`${dur} days`,ML+C_ID+C_NAME+C_DUR-1,midY,{align:'right'});
+          doc.text(_fmtDate(t.startDate),ML+C_ID+C_NAME+C_DUR+C_START/2,midY,{align:'center'});
+          doc.text(_fmtDate(t.endDate||t.dueDate||''),ML+C_ID+C_NAME+C_DUR+C_START+C_FINISH/2,midY,{align:'center'});
+          const pct=t.progress||0;
+          doc.setFont('helvetica','bold');
+          doc.setTextColor(pct>=100?GRN[0]:pct>0?BLU[0]:TMUT[0],pct>=100?GRN[1]:pct>0?BLU[1]:TMUT[1],pct>=100?GRN[2]:pct>0?BLU[2]:TMUT[2]);
+          doc.text(`${pct}%`,ML+C_ID+C_NAME+C_DUR+C_START+C_FINISH+C_PCT/2,midY,{align:'center'});
+        }
+
+        // Gantt bar
+        const s=t.startDate;
+        const e=isProj?t.endDate:(t.endDate||t.dueDate);
+        if(s&&e){
+          const bx=GANTT_X+xPct(s)*GANTT_W;
+          const bx2=GANTT_X+xPct(e)*GANTT_W;
+          const bw=Math.max(1.5,bx2-bx);
+          const BH=isProj?3.2:2.6;
+          const by=ry+(ROW_H-BH)/2;
+          const cy=ry+ROW_H/2;
+
+          if(isProj){
+            doc.setFillColor(20,40,80);doc.rect(bx,by,bw,BH,'F');
+            const pw=bw*((t.progress||0)/100);
+            if(pw>0){doc.setFillColor(...BLU);doc.rect(bx,by,pw,BH,'F');}
+            doc.setFillColor(20,40,80);
+            doc.triangle(bx,by+BH,bx,by+BH+2,bx+2,by+BH,'F');
+            doc.triangle(bx2,by+BH,bx2,by+BH+2,bx2-2,by+BH,'F');
+            barPos.set(t.id,{lx:bx,rx:bx2,cy});
+          }else{
+            let bc=GRY;
+            const st=t.status||'todo',pr=t.progress||0;
+            if(pr>=100||st==='done')bc=GRN;
+            else if(st==='blocked')bc=RED;
+            else if(st==='inprogress'||st==='in-progress')bc=BLU;
+            else if(st==='on-hold')bc=AMB;
+
+            const lr=bc[0]+Math.round((255-bc[0])*0.75);
+            const lg=bc[1]+Math.round((255-bc[1])*0.75);
+            const lb=bc[2]+Math.round((255-bc[2])*0.75);
+            doc.setFillColor(lr,lg,lb);
+            doc.setDrawColor(...bc);doc.setLineWidth(0.25);
+            doc.rect(bx,by,bw,BH,'FD');
+            const pw=bw*(pr/100);
+            if(pw>0){doc.setFillColor(...bc);doc.rect(bx,by,pw,BH,'F');}
+
+            if(t.milestone){
+              doc.setFillColor(...AMB);
+              doc.triangle(bx+bw/2,cy-3,bx+bw/2+2.5,cy,bx+bw/2,cy+3,'F');
+              doc.triangle(bx+bw/2,cy-3,bx+bw/2-2.5,cy,bx+bw/2,cy+3,'F');
+            }
+
+            barPos.set(t.id,{lx:bx,rx:bx2,cy});
+          }
+        }
+
+        // Row divider
+        doc.setDrawColor(...BORDER);doc.setLineWidth(0.1);
+        doc.line(ML,ry+ROW_H,ML+CW,ry+ROW_H);
+      }
+
+      // ── Dependency Arrows ──────────────────────────────────
+      // Draw elbow paths: predecessor right edge → successor left edge
+      // Only draw if both tasks are visible on this page
+      if(window.SHICCPMEngine){
+        const pageTaskIds=new Set(
+          rows.slice(ri,ri+rowsThisPage).filter(r=>r.type==='task').map(r=>r.d.id)
+        );
+
+        rows.slice(ri,ri+rowsThisPage).forEach(row=>{
+          if(row.type!=='task')return;
+          const t=row.d;
+          if(!t.predecessors)return;
+          const preds=SHICCPMEngine.parsePredecessors(t.predecessors);
+          const succPos=barPos.get(t.id);
+          if(!succPos)return;
+
+          preds.forEach(pr=>{
+            if(!pageTaskIds.has(pr.id))return;  // skip cross-page arrows
+            const predPos=barPos.get(pr.id);
+            if(!predPos)return;
+
+            // Determine colour: red if both critical, grey otherwise
+            const predCrit=false; // CPM not re-run here; use grey default
+            const arrowColor=GRY;
+
+            let sx,sy,ex,ey;
+            switch(pr.type){
+              case 'SS': sx=predPos.lx; sy=predPos.cy; ex=succPos.lx; ey=succPos.cy; break;
+              case 'FF': sx=predPos.rx; sy=predPos.cy; ex=succPos.rx; ey=succPos.cy; break;
+              case 'SF': sx=predPos.lx; sy=predPos.cy; ex=succPos.rx; ey=succPos.cy; break;
+              default:   sx=predPos.rx; sy=predPos.cy; ex=succPos.lx; ey=succPos.cy;
+            }
+
+            const midX=(sx+ex)/2;
+
+            doc.setDrawColor(...arrowColor);
+            doc.setLineWidth(0.35);
+            doc.setLineDash([],0);
+
+            // Elbow: right from pred → midpoint → down/up → left to succ
+            doc.line(sx,sy,midX,sy);
+            doc.line(midX,sy,midX,ey);
+            doc.line(midX,ey,ex,ey);
+
+            // Arrow head at destination
+            _arrowHead(ex,ey,arrowColor);
+          });
+        });
+      }
+
+      // ── Today line ─────────────────────────────────────────
+      if(todayPct>0&&todayPct<1){
+        const tx=GANTT_X+todayPct*GANTT_W;
+        doc.setDrawColor(...RED);doc.setLineWidth(0.5);
+        doc.setLineDash([1.5,1],0);
+        doc.line(tx,CHY,tx,firstRowY+rowsThisPage*ROW_H);
+        doc.setLineDash([],0);
+      }
+
+      // ── Grid lines ─────────────────────────────────────────
+      doc.setDrawColor(...BORDER);doc.setLineWidth(0.2);
+      let tcx=ML;
+      [C_ID,C_NAME,C_DUR,C_START,C_FINISH,C_PCT].forEach(w=>{tcx+=w;doc.line(tcx,CHY,tcx,firstRowY+rowsThisPage*ROW_H);});
+      doc.line(GANTT_X,CHY,GANTT_X,firstRowY+rowsThisPage*ROW_H);
+      doc.setLineWidth(0.08);doc.setDrawColor(210,215,225);
+      months.forEach(m=>{const mx=GANTT_X+m.p*GANTT_W;doc.line(mx,firstRowY,mx,firstRowY+rowsThisPage*ROW_H);});
+      doc.setDrawColor(...BORDER);doc.setLineWidth(0.3);
+      doc.rect(ML,CHY,CW,MH_H+WK_H+rowsThisPage*ROW_H,'S');
+
+      // ── Footer ─────────────────────────────────────────────
+      const fy=PH-MB;
+      doc.setDrawColor(...BORDER);doc.setLineWidth(0.25);
+      doc.line(ML,fy,ML+CW,fy);
+      doc.setFont('helvetica','normal');doc.setFontSize(6);doc.setTextColor(...TMUT);
+      doc.text(`${project.id} — ${(project.name||'').toUpperCase()}`,ML,fy+4);
+      doc.text(`Page ${localPg+1}`,PW/2,fy+4,{align:'center'});
+      doc.text(new Date().toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}),ML+CW,fy+4,{align:'right'});
+
+      ri+=rowsThisPage;
+      localPg++;
     }
   });
 
-  if(changed) AppState.save();
+  const projId=filter!=='all'?filter:'ALL-PROJECTS';
+  const stamp=new Date().toISOString().slice(0,10).replace(/-/g,'');
+  doc.save(`Gantt-${projId}-${stamp}.pdf`);
+  showToast('Gantt PDF saved successfully','success');
 }
 
-// ── Sync Procurement POs → allocated materials ─────────────────────────────
-function _syncProcurementToAllocations(){
-  AppState.ensureData();
-  if(!AppState.data.resourceAllocations)AppState.data.resourceAllocations=[];
-
-  const proc=AppState.data.procurement||[];
-  let changed=false;
-
-  proc.filter(p=>p.projectId&&p.projectId!=='N/A').forEach(po=>{
-    const exists=AppState.data.resourceAllocations.some(a=>
-      a._procId===po.id&&a.resourceType==='Procurement'
-    );
-    if(!exists&&po.status!=='rfq'){
-      const alloc={
-        id:'RA-PO-'+po.id,
-        _procId:po.id,
-        projectId:po.projectId,
-        resourceId:po.id,
-        resourceName:po.description||po.id,
-        resourceType:'Procurement',
-        unit:'lot',
-        allocatedQty:1,
-        plannedCost:po.budgetAmount||po.amount||0,
-        actualCost:po.status==='delivered'||po.status==='partial'?po.amount||0:0,
-        status:po.status==='delivered'?'active':po.status==='partial'?'active':'planned',
-        role:po.category||'Procurement',
-        week:'',
-        notes:'Auto-synced from PO: '+(po.poNumber||po.id),
-        _autoSynced:true
-      };
-      AppState.data.resourceAllocations.push(alloc);
-      changed=true;
-    }else if(exists){
-      const a=AppState.data.resourceAllocations.find(a=>a._procId===po.id);
-      if(a){
-        a.plannedCost=po.budgetAmount||po.amount||0;
-        a.actualCost=po.status==='delivered'||po.status==='partial'?po.amount||0:0;
-        a.resourceName=po.description||po.id;
-        a.status=po.status==='delivered'?'active':po.status==='partial'?'active':'planned';
-        changed=true;
-      }
-    }
-  });
-
-  if(changed) AppState.save();
-}
+window.exportGanttPDF=exportGanttPDF;
+})();
 
 </script>
 <script>
