@@ -11187,7 +11187,11 @@ function runFullCPM(tasks, project) {
     const t    = map.get(id);
     const preds = parsePredecessors(t.predecessors || '');
     const dur  = getDurDays(t);
-    let   es   = projectStart;
+    // Anchor tasks (no predecessors) with a manually set startDate use that date
+    // as the floor instead of projectStart, so stored dates are respected.
+    let   es   = (preds.length === 0 && t.startDate && t.startDate >= projectStart)
+                  ? t.startDate
+                  : projectStart;
 
     for (const p of preds) {
       const pred = map.get(p.id);
