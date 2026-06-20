@@ -11263,13 +11263,8 @@ window.SHICCPMEngine = {
 
 </script>
 <script>
-// ── Gantt state ───────────────────────────────────────────────
-// ganttFrom, ganttTo, ganttProjFilter, ganttStatusFilter declared in ui.js or here as fallback
-if(typeof ganttFrom==='undefined')var ganttFrom='';
-if(typeof ganttTo==='undefined')var ganttTo='';
-if(typeof ganttProjFilter==='undefined')var ganttProjFilter='all';
-if(typeof ganttStatusFilter==='undefined')var ganttStatusFilter='all';
-var _ganttShowBaseline=true; // baseline ghost bars toggle
+// _ganttShowBaseline: baseline ghost bars toggle (ganttFrom/To/ProjFilter declared in core.js)
+let _ganttShowBaseline=true;
 
 function renderGantt(){
   AppState.ensureData();
