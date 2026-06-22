@@ -10859,22 +10859,29 @@ function showTaskForm(id=null,defStatus='todo'){
 if(id && typeof _genericSnapshotForEdit==='function')_genericSnapshotForEdit('task_'+id,'tasks',id);
 const t=id?(AppState.data.tasks||[]).find(x=>x.id===id):null;
 $('#taskModalTitle').textContent=id?'Edit Task':'New Task';
+const _hasPred=!!(t?.predecessors||'').trim();
+const _isMile=!!t?.milestone;
+const _hpd=_getTaskProjHPD(t?.projectId||taskProjectFilter||'');
+const _durVal=t?.durationHrs>0?+(t.durationHrs/_hpd).toFixed(1):(_isMile?0:'');
+// For successor tasks: start/end are CPM-computed — show read-only hint
+const _dateRO=_hasPred?'readonly style="opacity:.55;cursor:not-allowed;background:var(--bg-secondary)"':'';
+const _dateNote=_hasPred?'<span style="font-size:10px;color:var(--accent-amber);margin-left:6px"><i class="fas fa-calculator"></i> Computed by CPM</span>':'';
 $('#taskModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">Project</label><select class="form-select" id="tProj">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${(t?.projectId===p.id||taskProjectFilter===p.id)?'selected':''}>${p.id}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">WBS Code</label><input class="form-input" id="tWbs" value="${t?.wbs||''}" placeholder="e.g., 1.2.3"></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Task Name *</label><input class="form-input" id="tName" value="${t?.name||''}" placeholder="Task description"></div>
 <div class="form-group"><label class="form-label">Assigned To</label><input class="form-input" id="tAss" value="${t?.assignee||''}" placeholder="Name"></div>
 <div class="form-group"><label class="form-label">Department</label><input class="form-input" id="tDept" value="${t?.dept||''}" placeholder="Department"></div>
-<div class="form-group"><label class="form-label">Start Date</label><input class="form-input" type="date" id="tStart" value="${t?.startDate||''}" onchange="_tFormRecalc('start')"></div>
-<div class="form-group"><label class="form-label">End Date</label><input class="form-input" type="date" id="tEnd" value="${t?.endDate||''}" onchange="_tFormRecalc('end')"></div>
+<div class="form-group"><label class="form-label">Start Date ${_dateNote}</label><input class="form-input" type="date" id="tStart" value="${t?.startDate||''}" ${_dateRO} onchange="_tFormRecalc('start')"></div>
+<div class="form-group"><label class="form-label">End Date ${_dateNote}</label><input class="form-input" type="date" id="tEnd" value="${t?.endDate||''}" ${_dateRO} onchange="_tFormRecalc('end')"></div>
 <div class="form-group"><label class="form-label">Planned Hours</label><input class="form-input" type="number" id="tPH" value="${t?.plannedHrs||0}"></div>
 <div class="form-group"><label class="form-label">Actual Hours</label><input class="form-input" type="number" id="tAH" value="${t?.actualHrs||0}"></div>
-<div class="form-group"><label class="form-label">Duration (days) <span style="font-size:10px;color:var(--text-muted)">— CPM scheduling</span></label><input class="form-input" type="number" id="tDur" step="0.5" min="0" value="${t?.durationHrs!=null&&t.durationHrs>0?+(t.durationHrs/(_getTaskProjHPD(t?.projectId||$('#tProj')?.value))).toFixed(1):''}" placeholder="e.g. 5" onchange="_tFormRecalc('dur')"></div>
-<div class="form-group" style="grid-column:1/-1"><label class="form-label">Predecessors <span style="font-size:10px;color:var(--text-muted)">e.g. TSK-001FS, TSK-002SS+2d, TSK-003FF-1d</span></label><div style="display:flex;gap:6px"><input class="form-input" id="tPred" value="${t?.predecessors||''}" placeholder="Leave blank if no dependencies" style="flex:1"><button type="button" class="btn btn-secondary btn-sm" style="white-space:nowrap;padding:0 10px" onclick="showPredPicker('${id||''}')"><i class="fas fa-list-ul"></i> Pick</button></div></div>
+<div class="form-group"><label class="form-label">Duration (days) <span style="font-size:10px;color:var(--text-muted)">— working days</span></label><input class="form-input" type="number" id="tDur" step="0.5" min="0" value="${_durVal}" placeholder="e.g. 5" onchange="_tFormRecalc('dur')" ${_isMile?'readonly style="opacity:.55"':''}></div>
+<div class="form-group" style="grid-column:1/-1"><label class="form-label">Predecessors <span style="font-size:10px;color:var(--text-muted)">e.g. TSK-001 FS, TSK-002 SS+2d</span></label><div style="display:flex;gap:6px"><input class="form-input" id="tPred" value="${t?.predecessors||''}" placeholder="Leave blank if no dependencies" style="flex:1" onchange="_tFormRecalc('pred')"><button type="button" class="btn btn-secondary btn-sm" style="white-space:nowrap;padding:0 10px" onclick="showPredPicker('${id||''}')"><i class="fas fa-list-ul"></i> Pick</button></div></div>
 <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="tStat">${['todo','inprogress','done','blocked'].map(s=>`<option value="${s}" ${(t?.status||defStatus)===s?'selected':''}>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Priority</label><select class="form-select" id="tPri">${['critical','high','medium','low'].map(s=>`<option value="${s}" ${t?.priority===s?'selected':''}>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Progress % <span id="progVal">${t?.progress||0}%</span></label><input type="range" id="tProg" value="${t?.progress||0}" min="0" max="100" style="width:100%;accent-color:var(--accent-blue)" oninput="$('#progVal').textContent=this.value+'%'"></div>
-<div class="form-group"><label class="form-label">Milestone</label><select class="form-select" id="tMile"><option value="false" ${!t?.milestone?'selected':''}>No</option><option value="true" ${t?.milestone?'selected':''}>Yes - Milestone</option></select></div>
+<div class="form-group"><label class="form-label">Milestone</label><select class="form-select" id="tMile" onchange="_tFormRecalc('mile')"><option value="false" ${!_isMile?'selected':''}>No</option><option value="true" ${_isMile?'selected':''}>Yes - Milestone</option></select></div>
 </div>
 <div class="modal-footer">
 <button class="btn btn-secondary" onclick="closeModal('taskModal')">Cancel</button>
@@ -10894,7 +10901,26 @@ if(id && typeof _genericCheckConflict==='function'){
 const _tProjId=$('#tProj').value;
 const _tDurDays=parseFloat($('#tDur')?.value)||0;
 const _tHPD=_getTaskProjHPD(_tProjId);
-const t={id:id||'TSK-'+(Date.now()%100000).toString().padStart(5,'0'),projectId:_tProjId,wbs:$('#tWbs').value,name:$('#tName').value,assignee:$('#tAss').value,dept:$('#tDept').value,startDate:$('#tStart').value,endDate:$('#tEnd').value,plannedHrs:parseFloat($('#tPH').value)||0,actualHrs:parseFloat($('#tAH').value)||0,status:$('#tStat').value,priority:$('#tPri').value,progress:parseInt($('#tProg').value)||0,milestone:$('#tMile').value==='true',predecessors:($('#tPred')?.value||'').trim(),durationHrs:_tDurDays>0?_tDurDays*_tHPD:(id?(AppState.data.tasks||[]).find(x=>x.id===id)?.durationHrs||0:0)};
+const _isMileSave=$('#tMile').value==='true';
+// Normalize predecessor string: parse then re-serialize with space separator
+const _rawPred=($('#tPred')?.value||'').trim();
+const _normPred=window.SHICCPMEngine?SHICCPMEngine.parsePredecessors(_rawPred).map(p=>{
+  const lagStr=p.lagDays>0?`+${p.lagDays}d`:p.lagDays<0?`${p.lagDays}d`:'';
+  return `${p.id} ${p.type}${lagStr}`;
+}).join(', '):_rawPred;
+const t={
+  id:id||'TSK-'+(Date.now()%100000).toString().padStart(5,'0'),
+  projectId:_tProjId,wbs:$('#tWbs').value,name:$('#tName').value,
+  assignee:$('#tAss').value,dept:$('#tDept').value,
+  startDate:_isMileSave?$('#tStart').value:$('#tStart').value,
+  endDate:_isMileSave?$('#tStart').value:$('#tEnd').value, // milestone: end=start
+  plannedHrs:parseFloat($('#tPH').value)||0,actualHrs:parseFloat($('#tAH').value)||0,
+  status:$('#tStat').value,priority:$('#tPri').value,
+  progress:parseInt($('#tProg').value)||0,
+  milestone:_isMileSave,
+  predecessors:_normPred,
+  durationHrs:_isMileSave?0:(_tDurDays>0?_tDurDays*_tHPD:(id?(AppState.data.tasks||[]).find(x=>x.id===id)?.durationHrs||0:0))
+};
 if(!t.name){showToast('Task name required','error');return;}
 if(id){const i=(AppState.data.tasks||[]).findIndex(x=>x.id===id);AppState.data.tasks[i]={...AppState.data.tasks[i],...t};}
 else AppState.data.tasks.push(t);
@@ -10911,55 +10937,93 @@ function _applyCPMDates(projId){
   const pt=(AppState.data.tasks||[]).filter(t=>t.projectId===projId&&!t._deleted);
   if(!pt.length)return;
   const result=SHICCPMEngine.runFullCPM(pt,proj);
-  if(result.hasCycle)return; // don't write back if cycle exists
+  if(result.hasCycle){showToast('Circular dependency detected — dates not updated','error');return;}
   result.tasks.forEach(ct=>{
-    if(ct._ES===undefined||ct._EF===undefined)return;
-    const hasPreds=(ct.predecessors||'').trim().length>0;
-    // Anchor tasks: only write back if CPM date differs (it uses their stored startDate,
-    // so this is a no-op unless duration changed). Successor tasks always get CPM dates.
+    if(!ct._ES||!ct._EF)return;
     const i=(AppState.data.tasks||[]).findIndex(x=>x.id===ct.id);
     if(i<0)return;
+    const stored=AppState.data.tasks[i];
+    const hasPreds=(ct.predecessors||'').trim().length>0;
     if(hasPreds){
-      AppState.data.tasks[i].startDate=ct._ES;
-      AppState.data.tasks[i].endDate=ct._EF;
+      // Successor: CPM owns both dates
+      stored.startDate=ct._ES;
+      stored.endDate=ct.milestone?ct._ES:ct._EF; // milestone: end=start
     } else {
-      // Anchor: only update endDate if duration is set (startDate is the user's anchor)
-      if(ct.durationHrs>0||ct.milestone)AppState.data.tasks[i].endDate=ct._EF;
+      // Anchor: user owns startDate; CPM owns endDate if duration or milestone
+      if(ct.milestone){
+        stored.endDate=stored.startDate; // milestone: end always = start
+      } else if(ct.durationHrs>0){
+        stored.endDate=ct._EF;
+      }
+    }
+    // Final guard: end must never be before start
+    if(stored.endDate&&stored.startDate&&stored.endDate<stored.startDate){
+      stored.endDate=stored.startDate;
     }
   });
 }
 
 function deleteTask(id){ return requestOrDelete('tasks', id); }
 
-// Auto-sync Start / End / Duration in the task form.
-// source: 'start' | 'end' | 'dur'
+// Auto-sync Start / End / Duration / Milestone / Predecessor in the task form.
+// source: 'start' | 'end' | 'dur' | 'mile' | 'pred'
 function _tFormRecalc(source){
   const projId=$('#tProj')?.value;
-  const hpd=_getTaskProjHPD(projId)||8;
   const cal=window.SHICCPMEngine?SHICCPMEngine.getCalendar((AppState.data.projects||[]).find(p=>p.id===projId)):null;
-  const addWD=(d,n)=>window.SHICCPMEngine?SHICCPMEngine.addWorkingDays(d,n,cal):d;
+  const addWD=(d,n)=>window.SHICCPMEngine&&d?SHICCPMEngine.addWorkingDays(d,n,cal):d;
   const diffWD=(s,e)=>window.SHICCPMEngine?SHICCPMEngine.workingDaysBetween(s,e,cal):0;
 
-  const startEl=$('#tStart'), endEl=$('#tEnd'), durEl=$('#tDur');
+  const startEl=$('#tStart'), endEl=$('#tEnd'), durEl=$('#tDur'), mileEl=$('#tMile'), predEl=$('#tPred');
   if(!startEl||!endEl||!durEl)return;
 
-  const s=startEl.value, e=endEl.value;
-  const dur=parseFloat(durEl.value)||0;
+  const isMile=mileEl?.value==='true';
+  const hasPred=!!(predEl?.value||'').trim();
 
-  if(source==='dur'&&s&&dur>0){
-    // Duration changed → update End Date
-    endEl.value=addWD(s,dur);
-  } else if(source==='start'&&dur>0){
-    // Start changed with duration set → push End Date
-    endEl.value=addWD(s,dur);
-  } else if(source==='start'&&e&&s>e){
-    // Start moved past End → clear End
-    endEl.value=s;
-  } else if(source==='end'&&s&&e){
-    // End changed → recalculate Duration
-    const d=diffWD(s,e);
-    if(d>=0)durEl.value=d||'';
-    else{endEl.value=s;durEl.value='';}
+  // Milestone: lock duration=0, end=start
+  if(source==='mile'){
+    if(isMile){
+      durEl.value=0;
+      durEl.readOnly=true; durEl.style.opacity='.55';
+      if(startEl.value)endEl.value=startEl.value;
+    } else {
+      durEl.readOnly=false; durEl.style.opacity='';
+      durEl.value='';
+    }
+    return;
+  }
+
+  // Predecessor toggled: lock/unlock start+end fields
+  if(source==='pred'){
+    const ro=hasPred;
+    startEl.readOnly=ro; startEl.style.opacity=ro?'.55':''; startEl.style.cursor=ro?'not-allowed':'';
+    endEl.readOnly=ro;   endEl.style.opacity=ro?'.55':'';   endEl.style.cursor=ro?'not-allowed':'';
+    return;
+  }
+
+  // If milestone: end always = start
+  if(isMile){
+    if(startEl.value)endEl.value=startEl.value;
+    durEl.value=0;
+    return;
+  }
+
+  // Successor tasks: dates controlled by CPM, only duration is editable here
+  // (dates will be fixed by _applyCPMDates on save)
+  if(hasPred) return;
+
+  const s=startEl.value, e=endEl.value;
+  const dur=parseFloat(durEl.value);
+
+  if(source==='start'){
+    if(!isNaN(dur)&&dur>=0&&s) endEl.value=addWD(s,dur);
+    else if(e&&s>e) endEl.value=s;
+  } else if(source==='dur'){
+    if(!isNaN(dur)&&dur>=0&&s) endEl.value=addWD(s,dur);
+  } else if(source==='end'){
+    if(s&&e){
+      if(e<s){endEl.value=s;durEl.value=0;}
+      else{const d=diffWD(s,e);durEl.value=d>=0?d:'';}
+    }
   }
 }
 
