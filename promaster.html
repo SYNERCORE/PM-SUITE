@@ -1379,10 +1379,11 @@ function drawBar(cid,labels,vals,col='#388bfd'){
 const c=$(`#${cid}`);if(!c)return;
 const ctx=c.getContext('2d'),W=c.width,H=c.height,pd={t:8,r:8,b:22,l:8};
 const cH=H-pd.t-pd.b,cW=W-pd.l-pd.r;
-ctx.clearRect(0,0,W,H);const mx=Math.max(...vals)||1,bW=Math.floor(cW/vals.length)-5;
+ctx.clearRect(0,0,W,H);const mx=Math.max(...vals.map(v=>isFinite(v)?v:0))||1,bW=Math.floor(cW/vals.length)-5;
 vals.forEach((v,i)=>{
-const bH=(v/mx)*cH,x=pd.l+i*(cW/vals.length)+2,y=pd.t+cH-bH;
-const g=ctx.createLinearGradient(x,y,x,y+bH);g.addColorStop(0,col);g.addColorStop(1,col+'55');
+const sv=isFinite(v)?v:0;
+const bH=Math.max(0,(sv/mx)*cH),x=pd.l+i*(cW/vals.length)+2,y=pd.t+cH-bH;
+const g=ctx.createLinearGradient(x,y,x,y+Math.max(1,bH));g.addColorStop(0,col);g.addColorStop(1,col+'55');
 ctx.fillStyle=g;ctx.fillRect(x,y,bW,bH);
 ctx.fillStyle='#8b949e';ctx.font='9px Outfit,sans-serif';ctx.textAlign='center';
 ctx.fillText((labels[i]||'').substring(0,6),x+bW/2,H-4);});}
@@ -12431,6 +12432,7 @@ window.exportGanttPDF=exportGanttPDF;
 
 </script>
 <script>
+function _syncResourceStatuses(){} // stub — resource status sync not yet implemented
 function renderResources(){
   _syncResourceStatuses();
 const tabs=[
@@ -13845,6 +13847,7 @@ function executeMpImport(){
 
 </script>
 <script>
+function _syncProcurementAllocations(){} // stub — procurement→allocations sync not yet implemented
 function renderMaterials(){
   _syncProcurementAllocations();
 const{materials}=AppState.data;
@@ -14023,6 +14026,7 @@ function executeProcImport(){
 
 </script>
 <script>
+function _syncProcurementToAllocations(){} // stub — procurement→allocations sync not yet implemented
 function renderProcurement(){
   ensureProcLogs();
   _syncProcurementToAllocations();
