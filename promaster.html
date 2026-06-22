@@ -9863,6 +9863,7 @@ function renderDetailGantt(){
   }
 
   let rowsHtml='';
+  const _gmeta={};
 
   // Project bar row
   rowsHtml+=`<div style="display:flex;border-bottom:2px solid var(--border);background:rgba(56,139,253,.05)">
@@ -9899,6 +9900,7 @@ function renderDetailGantt(){
     if(!s||!e)return;
     const lft=pct(s);
     const wdt=wPct(s,e);
+    _gmeta[t.id]={lft,rgt:lft+wdt,preds:t.predecessors||''};
     const prog=t.status==='done'?wdt:Math.min(wdt,wdt*((t.progress||0)/100));
     const overdue=isOverdue(e)&&t.status!=='done';
     const isMile=!!t.milestone;
@@ -9915,7 +9917,7 @@ function renderDetailGantt(){
         ${overdue?`<div style="position:absolute;left:calc(${lft+wdt}% + 2px);top:9px;font-size:9px;color:var(--accent-red)">⚠</div>`:''}`;
     }
 
-    rowsHtml+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${t.name}">
+    rowsHtml+=`<div id="ganttRow_${t.id}" style="display:flex;border-bottom:1px solid var(--border)" title="${t.name}">
       <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:5px 10px;border-right:1px solid var(--border);overflow:hidden">
         <div style="display:flex;align-items:center;gap:5px">
           <i class="fas ${isMile?'fa-diamond':'fa-circle'}" style="color:${isMile?'var(--accent-amber)':c};font-size:${isMile?'9':'6'}px;flex-shrink:0"></i>
@@ -9923,7 +9925,7 @@ function renderDetailGantt(){
         </div>
         ${t.assignee?`<div style="font-size:9px;color:var(--text-muted);padding-left:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.assignee}</div>`:''}
       </div>
-      <div style="flex:1;min-width:0">${barCell(barContent)}</div>
+      <div id="ganttBar_${t.id}" style="flex:1;min-width:0">${barCell(barContent)}</div>
       <div style="width:86px;min-width:86px;padding:5px 8px;font-size:9px;font-family:var(--font-mono);border-left:1px solid var(--border);color:${overdue?'var(--accent-red)':'var(--text-secondary)'}">
         <div>${s}</div><div>${e}</div>
       </div>
@@ -9932,6 +9934,8 @@ function renderDetailGantt(){
       </div>
     </div>`;
   });
+
+  window._ganttMeta=_gmeta;
 
   // Resource allocations
   if(allocs.length){
@@ -10002,7 +10006,7 @@ function renderDetailGantt(){
     <div style="overflow-x:auto;overflow-y:auto;max-height:70vh">
       <div style="min-width:700px">
         ${monthHeader}
-        ${rowsHtml}
+        <div id="ganttRowsWrap" style="position:relative">${rowsHtml}<svg id="ganttArrowSvg" style="position:absolute;left:0;top:0;pointer-events:none;overflow:visible" width="0" height="0"></svg></div>
       </div>
     </div>
     ${todayPct>0&&todayPct<100?`<div style="padding:6px 14px;font-size:10px;color:var(--accent-red);border-top:1px solid var(--border)"><i class="fas fa-circle" style="font-size:7px;margin-right:5px"></i>Red line = Today (${today})</div>`:''}
@@ -10014,6 +10018,69 @@ function renderDetailGantt(){
       <div style="font-size:9px;color:var(--text-secondary);margin-top:2px">${l}</div>
     </div>`).join('')}
   </div>`;
+  setTimeout(_drawGanttArrows,0);
+}
+
+function _parseGanttPreds(str){
+  if(!str)return[];
+  return str.split(',').map(s=>{
+    s=s.trim();if(!s)return null;
+    const m=s.match(/^(.+?)(FS|SS|FF|SF)?([+-]\d+)?$/i);
+    if(!m)return{id:s,type:'FS',lag:0};
+    return{id:m[1].trim(),type:(m[2]||'FS').toUpperCase(),lag:parseInt(m[3]||0)};
+  }).filter(Boolean);
+}
+
+function _drawGanttArrows(){
+  const svg=document.getElementById('ganttArrowSvg');
+  if(!svg)return;
+  const wrap=document.getElementById('ganttRowsWrap');
+  if(!wrap)return;
+  const meta=window._ganttMeta;
+  if(!meta)return;
+  const hasPreds=Object.values(meta).some(m=>m.preds);
+  if(!hasPreds){svg.innerHTML='';return;}
+  const wrapRect=wrap.getBoundingClientRect();
+  const LABEL_W=240;
+  const firstBar=wrap.querySelector('[id^="ganttBar_"]');
+  const barW=firstBar?firstBar.getBoundingClientRect().width:Math.max(1,wrapRect.width-LABEL_W-166);
+  svg.setAttribute('width',wrapRect.width);
+  svg.setAttribute('height',wrapRect.height);
+  let paths='';
+  Object.entries(meta).forEach(([succId,succMeta])=>{
+    if(!succMeta.preds)return;
+    const preds=_parseGanttPreds(succMeta.preds);
+    if(!preds.length)return;
+    const succRowEl=document.getElementById('ganttRow_'+succId);
+    if(!succRowEl)return;
+    const succRect=succRowEl.getBoundingClientRect();
+    const succY=succRect.top-wrapRect.top+succRect.height/2;
+    preds.forEach(pred=>{
+      const predMeta=meta[pred.id];
+      if(!predMeta)return;
+      const predRowEl=document.getElementById('ganttRow_'+pred.id);
+      if(!predRowEl)return;
+      const predRect=predRowEl.getBoundingClientRect();
+      const predY=predRect.top-wrapRect.top+predRect.height/2;
+      let x1,x2;
+      if(pred.type==='SS'){x1=LABEL_W+predMeta.lft/100*barW;x2=LABEL_W+succMeta.lft/100*barW;}
+      else if(pred.type==='FF'){x1=LABEL_W+predMeta.rgt/100*barW;x2=LABEL_W+succMeta.rgt/100*barW;}
+      else if(pred.type==='SF'){x1=LABEL_W+predMeta.lft/100*barW;x2=LABEL_W+succMeta.rgt/100*barW;}
+      else{x1=LABEL_W+predMeta.rgt/100*barW;x2=LABEL_W+succMeta.lft/100*barW;}
+      const dx=x2-x1;
+      let pathD;
+      if(dx>20){
+        const cp=dx*0.45;
+        pathD=`M${x1},${predY} C${x1+cp},${predY} ${x2-cp},${succY} ${x2},${succY}`;
+      }else{
+        const g=14;
+        const vx1=x1+g;const vx2=x2-g;
+        pathD=`M${x1},${predY} L${vx1},${predY} L${vx1},${(predY+succY)/2} L${vx2},${(predY+succY)/2} L${vx2},${succY} L${x2},${succY}`;
+      }
+      paths+=`<path d="${pathD}" fill="none" stroke="rgba(56,139,253,.7)" stroke-width="1.5" marker-end="url(#ganttArr)"/>`;
+    });
+  });
+  svg.innerHTML=`<defs><marker id="ganttArr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="rgba(56,139,253,.8)"/></marker></defs>${paths}`;
 }
 
 
@@ -13439,7 +13506,7 @@ function _syncManpowerAllocations(){
 function renderManpower(){
   // Sync Manpower-type allocations → Manpower Tracking records
   _syncManpowerAllocations();
-const manpower=AppState.data.manpower||[];
+const manpower=(AppState.data.manpower||[]).filter(m=>!m._deleted);
 const totP=manpower.reduce((s,m)=>s+m.planned,0),totA=manpower.reduce((s,m)=>s+m.actual,0);
 const totC=manpower.reduce((s,m)=>s+m.cost,0),totOT=manpower.reduce((s,m)=>s+m.overtime,0);
 $('#manpower').innerHTML=`<div class="section-header" style="margin-bottom:14px">
@@ -13723,16 +13790,19 @@ function deleteMpRecord(id){
       'Click Cancel to delete the manpower record only (it will re-appear on next sync unless you also remove the allocation).'
     );
     if(removeAlloc){
-      AppState.data.resourceAllocations=(AppState.data.resourceAllocations||[]).filter(a=>a.id!==rec.allocId);
+      const allocRec=(AppState.data.resourceAllocations||[]).find(a=>a.id===rec.allocId);
+      if(allocRec){allocRec._deleted=true;allocRec._deletedAt=new Date().toISOString();allocRec._deletedBy=(typeof _currentUserProfile!=='undefined')?(_currentUserProfile?.name||_currentUserProfile?.email||'unknown'):'unknown';}
     }
   }else if(!confirm('Delete this manpower record?')){
     return;
   }
-  // Remove manpower record
-  AppState.data.manpower=(AppState.data.manpower||[]).filter(m=>m.id!==id);
+  // Soft-delete manpower record so it goes to Trash and survives sync
+  rec._deleted=true;
+  rec._deletedAt=new Date().toISOString();
+  rec._deletedBy=(typeof _currentUserProfile!=='undefined')?(_currentUserProfile?.name||_currentUserProfile?.email||'unknown'):'unknown';
   AppState.save();
   renderManpower();
-  showToast('Record deleted','warning');
+  showToast('Record moved to Trash','warning');
 }
 
 function showAddManpowerRecord(){
@@ -14031,8 +14101,8 @@ function _syncProcurementToAllocations(){} // stub — procurement→allocations
 function renderProcurement(){
   ensureProcLogs();
   _syncProcurementToAllocations();
-  const proc=AppState.data.procurement||[];
-  const logs=AppState.data.procurementLogs||[];
+  const proc=(AppState.data.procurement||[]).filter(x=>!x._deleted);
+  const logs=(AppState.data.procurementLogs||[]).filter(l=>!l._deleted);
 
   // KPIs
   const totVal=proc.reduce((s,p)=>s+p.amount,0);
@@ -14594,8 +14664,9 @@ function addProcLog(procId,data){
 
 function deleteProcLog(id){
   if(!confirm('Delete this log entry?'))return;
-  AppState.data.procurementLogs=(AppState.data.procurementLogs||[]).filter(l=>l.id!==id);
-  AppState.save();renderProcurement();showToast('Log entry deleted','warning');
+  const log=(AppState.data.procurementLogs||[]).find(l=>l.id===id);
+  if(log){log._deleted=true;log._deletedAt=new Date().toISOString();log._deletedBy=(typeof _currentUserProfile!=='undefined')?(_currentUserProfile?.name||_currentUserProfile?.email||'unknown'):'unknown';}
+  AppState.save();renderProcurement();showToast('Log entry moved to Trash','warning');
 }
 
 // ── ADD / EDIT PROCUREMENT MODAL ───────────────────────────
@@ -14955,10 +15026,13 @@ function saveProcurement(id){
 }
 
 function deleteProcurement(id){
-  if(!confirm('Delete this procurement record and all its logs?'))return;
-  AppState.data.procurement=(AppState.data.procurement||[]).filter(x=>x.id!==id);
-  AppState.data.procurementLogs=(AppState.data.procurementLogs||[]).filter(l=>l.procId!==id);
-  AppState.save();renderProcurement();showToast('Record deleted','warning');
+  if(!confirm('Delete this procurement record and all its logs? They will be moved to Trash.'))return;
+  const now=new Date().toISOString();
+  const by=(typeof _currentUserProfile!=='undefined')?(_currentUserProfile?.name||_currentUserProfile?.email||'unknown'):'unknown';
+  const rec=(AppState.data.procurement||[]).find(x=>x.id===id);
+  if(rec){rec._deleted=true;rec._deletedAt=now;rec._deletedBy=by;}
+  (AppState.data.procurementLogs||[]).filter(l=>l.procId===id).forEach(l=>{l._deleted=true;l._deletedAt=now;l._deletedBy=by;});
+  AppState.save();renderProcurement();showToast('Moved to Trash','warning');
 }
 
 function exportProcurementCSV(){
@@ -18308,7 +18382,7 @@ function renderMlTab(){
 }
 
 function mlFilter(arr){
-  let r=[...arr];
+  let r=arr.filter(i=>i&&!i._deleted);
   if(mlSearch){
     const s=mlSearch.toLowerCase();
     r=r.filter(i=>Object.values(i).some(v=>String(v||'').toLowerCase().includes(s)));
@@ -18504,10 +18578,10 @@ function renderMlEquipment(){
   const statOp=statOpts('',['available','in-use','maintenance','standby','out-of-service']);
   $('#mlTabContent').innerHTML=`
   <div class="grid grid-4" style="margin-bottom:12px">
-    ${sc('fas fa-cog','Total Equipment',(AppState.data.equipment||[]).length,'In register','#f0a450','rgba(240,164,80,.15)')}
-    ${sc('fas fa-check-circle','Available',(AppState.data.equipment||[]).filter(e=>e.status==='available').length,'Ready','#3fb950','rgba(63,185,80,.15)')}
-    ${sc('fas fa-hard-hat','In Use',(AppState.data.equipment||[]).filter(e=>e.status==='in-use').length,'Deployed','#388bfd','rgba(56,139,253,.15)')}
-    ${sc('fas fa-tools','Maintenance',(AppState.data.equipment||[]).filter(e=>e.status==='maintenance').length,'Needs attention','#f85149','rgba(248,81,73,.15)')}
+    ${sc('fas fa-cog','Total Equipment',getActive('equipment').length,'In register','#f0a450','rgba(240,164,80,.15)')}
+    ${sc('fas fa-check-circle','Available',getActive('equipment').filter(e=>e.status==='available').length,'Ready','#3fb950','rgba(63,185,80,.15)')}
+    ${sc('fas fa-hard-hat','In Use',getActive('equipment').filter(e=>e.status==='in-use').length,'Deployed','#388bfd','rgba(56,139,253,.15)')}
+    ${sc('fas fa-tools','Maintenance',getActive('equipment').filter(e=>e.status==='maintenance').length,'Needs attention','#f85149','rgba(248,81,73,.15)')}
   </div>
   <div class="card">
   <div class="section-header" style="margin-bottom:10px">
@@ -18753,12 +18827,12 @@ function renderMlWarehouse(){
 function renderMlConsumables(){
   let data=mlFilter(AppState.data.consumables||[]);
   if(mlStatusFilter!=='all')data=data.filter(c=>(c.qtyOnHand<=c.minStock?'low-stock':'in-stock')===mlStatusFilter);
-  const totVal=(AppState.data.consumables||[]).reduce((s,c)=>s+c.qtyOnHand*c.unitCost,0);
+  const totVal=getActive('consumables').reduce((s,c)=>s+c.qtyOnHand*c.unitCost,0);
   $('#mlTabContent').innerHTML=`
   <div class="grid grid-4" style="margin-bottom:12px">
-    ${sc('fas fa-boxes','Total Items',(AppState.data.consumables||[]).length,'Consumables','#3fb950','rgba(63,185,80,.15)')}
-    ${sc('fas fa-check','In Stock',(AppState.data.consumables||[]).filter(c=>c.qtyOnHand>c.minStock).length,'Adequate','#3fb950','rgba(63,185,80,.15)')}
-    ${sc('fas fa-exclamation-triangle','Low / Reorder',(AppState.data.consumables||[]).filter(c=>c.qtyOnHand<=c.minStock).length,'Action needed','#f85149','rgba(248,81,73,.15)')}
+    ${sc('fas fa-boxes','Total Items',getActive('consumables').length,'Consumables','#3fb950','rgba(63,185,80,.15)')}
+    ${sc('fas fa-check','In Stock',getActive('consumables').filter(c=>c.qtyOnHand>c.minStock).length,'Adequate','#3fb950','rgba(63,185,80,.15)')}
+    ${sc('fas fa-exclamation-triangle','Low / Reorder',getActive('consumables').filter(c=>c.qtyOnHand<=c.minStock).length,'Action needed','#f85149','rgba(248,81,73,.15)')}
     ${sc('fas fa-dollar-sign','Stock Value',fmtNum(totVal),'Total inventory','#f0a450','rgba(240,164,80,.15)')}
   </div>
   <div class="card">
@@ -18802,12 +18876,12 @@ function renderMlConsumables(){
 function renderMlMaterials(){
   let data=mlFilter(AppState.data.materials||[]);
   if(mlStatusFilter!=='all')data=data.filter(m=>m.status===mlStatusFilter);
-  const totVal=(AppState.data.materials||[]).reduce((s,m)=>s+m.qty*m.unitCost,0);
+  const totVal=getActive('materials').reduce((s,m)=>s+m.qty*m.unitCost,0);
   $('#mlTabContent').innerHTML=`
   <div class="grid grid-4" style="margin-bottom:12px">
-    ${sc('fas fa-layer-group','Total Materials',(AppState.data.materials||[]).length,'All materials','#fb8f44','rgba(251,143,68,.15)')}
-    ${sc('fas fa-check','Delivered',(AppState.data.materials||[]).filter(m=>m.status==='delivered').length,'On site','#3fb950','rgba(63,185,80,.15)')}
-    ${sc('fas fa-shipping-fast','In Transit',(AppState.data.materials||[]).filter(m=>m.status==='ordered'||m.status==='partial').length,'En route','#388bfd','rgba(56,139,253,.15)')}
+    ${sc('fas fa-layer-group','Total Materials',getActive('materials').length,'All materials','#fb8f44','rgba(251,143,68,.15)')}
+    ${sc('fas fa-check','Delivered',getActive('materials').filter(m=>m.status==='delivered').length,'On site','#3fb950','rgba(63,185,80,.15)')}
+    ${sc('fas fa-shipping-fast','In Transit',getActive('materials').filter(m=>m.status==='ordered'||m.status==='partial').length,'En route','#388bfd','rgba(56,139,253,.15)')}
     ${sc('fas fa-dollar-sign','Total Value',fmtNum(totVal),'Material stock','#f0a450','rgba(240,164,80,.15)')}
   </div>
   <div class="card">
@@ -18844,14 +18918,14 @@ function renderMlMaterials(){
 function renderMlThirdParty(){
   let data=mlFilter(AppState.data.thirdParty||[]);
   if(mlStatusFilter!=='all')data=data.filter(t=>t.status===mlStatusFilter);
-  const totMonthly=(AppState.data.thirdParty||[]).filter(t=>t.status==='active').reduce((s,t)=>s+t.monthlyRate,0);
+  const totMonthly=getActive('thirdParty').filter(t=>t.status==='active').reduce((s,t)=>s+t.monthlyRate,0);
   const now=new Date().toISOString().split('T')[0];
   $('#mlTabContent').innerHTML=`
   <div class="grid grid-4" style="margin-bottom:12px">
-    ${sc('fas fa-handshake','Total Vendors',(AppState.data.thirdParty||[]).length,'All vendors','#f85149','rgba(248,81,73,.15)')}
-    ${sc('fas fa-check-circle','Active',(AppState.data.thirdParty||[]).filter(t=>t.status==='active').length,'Active contracts','#3fb950','rgba(63,185,80,.15)')}
+    ${sc('fas fa-handshake','Total Vendors',getActive('thirdParty').length,'All vendors','#f85149','rgba(248,81,73,.15)')}
+    ${sc('fas fa-check-circle','Active',getActive('thirdParty').filter(t=>t.status==='active').length,'Active contracts','#3fb950','rgba(63,185,80,.15)')}
     ${sc('fas fa-dollar-sign','Monthly Commitment',fmtNum(totMonthly),'Active only','#f0a450','rgba(240,164,80,.15)')}
-    ${sc('fas fa-calendar-times','Expiring <60d',(AppState.data.thirdParty||[]).filter(t=>t.contractEnd&&daysBetween(now,t.contractEnd)<60&&daysBetween(now,t.contractEnd)>0).length,'Review needed','#f85149','rgba(248,81,73,.15)')}
+    ${sc('fas fa-calendar-times','Expiring <60d',getActive('thirdParty').filter(t=>t.contractEnd&&daysBetween(now,t.contractEnd)<60&&daysBetween(now,t.contractEnd)>0).length,'Review needed','#f85149','rgba(248,81,73,.15)')}
   </div>
   <div class="card">
   <div class="section-header" style="margin-bottom:10px">
@@ -18886,10 +18960,20 @@ function renderMlThirdParty(){
 }
 
 // ── CRUD HELPERS ──────────────────────────────────────────
-function deleteMlAsset(id,typeKey){if(!confirm('Delete this asset? This cannot be undone.'))return;if(!AppState.data[typeKey])return;AppState.data[typeKey]=AppState.data[typeKey].filter(r=>r.id!==id);AppState.save();showToast('Asset deleted','warning');}
-function deleteMlConsumable(id){if(!confirm('Delete?'))return;AppState.data.consumables=(AppState.data.consumables||[]).filter(c=>c.id!==id);AppState.save();renderMlConsumables();showToast('Deleted','warning');}
-function deleteMlMaterial(id){if(!confirm('Delete?'))return;AppState.data.materials=(AppState.data.materials||[]).filter(m=>m.id!==id);AppState.save();renderMlMaterials();showToast('Deleted','warning');}
-function deleteMlTp(id){if(!confirm('Delete?'))return;AppState.data.thirdParty=(AppState.data.thirdParty||[]).filter(t=>t.id!==id);AppState.save();renderMlThirdParty();showToast('Deleted','warning');}
+function _mlSoftDelete(arrayKey,id){
+  const arr=AppState.data[arrayKey]||[];
+  const rec=arr.find(r=>r.id===id);
+  if(!rec)return false;
+  rec._deleted=true;
+  rec._deletedAt=new Date().toISOString();
+  rec._deletedBy=(typeof _currentUserProfile!=='undefined')?(_currentUserProfile?.name||_currentUserProfile?.email||'unknown'):'unknown';
+  AppState.save();
+  return true;
+}
+function deleteMlAsset(id,typeKey){if(!confirm('Delete this asset? It will be moved to Trash.'))return;if(!AppState.data[typeKey])return;_mlSoftDelete(typeKey,id);showToast('Asset moved to Trash','warning');}
+function deleteMlConsumable(id){if(!confirm('Delete? It will be moved to Trash.'))return;_mlSoftDelete('consumables',id);renderMlConsumables();showToast('Moved to Trash','warning');}
+function deleteMlMaterial(id){if(!confirm('Delete? It will be moved to Trash.'))return;_mlSoftDelete('materials',id);renderMlMaterials();showToast('Moved to Trash','warning');}
+function deleteMlTp(id){if(!confirm('Delete? It will be moved to Trash.'))return;_mlSoftDelete('thirdParty',id);renderMlThirdParty();showToast('Moved to Trash','warning');}
 // Also keep old aliases that other code may call
 function updateConsumableField(id,field,val){mlSaveConsumable(id,field,val);}
 function updateMaterialField(id,field,val){mlSaveMaterial(id,field,val);}
