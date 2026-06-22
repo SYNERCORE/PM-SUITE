@@ -10913,13 +10913,19 @@ function _applyCPMDates(projId){
   const result=SHICCPMEngine.runFullCPM(pt,proj);
   if(result.hasCycle)return; // don't write back if cycle exists
   result.tasks.forEach(ct=>{
-    if(!ct._ES||!ct._EF)return;
+    if(ct._ES===undefined||ct._EF===undefined)return;
     const hasPreds=(ct.predecessors||'').trim().length>0;
-    if(!hasPreds)return; // keep manual dates for anchor tasks
+    // Anchor tasks: only write back if CPM date differs (it uses their stored startDate,
+    // so this is a no-op unless duration changed). Successor tasks always get CPM dates.
     const i=(AppState.data.tasks||[]).findIndex(x=>x.id===ct.id);
     if(i<0)return;
-    AppState.data.tasks[i].startDate=ct._ES;
-    AppState.data.tasks[i].endDate=ct._EF;
+    if(hasPreds){
+      AppState.data.tasks[i].startDate=ct._ES;
+      AppState.data.tasks[i].endDate=ct._EF;
+    } else {
+      // Anchor: only update endDate if duration is set (startDate is the user's anchor)
+      if(ct.durationHrs>0||ct.milestone)AppState.data.tasks[i].endDate=ct._EF;
+    }
   });
 }
 
@@ -11190,9 +11196,9 @@ function runFullCPM(tasks, project) {
     const t    = map.get(id);
     const preds = parsePredecessors(t.predecessors || '');
     const dur  = getDurDays(t);
-    // Anchor tasks (no predecessors) with a manually set startDate use that date
-    // as the floor instead of projectStart, so stored dates are respected.
-    let   es   = (preds.length === 0 && t.startDate && t.startDate >= projectStart)
+    // Anchor tasks (no predecessors) with a manually set startDate always use
+    // that date — it is the user's intent, not constrained by projectStart.
+    let   es   = (preds.length === 0 && t.startDate)
                   ? t.startDate
                   : projectStart;
 
@@ -11548,8 +11554,10 @@ function renderGantt(){
       const isCrit=cpm?._isCritical||false;
       const tf=cpm?._TF||0;
 
-      const ts=(cpm?._ES)||t.startDate||p.startDate||minDate;
-      const te=(cpm?._EF)||t.dueDate||t.endDate||p.endDate||maxDate;
+      // Always use stored dates for bar position (keeps Gantt in sync with Task List).
+      // CPM _ES/_EF are only used for float bar and critical path decoration.
+      const ts=t.startDate||p.startDate||minDate;
+      const te=t.endDate||t.dueDate||p.endDate||maxDate;
       const tsStr=typeof ts==='object'?ts.toISOString().split('T')[0]:ts;
       const teStr=typeof te==='object'?te.toISOString().split('T')[0]:te;
       const lfStr=cpm?._LF?(typeof cpm._LF==='object'?cpm._LF.toISOString().split('T')[0]:cpm._LF):null;
