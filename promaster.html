@@ -9823,7 +9823,7 @@ function renderDetailGantt(){
   }
 
   // ── Date range ──
-  const allDates=[p.startDate,p.endDate,...tasks.flatMap(t=>[t.startDate,t.dueDate]),...allocs.flatMap(a=>[a.startDate,a.endDate])].filter(d=>d&&/^\d{4}-\d{2}-\d{2}$/.test(d));
+  const allDates=[p.startDate,p.endDate,...tasks.flatMap(t=>[t.startDate,t.endDate,t.dueDate]),...allocs.flatMap(a=>[a.startDate,a.endDate])].filter(d=>d&&/^\d{4}-\d{2}-\d{2}$/.test(d));
   if(!allDates.length){$('#detailTabContent').innerHTML=`<div class="card" style="padding:24px;text-align:center"><p style="color:var(--text-muted)">Tasks need start and due dates to show the Gantt chart.</p></div>`;return;}
 
   const mD=new Date(allDates.reduce((a,b)=>a<b?a:b));mD.setDate(mD.getDate()-2);
@@ -9896,7 +9896,7 @@ function renderDetailGantt(){
   tasks.forEach(t=>{
     const c=scColor[t.status]||'#8b949e';
     const s=t.startDate||p.startDate;
-    const e=t.dueDate||p.endDate;
+    const e=t.endDate||t.dueDate||p.endDate;
     if(!s||!e)return;
     const lft=pct(s);
     const wdt=wPct(s,e);
@@ -11037,7 +11037,7 @@ function showPredPicker(currentTaskId){
   // Parse existing predecessors into a working set
   const existing={};
   ($('#tPred').value||'').split(',').map(s=>s.trim()).filter(Boolean).forEach(entry=>{
-    const m=entry.match(/^(TSK-\d+)(FS|SS|FF|SF)?([+-]\d+d)?$/i);
+    const m=entry.match(/^([A-Za-z0-9_-]*[0-9])\s*(FS|SS|FF|SF)?\s*([+-]\d+d?)?$/i);
     if(m){existing[m[1].toUpperCase()]={type:(m[2]||'FS').toUpperCase(),lag:m[3]||''};}
   });
 
@@ -11138,7 +11138,7 @@ function _pprApplyToField(){
     const sign=document.querySelector(`.ppr-lsign[data-id="${id}"]`)?.value||'+';
     const lag=parseInt(document.querySelector(`.ppr-lag[data-id="${id}"]`)?.value)||0;
     const lagStr=lag>0?`${sign}${lag}d`:'';
-    parts.push(`${id}${type}${lagStr}`);
+    parts.push(`${id} ${type}${lagStr}`);
   });
   const field=$('#tPred');
   if(field)field.value=parts.join(', ');
