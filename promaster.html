@@ -11024,7 +11024,7 @@ function _pprApply(){
     const sign=document.querySelector(`.ppr-lsign[data-id="${id}"]`)?.value||'+';
     const lag=parseInt(document.querySelector(`.ppr-lag[data-id="${id}"]`)?.value)||0;
     const lagStr=lag>0?`${sign}${lag}d`:'';
-    parts.push(`${id}${type}${lagStr}`);
+    parts.push(`${id} ${type}${lagStr}`);
   });
   const preview=$('#pprPreview');
   if(preview)preview.textContent=parts.length?'Preview: '+parts.join(', '):'No predecessors selected.';
@@ -11109,7 +11109,7 @@ function parsePredecessors(predStr) {
     s = s.trim();
     if (!s) return null;
     // Groups: 1=id, 2=link type (optional), 3=lag (optional)
-    const m = s.match(/^([A-Za-z0-9_-]+)\s*(FS|SS|FF|SF)?\s*([+-]\d+d?)?$/i);
+    const m = s.match(/^([A-Za-z0-9_-]*[0-9])\s*(FS|SS|FF|SF)?\s*([+-]\d+d?)?$/i);
     if (!m) return null;
     const lagStr = (m[3] || '').replace(/d$/i, '');
     return {
@@ -11422,6 +11422,8 @@ let _ganttShowBaseline=true;
 function renderGantt(){
   AppState.ensureData();
   const{projects,tasks}=AppState.data;
+  // Self-heal stored dates on every render so they stay in sync with CPM
+  if(window.SHICCPMEngine)(AppState.data.projects||[]).forEach(p=>_applyCPMDates(p.id));
 
   // Gather all valid dates for auto range
   const allDates=[...tasks.flatMap(t=>[t.startDate,t.dueDate||t.endDate]),...projects.flatMap(p=>[p.startDate,p.endDate])].filter(d=>d&&/^\d{4}-\d{2}-\d{2}$/.test(d));
