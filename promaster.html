@@ -10855,7 +10855,10 @@ $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><tabl
 <button class="btn btn-danger btn-sm btn-icon" onclick="deleteTask('${t.id}')"><i class="fas fa-trash"></i></button>
 </div></td></tr>`).join('')}</tbody></table>${_pgNav("tasks",tasks,typeof renderTaskView==="function"?renderTaskView:null)}</div></div>`;}
 
+let _tEditingId=null; // tracks which task is open in the form
+
 function showTaskForm(id=null,defStatus='todo'){
+_tEditingId=id||null;
 // Fix #2b: snapshot for conflict detection if editing
 if(id && typeof _genericSnapshotForEdit==='function')_genericSnapshotForEdit('task_'+id,'tasks',id);
 const t=id?(AppState.data.tasks||[]).find(x=>x.id===id):null;
@@ -10887,7 +10890,10 @@ $('#taskModalBody').innerHTML=`<div class="form-grid">
 <div class="modal-footer">
 <button class="btn btn-secondary" onclick="closeModal('taskModal')">Cancel</button>
 <button class="btn btn-primary" onclick="saveTask('${id||''}')"><i class="fas fa-save"></i> ${id?'Update':'Create'}</button>
-</div>`; openModal('taskModal');}
+</div>`; openModal('taskModal');
+// Run live CPM preview immediately so read-only date fields show computed values on open
+if(_hasPred) setTimeout(_runFormCPMPreview, 50);
+}
 
 async function saveTask(id){
 // Fix #2b: conflict check before save
@@ -10968,6 +10974,44 @@ function _applyCPMDates(projId){
 
 function deleteTask(id){ return requestOrDelete('tasks', id); }
 
+// Live CPM preview: run CPM with current form values and push computed
+// start/end into the read-only fields so the user sees the result before saving.
+function _runFormCPMPreview(){
+  if(!window.SHICCPMEngine)return;
+  const projId=$('#tProj')?.value; if(!projId)return;
+  const predEl=$('#tPred'), startEl=$('#tStart'), endEl=$('#tEnd'), durEl=$('#tDur'), mileEl=$('#tMile');
+  if(!predEl||!startEl||!endEl)return;
+  const predStr=(predEl.value||'').trim();
+  if(!predStr)return; // no predecessor — nothing to preview
+  const isMile=mileEl?.value==='true';
+  const proj=(AppState.data.projects||[]).find(p=>p.id===projId);
+  const hpd=_getTaskProjHPD(projId);
+  const durDays=parseFloat(durEl?.value)||1;
+  const previewId=_tEditingId||'__cpm_preview__';
+  // Build snapshot of ALL project tasks except the one being edited, plus the current form state
+  const others=(AppState.data.tasks||[]).filter(t=>t.projectId===projId&&!t._deleted&&t.id!==previewId);
+  const thisTask={
+    id:previewId, projectId:projId,
+    startDate:startEl.value||proj?.startDate||'',
+    endDate:endEl.value||'',
+    durationHrs:isMile?0:durDays*hpd,
+    predecessors:predStr,
+    milestone:isMile
+  };
+  const result=SHICCPMEngine.runFullCPM([...others,thisTask],proj);
+  if(result.hasCycle)return;
+  const computed=result.tasks.find(t=>t.id===previewId);
+  if(!computed||!computed._ES)return;
+  startEl.value=computed._ES;
+  endEl.value=isMile?computed._ES:(computed._EF||computed._ES);
+  // Update duration display if not milestone
+  if(!isMile&&durEl){
+    const cal=SHICCPMEngine.getCalendar(proj);
+    const d=SHICCPMEngine.workingDaysBetween(computed._ES,computed._EF||computed._ES,cal);
+    if(d>0)durEl.value=d;
+  }
+}
+
 // Auto-sync Start / End / Duration / Milestone / Predecessor in the task form.
 // source: 'start' | 'end' | 'dur' | 'mile' | 'pred'
 function _tFormRecalc(source){
@@ -10995,11 +11039,12 @@ function _tFormRecalc(source){
     return;
   }
 
-  // Predecessor toggled: lock/unlock start+end fields
+  // Predecessor changed: lock/unlock start+end fields, then run live CPM preview
   if(source==='pred'){
     const ro=hasPred;
     startEl.readOnly=ro; startEl.style.opacity=ro?'.55':''; startEl.style.cursor=ro?'not-allowed':'';
     endEl.readOnly=ro;   endEl.style.opacity=ro?'.55':'';   endEl.style.cursor=ro?'not-allowed':'';
+    if(hasPred) _runFormCPMPreview(); // show computed dates immediately
     return;
   }
 
@@ -11010,9 +11055,11 @@ function _tFormRecalc(source){
     return;
   }
 
-  // Successor tasks: dates controlled by CPM, only duration is editable here
-  // (dates will be fixed by _applyCPMDates on save)
-  if(hasPred) return;
+  // Successor tasks: duration changed → recompute end via CPM preview
+  if(hasPred){
+    if(source==='dur') _runFormCPMPreview();
+    return;
+  }
 
   const s=startEl.value, e=endEl.value;
   const dur=parseFloat(durEl.value);
