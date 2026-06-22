@@ -7333,7 +7333,7 @@ if (typeof markRecordEditing === 'function') markRecordEditing('projects', id);
 function renderProjectDetail(){
   const p=(AppState.data.projects||[]).find(x=>x.id===detailProjectId);
   if(!p){renderProjects();return;}
-  const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===p.id);
+  const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===p.id&&!t._deleted);
   const costs=(AppState.data.costs||[]).filter(c=>c.projectId===p.id);
   const risks=(AppState.data.risks||[]).filter(r=>r.projectId===p.id);
   const actions=(AppState.data.actions||[]).filter(a=>a.projectId===p.id);
@@ -7756,7 +7756,7 @@ function saveDetailOverview(){
 }
 
 function renderDetailTasks(){
-  const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===detailProjectId);
+  const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===detailProjectId&&!t._deleted);
   const p=(AppState.data.projects||[]).find(x=>x.id===detailProjectId);
   const done=tasks.filter(t=>t.status==='done').length;
   const inp=tasks.filter(t=>t.status==='inprogress').length;
@@ -7803,9 +7803,7 @@ function renderDetailTaskRows(tasks){
 }
 
 function deleteDetailTask(id){
-  if(!confirm('Delete this task?'))return;
-  AppState.data.tasks=(AppState.data.tasks||[]).filter(t=>t.id!==id);
-  AppState.save();renderDetailTasks();showToast('Task deleted','warning');
+  requestOrDelete('tasks', id);
 }
 
 
@@ -10801,7 +10799,7 @@ ${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${taskProjectFilt
 </div></div>
 <div id="taskViewContent"></div>`;renderTaskView();}
 
-function getFilteredTasks(){return taskProjectFilter==='all'?AppState.data.tasks:(AppState.data.tasks||[]).filter(t=>t.projectId===taskProjectFilter);}
+function getFilteredTasks(){const all=(AppState.data.tasks||[]).filter(t=>!t._deleted);return taskProjectFilter==='all'?all:all.filter(t=>t.projectId===taskProjectFilter);}
 function renderTaskView(){
   if(!$('#taskViewContent'))return; // not on tasks page
   if(taskView==='kanban')renderKanban();else renderTaskTable();
