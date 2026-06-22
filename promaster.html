@@ -20375,6 +20375,7 @@ function softDelete(arrayKey, id) {
   r._deleted = true;
   r._deletedAt = new Date().toISOString();
   r._deletedBy = _currentUserProfile?.name || _currentUser?.email || 'unknown';
+  if (typeof _spTrackDeletion === 'function') _spTrackDeletion(arrayKey, id);
   return true;
 }
 
