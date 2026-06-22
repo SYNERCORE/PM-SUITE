@@ -11059,16 +11059,18 @@ function getCalendar(project) {
 // Returns a YYYY-MM-DD string.
 function addWorkingDays(dateStr, workingDays, calendar) {
   if (!dateStr) return dateStr;
-  if (workingDays === 0) return dateStr;
   const cal = calendar || DEFAULT_CALENDAR;
-  const sign = workingDays > 0 ? 1 : -1;
+  const sign = workingDays >= 0 ? 1 : -1;
   let remaining = Math.abs(workingDays);
   const dt = new Date(dateStr + 'T00:00:00');
 
-  // If start falls on a non-working day, move to the nearest working day first
+  // Snap to nearest working day in the travel direction first
   while (!cal.workDays.includes(dt.getDay())) {
     dt.setDate(dt.getDate() + sign);
   }
+
+  // If workingDays === 0 we still needed the snap above, now return
+  if (remaining === 0) return dt.toISOString().split('T')[0];
 
   while (remaining > 0) {
     dt.setDate(dt.getDate() + sign);
@@ -11172,12 +11174,13 @@ function runFullCPM(tasks, project) {
 
   // Duration in working days (durationHrs / hoursPerDay, fallback to date span)
   function getDurDays(t) {
+    if (t.milestone) return 0; // milestones are zero-duration
     if (t.durationHrs && t.durationHrs > 0) return t.durationHrs / cal.hoursPerDay;
     // Fallback: derive from existing start/end dates
     if (t.startDate && (t.endDate || t.dueDate)) {
       const s = t.startDate;
       const e = t.endDate || t.dueDate;
-      return Math.max(1, workingDaysBetween(s, e, cal));
+      return Math.max(0, workingDaysBetween(s, e, cal));
     }
     return 1; // default 1 working day
   }
@@ -11195,13 +11198,14 @@ function runFullCPM(tasks, project) {
 
     for (const p of preds) {
       const pred = map.get(p.id);
-      if (!pred || !pred._ES) continue;
+      if (!pred || pred._ES === undefined) continue;
       const lag = p.lagDays || 0;
       let constraint;
 
       switch (p.type) {
         case 'FS':
-          constraint = addWorkingDays(pred._EF, lag, cal);
+          // Successor starts the day AFTER predecessor finishes (+ lag)
+          constraint = addWorkingDays(pred._EF, lag + 1, cal);
           break;
         case 'SS':
           constraint = addWorkingDays(pred._ES, lag, cal);
@@ -11211,11 +11215,11 @@ function runFullCPM(tasks, project) {
           constraint = addWorkingDays(addWorkingDays(pred._EF, lag, cal), -dur, cal);
           break;
         case 'SF':
-          // succ EF >= pred ES + lag
+          // succ EF >= pred ES + lag  →  succ ES = that - dur
           constraint = addWorkingDays(addWorkingDays(pred._ES, lag, cal), -dur, cal);
           break;
         default:
-          constraint = addWorkingDays(pred._EF, lag, cal);
+          constraint = addWorkingDays(pred._EF, lag + 1, cal);
       }
 
       if (constraint > es) es = constraint;
@@ -11247,13 +11251,14 @@ function runFullCPM(tasks, project) {
 
     for (const s of succs) {
       const succ = map.get(s.id);
-      if (!succ || !succ._LS) continue;
+      if (!succ || succ._LS === undefined) continue;
       const lag = s.lagDays || 0;
       let constraint;
 
       switch (s.type) {
         case 'FS':
-          constraint = addWorkingDays(succ._LS, -lag, cal);
+          // pred LF must be the day BEFORE succ LS (mirror of forward +1)
+          constraint = addWorkingDays(succ._LS, -(lag + 1), cal);
           break;
         case 'SS':
           // pred LF = pred LS + dur = (succ LS - lag) + dur
@@ -11266,7 +11271,7 @@ function runFullCPM(tasks, project) {
           constraint = addWorkingDays(addWorkingDays(succ._LF, -lag, cal), dur, cal);
           break;
         default:
-          constraint = addWorkingDays(succ._LS, -lag, cal);
+          constraint = addWorkingDays(succ._LS, -(lag + 1), cal);
       }
 
       if (constraint < lf) lf = constraint;
