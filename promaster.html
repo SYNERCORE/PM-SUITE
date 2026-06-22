@@ -10926,7 +10926,9 @@ if(!t.name){showToast('Task name required','error');return;}
 if(id){const i=(AppState.data.tasks||[]).findIndex(x=>x.id===id);AppState.data.tasks[i]={...AppState.data.tasks[i],...t};}
 else AppState.data.tasks.push(t);
 _applyCPMDates(_tProjId);
-AppState.save();closeModal('taskModal');renderTaskView();showToast(id?'Task updated':'Task created','success');}
+AppState.save();closeModal('taskModal');
+if(typeof detailProjectId!=='undefined'&&detailProjectId&&typeof renderDetailTasks==='function'){renderDetailTasks();}else{renderTaskView();}
+showToast(id?'Task updated':'Task created','success');}
 
 // After any task save, run CPM on the project and write _ES/_EF back to
 // startDate/endDate for tasks that are CPM-scheduled (have predecessors or
@@ -11158,6 +11160,13 @@ function getCalendar(project) {
   return (project && project.calendar) ? project.calendar : DEFAULT_CALENDAR;
 }
 
+// Format a Date object as YYYY-MM-DD using LOCAL time (not UTC).
+function _localDateStr(dt) {
+  return dt.getFullYear() + '-' +
+    String(dt.getMonth() + 1).padStart(2, '0') + '-' +
+    String(dt.getDate()).padStart(2, '0');
+}
+
 // Advance (or retreat) `workingDays` working days from a date string.
 // Returns a YYYY-MM-DD string.
 function addWorkingDays(dateStr, workingDays, calendar) {
@@ -11173,13 +11182,13 @@ function addWorkingDays(dateStr, workingDays, calendar) {
   }
 
   // If workingDays === 0 we still needed the snap above, now return
-  if (remaining === 0) return dt.toISOString().split('T')[0];
+  if (remaining === 0) return _localDateStr(dt);
 
   while (remaining > 0) {
     dt.setDate(dt.getDate() + sign);
     if (cal.workDays.includes(dt.getDay())) remaining--;
   }
-  return dt.toISOString().split('T')[0];
+  return _localDateStr(dt);
 }
 
 // Count working days between two YYYY-MM-DD strings (positive = forward).
@@ -11283,7 +11292,7 @@ function runFullCPM(tasks, project) {
     if (t.startDate && (t.endDate || t.dueDate)) {
       const s = t.startDate;
       const e = t.endDate || t.dueDate;
-      return Math.max(0, workingDaysBetween(s, e, cal));
+      return Math.max(1, workingDaysBetween(s, e, cal));
     }
     return 1; // default 1 working day
   }
