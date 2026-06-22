@@ -6731,6 +6731,7 @@ function _groupProjects(projects) {
 </script>
 <script>
 function renderProjects() {
+  if (detailProjectId) { renderProjectDetail(); return; }
   const el = $('#projects');
   const totalProjects = (AppState.data.projects||[]).filter(p => p && !p._deleted && p.status !== 'prospect').length;
   const view = _projPrefs.view;
