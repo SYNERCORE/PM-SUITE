@@ -10865,11 +10865,11 @@ $('#taskModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Task Name *</label><input class="form-input" id="tName" value="${t?.name||''}" placeholder="Task description"></div>
 <div class="form-group"><label class="form-label">Assigned To</label><input class="form-input" id="tAss" value="${t?.assignee||''}" placeholder="Name"></div>
 <div class="form-group"><label class="form-label">Department</label><input class="form-input" id="tDept" value="${t?.dept||''}" placeholder="Department"></div>
-<div class="form-group"><label class="form-label">Start Date</label><input class="form-input" type="date" id="tStart" value="${t?.startDate||''}"></div>
-<div class="form-group"><label class="form-label">End Date</label><input class="form-input" type="date" id="tEnd" value="${t?.endDate||''}"></div>
+<div class="form-group"><label class="form-label">Start Date</label><input class="form-input" type="date" id="tStart" value="${t?.startDate||''}" onchange="_tFormRecalc('start')"></div>
+<div class="form-group"><label class="form-label">End Date</label><input class="form-input" type="date" id="tEnd" value="${t?.endDate||''}" onchange="_tFormRecalc('end')"></div>
 <div class="form-group"><label class="form-label">Planned Hours</label><input class="form-input" type="number" id="tPH" value="${t?.plannedHrs||0}"></div>
 <div class="form-group"><label class="form-label">Actual Hours</label><input class="form-input" type="number" id="tAH" value="${t?.actualHrs||0}"></div>
-<div class="form-group"><label class="form-label">Duration (days) <span style="font-size:10px;color:var(--text-muted)">— CPM scheduling</span></label><input class="form-input" type="number" id="tDur" step="0.5" min="0" value="${t?.durationHrs!=null&&t.durationHrs>0?+(t.durationHrs/(_getTaskProjHPD(t?.projectId||$('#tProj')?.value))).toFixed(1):''}" placeholder="e.g. 5"></div>
+<div class="form-group"><label class="form-label">Duration (days) <span style="font-size:10px;color:var(--text-muted)">— CPM scheduling</span></label><input class="form-input" type="number" id="tDur" step="0.5" min="0" value="${t?.durationHrs!=null&&t.durationHrs>0?+(t.durationHrs/(_getTaskProjHPD(t?.projectId||$('#tProj')?.value))).toFixed(1):''}" placeholder="e.g. 5" onchange="_tFormRecalc('dur')"></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Predecessors <span style="font-size:10px;color:var(--text-muted)">e.g. TSK-001FS, TSK-002SS+2d, TSK-003FF-1d</span></label><div style="display:flex;gap:6px"><input class="form-input" id="tPred" value="${t?.predecessors||''}" placeholder="Leave blank if no dependencies" style="flex:1"><button type="button" class="btn btn-secondary btn-sm" style="white-space:nowrap;padding:0 10px" onclick="showPredPicker('${id||''}')"><i class="fas fa-list-ul"></i> Pick</button></div></div>
 <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="tStat">${['todo','inprogress','done','blocked'].map(s=>`<option value="${s}" ${(t?.status||defStatus)===s?'selected':''}>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Priority</label><select class="form-select" id="tPri">${['critical','high','medium','low'].map(s=>`<option value="${s}" ${t?.priority===s?'selected':''}>${s}</option>`).join('')}</select></div>
@@ -10930,6 +10930,38 @@ function _applyCPMDates(projId){
 }
 
 function deleteTask(id){ return requestOrDelete('tasks', id); }
+
+// Auto-sync Start / End / Duration in the task form.
+// source: 'start' | 'end' | 'dur'
+function _tFormRecalc(source){
+  const projId=$('#tProj')?.value;
+  const hpd=_getTaskProjHPD(projId)||8;
+  const cal=window.SHICCPMEngine?SHICCPMEngine.getCalendar((AppState.data.projects||[]).find(p=>p.id===projId)):null;
+  const addWD=(d,n)=>window.SHICCPMEngine?SHICCPMEngine.addWorkingDays(d,n,cal):d;
+  const diffWD=(s,e)=>window.SHICCPMEngine?SHICCPMEngine.workingDaysBetween(s,e,cal):0;
+
+  const startEl=$('#tStart'), endEl=$('#tEnd'), durEl=$('#tDur');
+  if(!startEl||!endEl||!durEl)return;
+
+  const s=startEl.value, e=endEl.value;
+  const dur=parseFloat(durEl.value)||0;
+
+  if(source==='dur'&&s&&dur>0){
+    // Duration changed → update End Date
+    endEl.value=addWD(s,dur);
+  } else if(source==='start'&&dur>0){
+    // Start changed with duration set → push End Date
+    endEl.value=addWD(s,dur);
+  } else if(source==='start'&&e&&s>e){
+    // Start moved past End → clear End
+    endEl.value=s;
+  } else if(source==='end'&&s&&e){
+    // End changed → recalculate Duration
+    const d=diffWD(s,e);
+    if(d>=0)durEl.value=d||'';
+    else{endEl.value=s;durEl.value='';}
+  }
+}
 
 function showPredPicker(currentTaskId){
   const projId=$('#tProj').value;
@@ -11422,8 +11454,6 @@ let _ganttShowBaseline=true;
 function renderGantt(){
   AppState.ensureData();
   const{projects,tasks}=AppState.data;
-  // Self-heal stored dates on every render so they stay in sync with CPM
-  if(window.SHICCPMEngine)(AppState.data.projects||[]).forEach(p=>_applyCPMDates(p.id));
 
   // Gather all valid dates for auto range
   const allDates=[...tasks.flatMap(t=>[t.startDate,t.dueDate||t.endDate]),...projects.flatMap(p=>[p.startDate,p.endDate])].filter(d=>d&&/^\d{4}-\d{2}-\d{2}$/.test(d));
