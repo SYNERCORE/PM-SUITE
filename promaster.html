@@ -9810,7 +9810,7 @@ function renderDetailGantt(){
   const pid=detailProjectId;
   const p=(AppState.data.projects||[]).find(x=>x.id===pid);
   if(!p)return;
-  const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===pid);
+  const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===pid&&!t._deleted);
   const allocs=(AppState.data.resourceAllocations||[]).filter(a=>a.projectId===pid&&a.startDate&&a.endDate);
 
   if(!tasks.length){
@@ -11671,7 +11671,7 @@ function renderGantt(){
   const{projects,tasks}=AppState.data;
 
   // Gather all valid dates for auto range
-  const allDates=[...tasks.flatMap(t=>[t.startDate,t.dueDate||t.endDate]),...projects.flatMap(p=>[p.startDate,p.endDate])].filter(d=>d&&/^\d{4}-\d{2}-\d{2}$/.test(d));
+  const allDates=[...tasks.filter(t=>!t._deleted).flatMap(t=>[t.startDate,t.dueDate||t.endDate]),...projects.flatMap(p=>[p.startDate,p.endDate])].filter(d=>d&&/^\d{4}-\d{2}-\d{2}$/.test(d));
   if(!allDates.length){
     $('#gantt').innerHTML=`<div class="empty-state"><i class="fas fa-stream" style="font-size:36px;margin-bottom:12px;display:block;opacity:.3"></i><p>No task dates to display. Add tasks with Start and Due dates.</p></div>`;
     return;
@@ -11744,6 +11744,7 @@ function renderGantt(){
     const pc=projColors[pi%projColors.length];
     const pt=tasks.filter(t=>{
       if(t.projectId!==p.id)return false;
+      if(t._deleted)return false;
       if(ganttStatusFilter!=='all'&&t.status!==ganttStatusFilter)return false;
       return true;
     });
@@ -11897,7 +11898,7 @@ function renderGantt(){
     </defs>`;
     let paths='';
 
-    const viewTasks=filteredProjects.flatMap(p=>tasks.filter(t=>t.projectId===p.id&&(ganttStatusFilter==='all'||t.status===ganttStatusFilter)));
+    const viewTasks=filteredProjects.flatMap(p=>tasks.filter(t=>t.projectId===p.id&&!t._deleted&&(ganttStatusFilter==='all'||t.status===ganttStatusFilter)));
 
     viewTasks.forEach(t=>{
       if(!t.predecessors)return;
@@ -11952,7 +11953,7 @@ function renderGantt(){
     <div style="width:${SV_W}px;min-width:${SV_W}px;padding:8px 4px;font-size:9px;font-weight:700;color:var(--text-secondary);border-left:1px solid var(--border);text-align:center">SV</div>
   </div>`;
 
-  const totalTaskCount=tasks.filter(t=>ganttProjFilter==='all'||t.projectId===ganttProjFilter).length;
+  const totalTaskCount=tasks.filter(t=>!t._deleted&&(ganttProjFilter==='all'||t.projectId===ganttProjFilter)).length;
   const critCount=[...cpmMap.values()].filter(t=>t._isCritical).length;
 
   // Check if any filtered project has a baseline set
@@ -20479,9 +20480,13 @@ function restoreFromTrash(arrayKey, id) {
 }
 
 // Permanently remove a soft-deleted record (admin only or after retention)
+// Uses _purged flag instead of hard-delete so sync doesn't re-add it from remote
 function purgeFromTrash(arrayKey, id) {
   if (!AppState.data[arrayKey]) return false;
-  AppState.data[arrayKey] = AppState.data[arrayKey].filter(r => r && r.id !== id);
+  const rec = AppState.data[arrayKey].find(r => r && r.id === id);
+  if (!rec) return false;
+  rec._purged = true;
+  rec._purgedAt = new Date().toISOString();
   return true;
 }
 
@@ -20490,9 +20495,9 @@ function getActive(arrayKey) {
   return (AppState.data[arrayKey] || []).filter(r => r && !r._deleted);
 }
 
-// Filter deleted records (for Trash view)
+// Filter deleted records (for Trash view) — excludes already-purged records
 function getTrashed(arrayKey) {
-  return (AppState.data[arrayKey] || []).filter(r => r && r._deleted);
+  return (AppState.data[arrayKey] || []).filter(r => r && r._deleted && !r._purged);
 }
 
 // Auto-purge records older than retention (run on app start)
@@ -20505,13 +20510,11 @@ function autoPurgeOldTrash() {
     'assetHistory','assetUtilization'];
   arrays.forEach(k => {
     if (!AppState.data[k]) return;
-    const before = AppState.data[k].length;
-    AppState.data[k] = AppState.data[k].filter(r => {
-      if (!r || !r._deleted) return true;
+    AppState.data[k].forEach(r => {
+      if (!r || !r._deleted || r._purged) return;
       const t = new Date(r._deletedAt || 0).getTime();
-      return t > cutoff;
+      if (t <= cutoff) { r._purged = true; r._purgedAt = new Date().toISOString(); purged++; }
     });
-    purged += before - AppState.data[k].length;
   });
   if (purged > 0) {
     console.log('[Trash] Auto-purged ' + purged + ' records older than ' + SOFT_DELETE_RETENTION_DAYS + ' days');
@@ -20649,11 +20652,13 @@ function purgeAllTrash() {
     'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
     'assetHistory','assetUtilization'];
   let purged = 0;
+  const now = new Date().toISOString();
   arrays.forEach(k => {
     if (!AppState.data[k]) return;
-    const before = AppState.data[k].length;
-    AppState.data[k] = AppState.data[k].filter(r => !r || !r._deleted);
-    purged += before - AppState.data[k].length;
+    AppState.data[k].forEach(r => {
+      if (!r || !r._deleted || r._purged) return;
+      r._purged = true; r._purgedAt = now; purged++;
+    });
   });
   AppState.save();
   showToast('Purged ' + purged + ' item(s)', 'warning', 4000);
