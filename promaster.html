@@ -18289,13 +18289,13 @@ function _openRecentItem(r) {
 <script>
 function renderMasterlist(){
   const d=AppState.data;
-  const personnel=(d.resources||[]);
-  const equipment=(d.equipment||[]);
-  const tools=(d.tools||[]);
-  const vehicles=(d.vehicles||[]);
-  const consumables=(d.consumables||[]);
-  const materials=(d.materials||[]);
-  const thirdParty=(d.thirdParty||[]);
+  const personnel=getActive('resources');
+  const equipment=getActive('equipment');
+  const tools=getActive('tools');
+  const vehicles=getActive('vehicles');
+  const consumables=getActive('consumables');
+  const materials=getActive('materials');
+  const thirdParty=getActive('thirdParty');
 
   const totFleet=equipment.reduce((s,r)=>s+r.dailyRate*30,0)+tools.reduce((s,r)=>s+r.dailyRate*30,0)+vehicles.reduce((s,r)=>s+r.dailyRate*30,0);
   const totStock=consumables.reduce((s,c)=>s+c.qtyOnHand*c.unitCost,0)+materials.reduce((s,m)=>s+m.qty*m.unitCost,0);
