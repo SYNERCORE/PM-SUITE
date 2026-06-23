@@ -548,20 +548,93 @@ const DATA_MIGRATIONS={
 function getStoredDataVersion(){return localStorage.getItem('shic_data_version')||'1.0.0';}
 function setStoredDataVersion(v){localStorage.setItem('shic_data_version',v);}
 
+// ── AES-GCM localStorage encryption ─────────────────────────
+// Key is derived per-user from M365 UID via PBKDF2. Null before login.
+let _cryptoKey = null;
+
+async function _initEncryption(uid) {
+  try {
+    const saltKey = 'shic_enc_salt_' + uid;
+    let saltHex = localStorage.getItem(saltKey);
+    let salt;
+    if (saltHex) {
+      salt = new Uint8Array(saltHex.match(/../g).map(h => parseInt(h, 16)));
+    } else {
+      salt = crypto.getRandomValues(new Uint8Array(16));
+      saltHex = Array.from(salt).map(b => b.toString(16).padStart(2,'0')).join('');
+      localStorage.setItem(saltKey, saltHex);
+    }
+    const km = await crypto.subtle.importKey(
+      'raw', new TextEncoder().encode(uid + 'shic_v1'), 'PBKDF2', false, ['deriveKey']
+    );
+    _cryptoKey = await crypto.subtle.deriveKey(
+      { name:'PBKDF2', salt, iterations:100000, hash:'SHA-256' },
+      km, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']
+    );
+    console.log('[SHIC] Local data encryption active');
+  } catch(e) {
+    console.warn('[SHIC] Encryption init failed:', e.message);
+    _cryptoKey = null;
+  }
+}
+
+async function _encryptAndStore(json) {
+  if (!_cryptoKey) return false;
+  try {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({name:'AES-GCM',iv}, _cryptoKey, new TextEncoder().encode(json));
+    const ivHex = Array.from(iv).map(b=>b.toString(16).padStart(2,'0')).join('');
+    const ctB64 = btoa(String.fromCharCode(...new Uint8Array(ct)));
+    const enc = JSON.stringify({__enc:1,iv:ivHex,ct:ctB64});
+    localStorage.setItem('pm_data', enc);
+    localStorage.setItem('shic_data_backup', enc);
+    return true;
+  } catch(e) { console.warn('[SHIC] Encrypt failed:', e.message); return false; }
+}
+
+async function _decryptFromStorage() {
+  if (!_cryptoKey) return null;
+  try {
+    const s = localStorage.getItem('pm_data') || localStorage.getItem('shic_data_backup');
+    if (!s) return null;
+    const p = JSON.parse(s);
+    if (!p.__enc) return s; // plaintext — return as-is for migration
+    const iv = new Uint8Array(p.iv.match(/../g).map(h=>parseInt(h,16)));
+    const ct = Uint8Array.from(atob(p.ct), c=>c.charCodeAt(0));
+    const pt = await crypto.subtle.decrypt({name:'AES-GCM',iv}, _cryptoKey, ct);
+    return new TextDecoder().decode(pt);
+  } catch(e) { console.warn('[SHIC] Decrypt failed — using fallback:', e.message); return null; }
+}
+
 const AppState={currentPage:'dashboard',theme:localStorage.getItem('pm_theme')||'dark',data:null,
 save(){
   if(!this.data)this.data=getDefaultData();
   try{
     const json=JSON.stringify(this.data);
-    localStorage.setItem('pm_data',json);
-    localStorage.setItem('shic_data_backup',json); // redundant copy — survives accidental pm_data wipes
+    if(_cryptoKey){
+      // Async encrypt — fire-and-forget; overwrites pm_data with ciphertext
+      _encryptAndStore(json).catch(()=>{
+        localStorage.setItem('pm_data',json);
+        localStorage.setItem('shic_data_backup',json);
+      });
+    }else{
+      localStorage.setItem('pm_data',json);
+      localStorage.setItem('shic_data_backup',json);
+    }
   }catch(e){}
 },
 load(){
   try{
     const s=localStorage.getItem('pm_data');
     if(s){
-      this.data=JSON.parse(s);
+      const p=JSON.parse(s);
+      if(p.__enc){
+        // Encrypted — cannot decode synchronously before login; start with defaults.
+        // _decryptFromStorage() + AppState.data reassignment happens in doM365Login().
+        this.data=getDefaultData();
+      }else{
+        this.data=p;
+      }
     }else{
       this.data=getDefaultData();
     }
@@ -1335,19 +1408,61 @@ setTimeout(()=>document.addEventListener('click',function h(e){
 if(!$('#notifBtn').contains(e.target)){p.classList.remove('open');document.removeEventListener('click',h);}
 }),10);}}
 
+function _generateSmartNotifs(){
+  // Auto-generate notifications from live data — never persisted, always fresh
+  const smart=[];
+  if(!AppState.data)return smart;
+  const today=new Date().toISOString().slice(0,10);
+  // Overdue tasks
+  (AppState.data.tasks||[]).filter(t=>!t._deleted&&t.status!=='done'&&t.dueDate&&t.dueDate<today).forEach(t=>{
+    smart.push({id:'ot_'+t.id,type:'warning',title:'Overdue Task',
+      message:`"${t.name||t.id}" was due ${t.dueDate}`,
+      onclick:`navigate('tasks')`,read:false,auto:true});
+  });
+  // Pending deletion requests (admin only)
+  if(typeof isAdminUser==='function'&&isAdminUser()){
+    const pend=(AppState.data.deletionRequests||[]).filter(r=>r.status==='pending');
+    if(pend.length)smart.push({id:'dr_pending',type:'info',title:'Deletion Requests Pending',
+      message:`${pend.length} request${pend.length!==1?'s':''} awaiting your approval`,
+      onclick:`navigate('deletionRequests')`,read:false,auto:true});
+  }
+  // My pending deletion requests
+  const myPend=(AppState.data.deletionRequests||[]).filter(r=>r.requestedByEmail===(_currentUserProfile?.email||'')&&r.status==='pending');
+  if(myPend.length)smart.push({id:'my_dr',type:'info',title:'Your Deletion Requests',
+    message:`${myPend.length} of your request${myPend.length!==1?'s are':' is'} pending admin approval`,
+    onclick:`navigate('deletionRequests')`,read:false,auto:true});
+  // Sync error
+  if(typeof _syncState!=='undefined'&&_syncState==='error')
+    smart.push({id:'sync_err',type:'error',title:'Sync Error',
+      message:'Last SharePoint sync failed — check connection',read:false,auto:true});
+  // Active projects with no recent update (>7 days no progress change)
+  const stale=(AppState.data.projects||[]).filter(p=>{
+    if(p.status!=='active'||p._deleted)return false;
+    if(!p._updatedAt)return false;
+    return(Date.now()-new Date(p._updatedAt).getTime())>7*24*60*60*1000;
+  });
+  if(stale.length)smart.push({id:'stale_proj',type:'warning',title:'Projects Need Update',
+    message:`${stale.length} active project${stale.length!==1?'s have':' has'} no updates in 7+ days`,
+    onclick:`navigate('projects')`,read:false,auto:true});
+  return smart;
+}
+
 function renderNotifPanel(){
 AppState.ensureData();
-const notifs=AppState.data.notifications||[];
-const unread=notifs.filter(n=>!n.read).length;
+const stored=AppState.data.notifications||[];
+const smart=_generateSmartNotifs();
+// Merge: smart notifs on top, then stored manual ones
+const all=[...smart,...stored.filter(n=>!smart.find(s=>s.id===n.id))];
+const unread=all.filter(n=>!n.read).length;
 const icons={error:'🔴',warning:'🟠',info:'🔵',success:'🟢'};
 $('#notifPanel').innerHTML=`<div class="notif-panel-header">Notifications <span class="badge badge-red">${unread}</span>
 <span style="font-size:10px;cursor:pointer;color:var(--accent-blue)" onclick="markAllRead()">Mark all read</span></div>
 <div style="max-height:340px;overflow-y:auto">
-${notifs.map(n=>`<div class="notif-item ${n.read?'':'unread'}">
+${all.length?all.map(n=>`<div class="notif-item ${n.read?'':'unread'}" ${n.onclick?`onclick="${n.onclick};toggleNotifications()"style="cursor:pointer"`:''}>
 <span style="font-size:14px">${icons[n.type]||'●'}</span>
-<div><div class="notif-title">${n.title}</div><div class="notif-time">${n.message}</div><div class="notif-time">${n.time}</div></div>
-</div>`).join('')}</div>
-<div style="padding:8px;text-align:center;font-size:11px;color:var(--accent-blue);cursor:pointer">View all</div>`;
+<div><div class="notif-title">${n.title}</div><div class="notif-time">${n.message||''}</div>${n.time?`<div class="notif-time">${n.time}</div>`:''}</div>
+</div>`).join(''):'<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px"><i class="fas fa-check-circle" style="font-size:20px;display:block;margin-bottom:6px;opacity:.3"></i>All caught up!</div>'}
+</div>`;
 $('#notifDot').style.display=unread?'':'none';}
 
 function markAllRead(){(AppState.data.notifications||[]).forEach(n=>n.read=true);renderNotifPanel();}
@@ -1417,8 +1532,10 @@ ctx.fillStyle='rgba(56,139,253,0.25)';const h1=(d1[i]/mx)*cH;ctx.fillRect(x,pd.t
 ctx.fillStyle='#388bfd';const h2=(d2[i]/mx)*cH;ctx.fillRect(x+bW+2,pd.t+cH-h2,bW,h2);
 ctx.fillStyle='#8b949e';ctx.font='9px Outfit';ctx.textAlign='center';ctx.fillText(l.replace('PRJ-','P'),x+bW,H-4);});}
 
-function sc(icon,label,value,sub,color,bg){
-return`<div class="stat-card"><div class="stat-icon" style="background:${bg}"><i class="${icon}" style="color:${color}"></i></div>
+function sc(icon,label,value,sub,color,bg,onclick){
+const clickStyle=onclick?'cursor:pointer;transition:transform .12s,box-shadow .12s'+'':' ';
+const clickAttr=onclick?`onclick="${onclick}" title="Click to view details"`:'';
+return`<div class="stat-card" ${clickAttr} style="${onclick?'cursor:pointer':''}"><div class="stat-icon" style="background:${bg}"><i class="${icon}" style="color:${color}"></i></div>
 <div class="stat-info"><div class="label">${label}</div><div class="value" style="color:${color}">${value}</div><div class="change">${sub}</div></div></div>`;}
 
 // ── Recently Viewed strip for dashboard ─────────────────────
@@ -1545,18 +1662,34 @@ async function doM365Login() {
     _currentUser = { uid, email, displayName: name };
     _currentUserProfile = { ...profile, name, email, uid };
     _m365LoggedIn = true;
+    // Initialize AES-GCM encryption key tied to this user's M365 UID
+    if (typeof _initEncryption === 'function') await _initEncryption(uid);
     // One-time cleanup of legacy base64 file data
     try { _cleanupLegacyFileData(); } catch(e) { console.warn('Cleanup error:', e); }
     // Update sidebar
     const sidebarLabel = document.getElementById('sidebarUserLabel');
     if (sidebarLabel) sidebarLabel.textContent = name + (profile.isAdmin ? ' · Admin' : '');
     showAuthOverlay(false);
-    // Boot the app — reload from localStorage/backup first (survives sign-out)
-    _restoreLocalData();
+    // Boot — try decrypting local data; fall back to plaintext if key missing
+    if (typeof _decryptFromStorage === 'function') {
+      const decJson = await _decryptFromStorage();
+      if (decJson) {
+        try { AppState.data = JSON.parse(decJson); } catch(e) { _restoreLocalData(); }
+      } else { _restoreLocalData(); }
+    } else { _restoreLocalData(); }
+    // Migrate existing plaintext pm_data → encrypted now that key is ready
+    if (typeof _encryptAndStore === 'function' && _cryptoKey) {
+      const raw = localStorage.getItem('pm_data');
+      if (raw) { try { const p=JSON.parse(raw); if(!p.__enc) _encryptAndStore(JSON.stringify(AppState.data)); } catch(e){} }
+    }
     if (typeof migrateData === 'function') migrateData();
     if (typeof buildSidebar === 'function') buildSidebar();
     navigate(AppState.currentPage || 'dashboard');
     showToast('Welcome, ' + name + '!', 'success', 3000);
+    // Start session inactivity timer
+    if (typeof _startSessionTimer === 'function') _startSessionTimer();
+    // Write login event to SP audit log (fire-and-forget)
+    if (typeof spWriteAuditLog === 'function') spWriteAuditLog('login', 'session', uid, name, { email });
     // Initialize SharePoint sync
     if (typeof spAutoInit === 'function') spAutoInit().catch(e => console.warn('[SP] Auto-init error:', e.message));
   } catch(e) {
@@ -1751,6 +1884,8 @@ async function doLogoutAsync(){
   _m365Account = null;
   _m365AuthMsal = null;
   _m365LoggedIn = false;
+  _cryptoKey = null; // discard in-memory key — localStorage data remains encrypted
+  if (typeof _stopSessionTimer === 'function') _stopSessionTimer();
   _usersListId = null;
   if (!_spOfflineQueue) {
     _spLastSavedHash = '';
@@ -3125,6 +3260,8 @@ setTimeout(() => {
       // this clears any stale "pending" state from before
       try { _captureSyncedSnapshot(); } catch(e) {}
       try { updateSyncStatusButton(); } catch(e) {}
+      // Auto-backup: export JSON to Downloads at most once per day, if enabled in Settings
+      try { _maybeAutoBackup(); } catch(e) {}
       return result;
     } catch(e) {
       _syncState = 'error';
@@ -3134,6 +3271,110 @@ setTimeout(() => {
     }
   };
 })();
+
+// ── SharePoint Audit Log ──────────────────────────────────────
+// Writes immutable audit events to SHIC_AuditLog SP list.
+// Non-blocking (fire-and-forget). Creates the list on first write if absent.
+let _auditListId = null;
+
+async function spWriteAuditLog(action, entityType, entityId, entityName, details) {
+  if (!_spConnected || !_spSiteId) return;
+  try {
+    const token = await getSpToken();
+    if (!token) return;
+    // Resolve list ID once
+    if (!_auditListId) {
+      const lr = await fetch(
+        `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists?$filter=displayName eq 'SHIC_AuditLog'&$select=id`,
+        { headers: { Authorization: 'Bearer ' + token } }
+      );
+      const ld = await lr.json();
+      if (ld.value?.length > 0) {
+        _auditListId = ld.value[0].id;
+      } else {
+        // Create list
+        const cr = await fetch(`https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists`, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            displayName: 'SHIC_AuditLog',
+            list: { template: 'genericList' },
+          })
+        });
+        const cd = await cr.json();
+        _auditListId = cd.id;
+      }
+    }
+    // Append audit record
+    await fetch(`https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${_auditListId}/items`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: {
+        Title: action,
+        EntityType: String(entityType || ''),
+        EntityId: String(entityId || ''),
+        EntityName: String(entityName || '').substring(0, 255),
+        UserName: String(_currentUserProfile?.name || ''),
+        UserEmail: String(_currentUserProfile?.email || ''),
+        Details: typeof details === 'object' ? JSON.stringify(details).substring(0, 2000) : String(details || ''),
+      }})
+    });
+  } catch(e) {
+    console.warn('[SHIC Audit] Write skipped:', e.message);
+  }
+}
+
+// ── Read audit log from SharePoint (admin UI) ─────────────────
+async function spReadAuditLog(limit) {
+  if (!_spConnected || !_spSiteId) return [];
+  try {
+    const token = await getSpToken();
+    if (!token) return [];
+    if (!_auditListId) await spWriteAuditLog('_ping', '', '', '', {}); // ensure list exists
+    if (!_auditListId) return [];
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${_auditListId}/items?$expand=fields&$orderby=createdDateTime desc&$top=${limit||100}`,
+      { headers: { Authorization: 'Bearer ' + token } }
+    );
+    const data = await res.json();
+    return (data.value || []).map(i => ({
+      action: i.fields?.Title || '',
+      entityType: i.fields?.EntityType || '',
+      entityId: i.fields?.EntityId || '',
+      entityName: i.fields?.EntityName || '',
+      userName: i.fields?.UserName || '',
+      userEmail: i.fields?.UserEmail || '',
+      details: i.fields?.Details || '',
+      timestamp: i.createdDateTime || '',
+    }));
+  } catch(e) {
+    console.warn('[SHIC Audit] Read failed:', e.message);
+    return [];
+  }
+}
+
+// ── Auto-backup helper ────────────────────────────────────────
+function _maybeAutoBackup() {
+  if (!AppState.data?.settings?.autoBackup) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const lastKey = 'shic_autobackup_last';
+  if (localStorage.getItem(lastKey) === today) return; // already ran today
+  localStorage.setItem(lastKey, today);
+  try {
+    const backup = {
+      version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '?',
+      exportedAt: new Date().toISOString(),
+      autoBackup: true,
+      data: AppState.data,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `shic_autobackup_${today}.json`;
+    a.click();
+    console.log('[SHIC] Auto-backup saved for', today);
+  } catch(e) { console.warn('[SHIC] Auto-backup failed:', e.message); }
+}
 
 // ── 3. SAVE INDICATOR ───────────────────────────────────────
 let _saveIndicatorTimer = null;
@@ -6402,10 +6643,11 @@ initOfflineSupport();
 // Re-run persistent patches LAST so overrides apply after all functions are defined
 setTimeout(runPersistentPatches,200);
 document.documentElement.setAttribute('data-theme',AppState.theme);
-$('#themeIcon').className=AppState.theme==='dark'?'fas fa-moon':'fas fa-sun';
-buildSidebar();renderDashboard();renderNotifPanel();
-setInterval(()=>AppState.save(),30000);
-showToast('SHIC loaded — Welcome back!','success',2500);
+// Apply theme to toggle icon if it exists (safe before auth)
+const _themeIcon=$('#themeIcon');if(_themeIcon)_themeIcon.className=AppState.theme==='dark'?'fas fa-moon':'fas fa-sun';
+// App UI (sidebar, dashboard) is rendered AFTER login in doM365Login() — not here.
+// This prevents the app from being accessible without M365 authentication.
+setInterval(()=>{if(_m365LoggedIn)AppState.save();},30000);
 
   // ── Register all functions on window for onclick handlers ─
   [showAuthForm,togglePassView,doLogout,
@@ -6459,6 +6701,10 @@ const budgetUtil=Math.round((totalSpent/totalBudget)*100);
 const now=new Date();
 const timeStr=now.toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
 const dateStr=now.toLocaleDateString('en',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+// Sensitive field masking: hide budget figures for non-admins
+const isAdm=typeof isAdminUser==='function'&&isAdminUser();
+const _budgetDisplay=isAdm?fmtNum(totalSpent):'●●●●●';
+const _budgetSub=isAdm?`${isNaN(budgetUtil)?0:budgetUtil}% of ${fmtNum(totalBudget)}`:'Admin only';
 
 $('#dashboard').innerHTML=`
 <div class="welcome-banner">
@@ -6466,16 +6712,16 @@ $('#dashboard').innerHTML=`
 <div style="text-align:right"><div class="banner-time" id="dashClock">${timeStr}</div><div style="font-size:10px;color:rgba(255,255,255,.6)">Local Time</div></div></div>
 ${_renderRecentStrip()}
 <div class="grid grid-4" style="margin-bottom:14px">
-${sc('fas fa-briefcase','Total Projects',projects.length,`${active} active`,'#388bfd','rgba(56,139,253,.15)')}
-${sc('fas fa-chart-line','Avg Progress',avgProg+'%',`${completed} completed`,'#3fb950','rgba(63,185,80,.15)')}
-${sc('fas fa-dollar-sign','Budget Used',fmtNum(totalSpent),`${budgetUtil}% of ${fmtNum(totalBudget)}`,'#f0a450','rgba(240,164,80,.15)')}
-${sc('fas fa-exclamation-triangle','Open Risks',openRisks,`${overdueAct} overdue actions`,'#f85149','rgba(248,81,73,.15)')}
+${sc('fas fa-briefcase','Total Projects',projects.length,`${active} active`,'#388bfd','rgba(56,139,253,.15)',"navigate('projects')")}
+${sc('fas fa-chart-line','Avg Progress',avgProg+'%',`${completed} completed`,'#3fb950','rgba(63,185,80,.15)',"navigate('projects')")}
+${sc('fas fa-dollar-sign','Budget Used',_budgetDisplay,_budgetSub,'#f0a450','rgba(240,164,80,.15)',isAdm?"navigate('costs')":null)}
+${sc('fas fa-exclamation-triangle','Open Risks',openRisks,`${overdueAct} overdue actions`,'#f85149','rgba(248,81,73,.15)',"navigate('risks')")}
 </div>
 <div class="grid grid-4" style="margin-bottom:14px">
-${sc('fas fa-tasks','Action Items',openActions,`${overdueAct} overdue`,'#bc8cff','rgba(188,140,255,.15)')}
-${sc('fas fa-hard-hat','Manpower Today',totalMP,'Across all sites','#39d3f2','rgba(57,211,242,.15)')}
-${sc('fas fa-check-double','Open NCRs',openNCR,'QA/QC tracking','#fb8f44','rgba(251,143,68,.15)')}
-${sc('fas fa-flag','At Risk',delayed,`of ${active} active projects`,'#f85149','rgba(248,81,73,.15)')}
+${sc('fas fa-tasks','Action Items',openActions,`${overdueAct} overdue`,'#bc8cff','rgba(188,140,255,.15)',"navigate('actions')")}
+${sc('fas fa-hard-hat','Manpower Today',totalMP,'Across all sites','#39d3f2','rgba(57,211,242,.15)',"navigate('manpower')")}
+${sc('fas fa-check-double','Open NCRs',openNCR,'QA/QC tracking','#fb8f44','rgba(251,143,68,.15)',"navigate('qaqc')")}
+${sc('fas fa-flag','At Risk',delayed,`of ${active} active projects`,'#f85149','rgba(248,81,73,.15)',"navigate('projects')")}
 </div>
 <div class="grid grid-3" style="margin-bottom:14px">
 <div class="card"><div class="card-title">Project Status Distribution</div>
@@ -8459,7 +8705,7 @@ function renderDetailRisks(){
   </div>`;
 }
 function updateRiskField(id,field,val){const r=(AppState.data.risks||[]).find(r=>r.id===id);if(r){r[field]=val;AppState.save();}}
-function deleteDetailRisk(id){if(!confirm('Delete risk?'))return;AppState.data.risks=(AppState.data.risks||[]).filter(r=>r.id!==id);AppState.save();renderDetailRisks();buildSidebar();showToast('Risk deleted','warning');}
+function deleteDetailRisk(id){if(requestOrDelete('risks',id)){renderDetailRisks();buildSidebar();}}
 
 function renderDetailActions(){
   const actions=(AppState.data.actions||[]).filter(a=>a.projectId===detailProjectId);
@@ -8491,7 +8737,7 @@ function renderDetailActions(){
   </div>`;
 }
 function updateActionField(id,field,val){const a=(AppState.data.actions||[]).find(a=>a.id===id);if(a){a[field]=val;AppState.save();}}
-function deleteDetailAction(id){if(!confirm('Delete action?'))return;AppState.data.actions=(AppState.data.actions||[]).filter(a=>a.id!==id);AppState.save();renderDetailActions();buildSidebar();showToast('Action deleted','warning');}
+function deleteDetailAction(id){if(requestOrDelete('actions',id)){renderDetailActions();buildSidebar();}}
 
 
 
@@ -9223,9 +9469,7 @@ function saveUsageLog(){
 }
 
 function deleteUsageLog(id){
-  if(!confirm('Delete this transaction?'))return;
-  AppState.data.resourceUsageLogs=(AppState.data.resourceUsageLogs||[]).filter(l=>l.id!==id);
-  AppState.save();renderDetailAllocation();showToast('Transaction deleted','warning');
+  if(requestOrDelete('resourceUsageLogs',id)){renderDetailAllocation();}
 }
 
 // ── RESOURCE ALLOCATION EXCEL EXPORT ──────────────────────
@@ -10090,33 +10334,48 @@ function _drawGanttArrows(){
 
 // Debounced save helper — waits 600ms after last keystroke then saves
 let _mlSaveTimer=null;
+function _stampEdit(item,field,oldVal){
+  const by=(typeof _currentUserProfile!=='undefined')?(_currentUserProfile?.name||_currentUserProfile?.email||'unknown'):'unknown';
+  item._updatedAt=new Date().toISOString();
+  item._updatedBy=by;
+  // Record before/after for each field change (keep last 50 entries per record)
+  if(field!==undefined&&oldVal!==undefined){
+    if(!item._editHistory)item._editHistory=[];
+    item._editHistory.push({field,oldVal,newVal:item[field],by,at:item._updatedAt});
+    if(item._editHistory.length>50)item._editHistory=item._editHistory.slice(-50);
+  }
+}
 function mlSave(id,listKey,field,val){
   clearTimeout(_mlSaveTimer);
   if(!AppState.data[listKey])AppState.data[listKey]=[];
   const item=AppState.data[listKey].find(r=>r.id===id);
   if(!item)return;
-  item[field]=val;
+  const oldVal=item[field];
+  item[field]=val;_stampEdit(item,field,oldVal);
   _mlSaveTimer=setTimeout(()=>{AppState.save();mlFlash(id);},600);
 }
 function mlSaveConsumable(id,field,val){
   clearTimeout(_mlSaveTimer);
   const item=(AppState.data.consumables||[]).find(c=>c.id===id);
   if(!item)return;
-  item[field]=val;
+  const oldVal=item[field];
+  item[field]=val;_stampEdit(item,field,oldVal);
   _mlSaveTimer=setTimeout(()=>{AppState.save();mlFlash(id);},600);
 }
 function mlSaveMaterial(id,field,val){
   clearTimeout(_mlSaveTimer);
   const item=(AppState.data.materials||[]).find(m=>m.id===id);
   if(!item)return;
-  item[field]=val;
+  const oldVal=item[field];
+  item[field]=val;_stampEdit(item,field,oldVal);
   _mlSaveTimer=setTimeout(()=>{AppState.save();mlFlash(id);},600);
 }
 function mlSaveTp(id,field,val){
   clearTimeout(_mlSaveTimer);
   const item=(AppState.data.thirdParty||[]).find(t=>t.id===id);
   if(!item)return;
-  item[field]=val;
+  const oldVal=item[field];
+  item[field]=val;_stampEdit(item,field,oldVal);
   _mlSaveTimer=setTimeout(()=>{AppState.save();mlFlash(id);},600);
 }
 function mlFlash(id){
@@ -10391,21 +10650,44 @@ function submitDeletionRequest(arrayKey, id) {
 // ── Render the Deletion Requests page ─────────────────────
 </script>
 <script>
-function renderDeletionRequests() {
+// Active tab state for deletion requests view
+let _delReqTab = 'pending';
+
+function renderDeletionRequests(tab) {
+  if (tab) _delReqTab = tab;
   const isAdmin = isAdminUser();
   const all = AppState.data.deletionRequests || [];
   const myRequests = all.filter(r => r.requestedByEmail === (_currentUserProfile?.email||''));
   const pending = all.filter(r => r.status === 'pending');
+  const pendingCount = isAdmin ? pending.length : myRequests.filter(r=>r.status==='pending').length;
 
-  const reqs = isAdmin ? all : myRequests;
-  const pendingCount = isAdmin ? pending.length : myRequests.filter(r => r.status === 'pending').length;
+  // Filter by active tab
+  const allSource = isAdmin ? all : myRequests;
+  const reqs = _delReqTab === 'history'
+    ? allSource.filter(r => r.status !== 'pending')
+    : allSource.filter(r => r.status === 'pending');
 
-  // Sort: pending first, then by requestedAt desc
-  reqs.sort((a, b) => {
-    if (a.status === 'pending' && b.status !== 'pending') return -1;
-    if (b.status === 'pending' && a.status !== 'pending') return 1;
-    return (b.requestedAt||'').localeCompare(a.requestedAt||'');
-  });
+  reqs.sort((a,b) => (b.requestedAt||'').localeCompare(a.requestedAt||''));
+
+  // Collect edit audit trail from all data arrays (records with _updatedBy set)
+  const editAudit = [];
+  if (isAdmin && _delReqTab === 'history') {
+    const arrays = ['projects','tasks','resources','equipment','tools','vehicles',
+      'consumables','materials','thirdParty','risks','actions','procurements'];
+    arrays.forEach(key => {
+      (AppState.data[key]||[]).forEach(r => {
+        if (r._updatedBy && r._updatedAt) {
+          editAudit.push({
+            id: r.id, name: r.name||r.title||r.id,
+            arrayKey: key, updatedBy: r._updatedBy, updatedAt: r._updatedAt,
+          });
+        }
+      });
+    });
+    editAudit.sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''));
+  }
+
+  const tabStyle = (t) => `style="padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:none;${_delReqTab===t?'background:var(--accent-amber);color:#000':'background:var(--bg-hover);color:var(--text-secondary)'}"`;
 
   $('#deletionRequests').innerHTML = `
     <div class="section-header" style="margin-bottom:14px">
@@ -10413,9 +10695,13 @@ function renderDeletionRequests() {
         <div class="section-title"><i class="fas fa-clipboard-check" style="color:var(--accent-amber);margin-right:8px"></i>Deletion Requests</div>
         <div class="section-sub">${isAdmin ? 'All requests' : 'Your requests'} · ${pendingCount} pending</div>
       </div>
+      <div style="display:flex;gap:6px">
+        <button ${tabStyle('pending')} onclick="renderDeletionRequests('pending')"><i class="fas fa-clock" style="margin-right:5px"></i>Pending (${pendingCount})</button>
+        <button ${tabStyle('history')} onclick="renderDeletionRequests('history')"><i class="fas fa-history" style="margin-right:5px"></i>History</button>
+      </div>
     </div>
-    ${reqs.length === 0 ? `
-      <div class="empty-state"><i class="fas fa-clipboard"></i><p>${isAdmin ? 'No deletion requests' : 'You have no deletion requests'}</p></div>
+    ${reqs.length === 0 && (_delReqTab!=='history'||editAudit.length===0) ? `
+      <div class="empty-state"><i class="fas fa-clipboard"></i><p>${_delReqTab==='pending'?(isAdmin?'No pending deletion requests':'You have no pending requests'):'No reviewed requests yet'}</p></div>
     ` : `
       <div style="display:flex;flex-direction:column;gap:8px">
         ${reqs.map(r => {
@@ -10451,6 +10737,29 @@ function renderDeletionRequests() {
         }).join('')}
       </div>
     `}
+    ${(_delReqTab === 'history' && isAdmin && editAudit.length > 0) ? `
+      <div style="margin-top:20px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:8px">
+          <i class="fas fa-pencil-alt" style="color:var(--accent-blue)"></i>
+          Edit Audit Trail
+          <span class="badge badge-blue" style="font-size:10px">${editAudit.length} record${editAudit.length!==1?'s':''} with edits</span>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Record</th><th>Type</th><th>Last Edited By</th><th>Last Edited At</th>
+          </tr></thead>
+          <tbody>
+            ${editAudit.slice(0,100).map(e=>`<tr>
+              <td style="font-size:12px;font-weight:500">${e.name}</td>
+              <td><span class="badge badge-gray" style="font-size:9px">${e.arrayKey}</span></td>
+              <td style="font-size:11px"><i class="fas fa-user" style="margin-right:4px;color:var(--accent-blue)"></i>${e.updatedBy}</td>
+              <td style="font-size:11px;font-family:var(--font-mono);color:var(--text-muted)">${new Date(e.updatedAt).toLocaleString()}</td>
+            </tr>`).join('')}
+            ${editAudit.length>100?`<tr><td colspan="4" style="text-align:center;color:var(--text-muted);font-size:11px">Showing 100 of ${editAudit.length} records</td></tr>`:''}
+          </tbody>
+        </table></div>
+      </div>
+    ` : ''}
   `;
 }
 
@@ -10466,7 +10775,7 @@ function approveDeletionRequest(reqId) {
   req.reviewedBy = _currentUserProfile?.name || 'admin';
   req.reviewedAt = new Date().toISOString();
   AppState.save();
-  if (typeof auditLog === 'function') auditLog('delete_approved', 'Approved deletion: ' + req.recordType + ' ' + req.recordId, { requestId: reqId, requester: req.requestedBy });
+  if (typeof spWriteAuditLog === 'function') spWriteAuditLog('delete_approved', req.recordType, req.recordId, req.recordLabel, { requestId: reqId, requester: req.requestedBy });
   showToast(req.recordType + ' moved to Trash', 'success');
   renderDeletionRequests();
 }
@@ -10483,7 +10792,7 @@ function rejectDeletionRequest(reqId) {
   req.reviewedAt = new Date().toISOString();
   req.rejectionReason = (reason || '').trim() || 'No reason provided';
   AppState.save();
-  if (typeof auditLog === 'function') auditLog('delete_rejected', 'Rejected deletion: ' + req.recordType + ' ' + req.recordId, { requestId: reqId, requester: req.requestedBy, reason: req.rejectionReason });
+  if (typeof spWriteAuditLog === 'function') spWriteAuditLog('delete_rejected', req.recordType, req.recordId, req.recordLabel, { requestId: reqId, requester: req.requestedBy, reason: req.rejectionReason });
   showToast('Request rejected', 'warning');
   renderDeletionRequests();
 }
@@ -12837,9 +13146,7 @@ function renderResHistoryTab(){
 }
 
 function deleteResHistoryEntry(id){
-  if(!confirm('Delete this history entry?'))return;
-  AppState.data.assetHistory=(AppState.data.assetHistory||[]).filter(h=>h.id!==id);
-  AppState.save();renderResHistoryTab();showToast('Entry deleted','warning');
+  if(requestOrDelete('assetHistory',id)){renderResHistoryTab();}
 }
 
 
@@ -13338,10 +13645,8 @@ AppState.data.utilizationLog.push(log);
 AppState.save();closeModal('genericModal');resTab='utilization';renderResources();showToast('Utilization logged','success');}
 
 function deleteUtilLog(id){
-if(!confirm('Delete this log entry?'))return;
-if(!AppState.data.utilizationLog)AppState.data.utilizationLog=[];
-AppState.data.utilizationLog=(AppState.data.utilizationLog||[]).filter(l=>l.id!==id);
-AppState.save();renderUtilizationTab();showToast('Log deleted','warning');}
+  if(requestOrDelete('assetUtilization',id)){renderUtilizationTab();}
+}
 
 function showAddConsumable(){
 $('#genericModalTitle').textContent='Add Consumable';
@@ -17188,12 +17493,10 @@ function renderProjectDailyLogs(pid) {
 }
 
 function dmDeleteLog(id, pid) {
-  if (!confirm('Delete this meeting log entry?')) return;
-  AppState.data.dailyMeetingLogs = (AppState.data.dailyMeetingLogs || []).filter(l => l.id !== id);
-  AppState.save();
-  const el = document.getElementById('dmLogsTab');
-  if (el) el.innerHTML = renderProjectDailyLogs(pid);
-  showToast('Log deleted', 'warning');
+  if(requestOrDelete('dailyMeetingLogs',id)){
+    const el=document.getElementById('dmLogsTab');
+    if(el)el.innerHTML=renderProjectDailyLogs(pid);
+  }
 }
 
 </script>
@@ -17768,6 +18071,19 @@ ${renderSpPanel()}
     <div class="form-group"><label class="form-label">Currency</label><select class="form-select" id="sCurrency">${['PHP','USD','EUR','SAR','GBP'].map(c=>`<option ${settings.currency===c?'selected':''}>${c}</option>`).join('')}</select></div>
     <div class="form-group"><label class="form-label">Date Format</label><select class="form-select"><option>YYYY-MM-DD</option><option>DD/MM/YYYY</option><option>MM/DD/YYYY</option></select></div>
     <div class="form-group"><label class="form-label">Timezone</label><select class="form-select"><option>Asia/Manila</option><option>Asia/Riyadh</option><option>UTC</option><option>US/Eastern</option><option>Europe/London</option></select></div>
+    <div class="form-group">
+      <label class="form-label">Session Timeout</label>
+      <select class="form-select" id="sSessionTimeout">
+        ${[['0','Disabled (stay signed in)'],['15','15 minutes'],['30','30 minutes (recommended)'],['60','1 hour'],['120','2 hours']].map(([v,l])=>`<option value="${v}" ${String(settings.sessionTimeout??30)===v?'selected':''}>${l}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group" style="grid-column:1/-1">
+      <label class="form-label" style="display:flex;align-items:center;gap:10px">
+        <label class="toggle" style="width:38px;height:20px"><input type="checkbox" id="sAutoBackup" ${settings.autoBackup?'checked':''}><span class="toggle-slider"></span></label>
+        Auto-backup to Downloads after each SharePoint sync
+        <span style="font-size:10px;color:var(--text-muted)">(once per day — saves a JSON file to your Downloads folder)</span>
+      </label>
+    </div>
   </div>
   <div class="card">
     <div style="font-size:14px;font-weight:600;margin-bottom:14px">Notifications &amp; Preferences</div>
@@ -17800,6 +18116,7 @@ ${renderSpPanel()}
         <div style="font-size:10px;color:var(--accent-amber);padding:6px 10px;background:rgba(248,81,73,.07);border-radius:6px;border-left:3px solid var(--accent-amber)">
           <i class="fas fa-shield-alt" style="margin-right:5px"></i><strong>Admin Only</strong> — affects all team members
         </div>
+        <button class="btn btn-secondary" onclick="showAuditLogPanel()"><i class="fas fa-history" style="margin-right:6px;color:var(--accent-blue)"></i> View SharePoint Audit Log</button>
       </div>
     </div>
     <div style="margin-top:12px;padding:10px;background:var(--bg-hover);border-radius:6px;font-size:10px;color:var(--text-secondary);line-height:1.7">
@@ -17869,10 +18186,49 @@ ${renderSpPanel()}
 </div>`;
 }
 
+async function showAuditLogPanel(){
+  if(!isAdminUser()){showToast('Admins only','error');return;}
+  $('#genericModalTitle').textContent='SharePoint Audit Log';
+  $('#genericModalBody').innerHTML='<div style="padding:20px;text-align:center;color:var(--text-muted)"><i class="fas fa-spinner fa-spin" style="font-size:20px;display:block;margin-bottom:8px"></i>Loading audit log from SharePoint...</div>';
+  openModal('genericModal');
+  try{
+    const logs=typeof spReadAuditLog==='function'?await spReadAuditLog(200):[];
+    if(!logs.length){
+      $('#genericModalBody').innerHTML='<div class="empty-state"><i class="fas fa-history"></i><p>No audit events yet, or SharePoint is not connected.<br><small>Events are written when users log in, or admins approve/reject deletion requests.</small></p></div>';
+      return;
+    }
+    const actionColor={login:'#3fb950',delete_approved:'#f85149',delete_rejected:'#f0a450',_ping:'#8b949e'};
+    $('#genericModalBody').innerHTML=`
+    <div style="margin-bottom:10px;font-size:11px;color:var(--text-secondary)">${logs.length} event${logs.length!==1?'s':''} — most recent first · Stored in SharePoint (immutable)</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Timestamp</th><th>Action</th><th>Type</th><th>Record</th><th>User</th><th>Details</th></tr></thead>
+      <tbody>${logs.map(l=>{
+        const c=actionColor[l.action]||'#388bfd';
+        return`<tr>
+          <td style="font-size:10px;font-family:var(--font-mono);white-space:nowrap">${l.timestamp?new Date(l.timestamp).toLocaleString():''}</td>
+          <td><span class="badge" style="background:${c}22;color:${c};font-size:9px">${l.action}</span></td>
+          <td style="font-size:11px">${l.entityType||'—'}</td>
+          <td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis">${l.entityName||l.entityId||'—'}</td>
+          <td style="font-size:11px">${l.userName||l.userEmail||'—'}</td>
+          <td style="font-size:10px;color:var(--text-muted);max-width:180px;overflow:hidden;text-overflow:ellipsis">${l.details||''}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+  }catch(e){
+    $('#genericModalBody').innerHTML=`<div class="empty-state"><p>Error loading audit log: ${e.message}</p></div>`;
+  }
+  $('#genericModalFooter').innerHTML='<button class="btn btn-secondary" onclick="closeModal(\'genericModal\')">Close</button>';
+}
+
 function saveSettings(){
 AppState.data.settings.companyName=$('#sCompany').value;
 AppState.data.settings.currency=$('#sCurrency').value;
-AppState.save();showToast('Settings saved','success');}
+AppState.data.settings.autoBackup=!!document.getElementById('sAutoBackup')?.checked;
+AppState.data.settings.sessionTimeout=parseInt(document.getElementById('sSessionTimeout')?.value??'30')||0;
+AppState.save();
+// Restart session timer with new timeout
+if(typeof _startSessionTimer==='function')_startSessionTimer();
+showToast('Settings saved','success');}
 
 // ── BUSINESS UNIT FUNCTIONS ───────────────────────────────
 const BU_COLORS=['#388bfd','#3fb950','#f0a450','#bc8cff','#39d3f2','#f85149','#fb8f44','#ff6b9d'];
@@ -18510,13 +18866,11 @@ function renderMlPersonnel(){
 function mlSavePersonnel(id,field,val){
   if(!AppState.data.resources)AppState.data.resources=[];
   const r=(AppState.data.resources||[]).find(r=>r.id===id);
-  if(r){r[field]=val;AppState.save();}
+  if(r){r[field]=val;if(typeof _stampEdit==='function')_stampEdit(r);AppState.save();}
 }
 
 function deletePersonnel(id){
-  if(!confirm('Delete this personnel record? This cannot be undone.'))return;
-  AppState.data.resources=(AppState.data.resources||[]).filter(r=>r.id!==id);
-  AppState.save();renderMlPersonnel();showToast('Personnel deleted','warning');
+  if(requestOrDelete('resources',id)){renderMlPersonnel();}
 }
 
 function showEditPersonnel(id){
@@ -19413,9 +19767,7 @@ function renderMlHistory(){
 }
 
 function deleteHistoryEntry(id){
-  if(!confirm('Delete this history entry?'))return;
-  AppState.data.assetHistory=(AppState.data.assetHistory||[]).filter(h=>h.id!==id);
-  AppState.save();renderMlHistory();showToast('Entry deleted','warning');
+  if(requestOrDelete('assetHistory',id)){renderMlHistory();}
 }
 
 function showLogAssetHistoryFor(assetId, assetName, assetType){
