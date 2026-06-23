@@ -212,7 +212,8 @@ tr:last-child td{border-bottom:none}
 .procurement-flow{display:flex;gap:2px;margin:14px 0}
 canvas{display:block}
 @media(max-width:1024px){.grid-4{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:768px){.sidebar{position:fixed;height:100vh;transform:translateX(-100%)}.sidebar.mobile-open{transform:translateX(0)}.grid-4,.grid-3{grid-template-columns:1fr 1fr}.grid-2{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.topbar-search{display:none}}
+@media(max-width:768px){.sidebar{position:fixed;height:100vh;transform:translateX(-100%);z-index:200}.sidebar.mobile-open{transform:translateX(0)}.mobile-overlay{display:block!important}.grid-4,.grid-3{grid-template-columns:1fr 1fr}.grid-2{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.topbar-search{display:none}}
+.mobile-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:199;backdrop-filter:blur(2px)}
 @media(max-width:480px){.grid-4,.grid-3,.grid-2{grid-template-columns:1fr}}
 @media print{.sidebar,.topbar,.fab,.toast-container{display:none!important}}
 </style>
@@ -328,6 +329,7 @@ canvas{display:block}
     </div>
   </div>
 </nav>
+<div class="mobile-overlay" id="mobileOverlay" onclick="toggleSidebar()"></div>
 <div class="main-content">
   <header class="topbar">
     <button class="sidebar-toggle" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
@@ -735,6 +737,40 @@ const NAV_ITEMS=[
 {id:'calendar',label:'Calendar',icon:'fas fa-calendar-alt',section:'Analytics'},
 {id:'reports',label:'Reports',icon:'fas fa-file-alt',section:'Analytics'},
 {id:'masterlist',label:'Asset Masterlist',icon:'fas fa-clipboard-list',section:'Assets'}];
+
+// ── DROPDOWN REGISTRY ──────────────────────────────────────
+// Central defaults for all admin-managed dropdowns
+const DROPDOWN_REGISTRY = {
+  risk_categories:    { label:'Risk Categories',      icon:'fa-shield-halved',  defaults:['Procurement','Resources','Technical','HSE','Regulatory','Financial','Schedule','Environmental','Contractual'] },
+  qaqc_types:         { label:'QA/QC Types',           icon:'fa-clipboard-check',defaults:['Inspection','NCR','Punch','Test','Audit','Safety Walk','Method Statement','RFI'] },
+  doc_categories:     { label:'Document Categories',   icon:'fa-file-alt',       defaults:['Engineering','Management','QA/QC','Finance','Legal','Safety','Photos','General','Procurement','As-Built','Drawings','Specifications'] },
+  doc_status:         { label:'Document Statuses',     icon:'fa-tag',            defaults:['draft','review','approved','issued','superseded','cancelled'] },
+  cost_categories:    { label:'Cost Categories',       icon:'fa-dollar-sign',    defaults:['Mobilization','Demobilization','Manpower Cost','Tools and Equipments','Materials and Consumables','Personal Protective Equipment','Miscellaneous','Subcontract','Overhead'] },
+  variation_codes:    { label:'Variation Codes',       icon:'fa-exchange-alt',   defaults:['Design Change','Client Request','Material Unavailable','Site Condition / Field Condition','Emergency / Urgent Requirement','Scope Expansion',"Engineer's Instruction",'Other'] },
+  manpower_shifts:    { label:'Manpower Shifts',       icon:'fa-clock',          defaults:['Day','Night','Day/Night','Rotating','Split','Flexi'] },
+  action_priority:    { label:'Action Priority',       icon:'fa-flag',           defaults:['critical','high','medium','low'] },
+  equipment_status:   { label:'Equipment Status',      icon:'fa-cogs',           defaults:['available','in-use','maintenance','standby','out-of-service'] },
+  tool_status:        { label:'Tool Status',           icon:'fa-wrench',         defaults:['available','in-use','maintenance','standby'] },
+  vehicle_status:     { label:'Vehicle Status',        icon:'fa-truck',          defaults:['available','in-use','maintenance','standby','out-of-service'] },
+  material_status:    { label:'Material Status',       icon:'fa-cubes',          defaults:['pending','ordered','partial','delivered','rejected'] },
+  tp_status:          { label:'Third Party Status',    icon:'fa-handshake',      defaults:['active','inactive','expired','pending','suspended'] },
+  personnel_avail:    { label:'Personnel Availability',icon:'fa-user',           defaults:['available','busy','unavailable','on-leave'] },
+  project_discipline: { label:'Project Disciplines',   icon:'fa-briefcase',      defaults:['Civil','Mechanical','Electrical','Instrumentation','Process','Structural','Piping','HVAC','General'] },
+};
+
+function _getDropdown(key){
+  const reg=DROPDOWN_REGISTRY[key];
+  if(!reg)return[];
+  const custom=(AppState.data.settings?.dropdowns||{})[key];
+  return(custom&&custom.length>0)?custom:[...reg.defaults];
+}
+
+function _setDropdown(key,values){
+  if(!AppState.data.settings)AppState.data.settings={};
+  if(!AppState.data.settings.dropdowns)AppState.data.settings.dropdowns={};
+  AppState.data.settings.dropdowns[key]=values;
+  AppState.save();
+}
 
 function getDefaultData(){
   // Returns empty data structure — NO demo records
@@ -1248,7 +1284,7 @@ const p=$(`#${pid}`);if(p)p.classList.add('active');
 const ni=NAV_ITEMS.find(n=>n.id===pid);
 $('#topbarTitle').textContent=ni?ni.label:'Settings';
 renderPage(pid);
-if(window.innerWidth<768)$('#sidebar').classList.remove('mobile-open');}
+if(window.innerWidth<768)_closeMobileSidebar();}
 
 
 // ── Pagination utility ──────────────────────────────────────────────────────
@@ -1392,8 +1428,12 @@ if(map[pid])map[pid]();}
 
 function toggleSidebar(){
 const s=$('#sidebar');
-if(window.innerWidth<768)s.classList.toggle('mobile-open');
+if(window.innerWidth<768){s.classList.toggle('mobile-open');const ov=$('#mobileOverlay');if(ov)ov.style.display=s.classList.contains('mobile-open')?'block':'none';}
 else s.classList.toggle('collapsed');}
+
+function _closeMobileSidebar(){
+const s=$('#sidebar');if(s)s.classList.remove('mobile-open');
+const ov=$('#mobileOverlay');if(ov)ov.style.display='none';}
 
 function toggleTheme(){
 AppState.theme=AppState.theme==='dark'?'light':'dark';
@@ -4640,8 +4680,18 @@ async function _spFetchRemote(token, siteId, listId) {
   if (!res.ok) throw new Error('Fetch failed: ' + res.status);
   const result = await res.json();
   if (!result.value || result.value.length === 0) return null;
-  // Find the SHIC_Main item by Title field
-  const item = result.value.find(i => i.fields?.Title === 'SHIC_Main') || result.value[0];
+  // Sort by UpdatedAt descending — pick the newest, auto-delete any duplicates
+  const allItems = result.value.filter(i => i.fields?.Title === 'SHIC_Main' || i.fields?.DataKey === 'main');
+  allItems.sort((a, b) => new Date(b.fields?.UpdatedAt || 0) - new Date(a.fields?.UpdatedAt || 0));
+  const item = allItems[0];
+  if (allItems.length > 1) {
+    // Delete the older duplicates silently
+    for (let di = 1; di < allItems.length; di++) {
+      fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${allItems[di].id}`,
+        { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } }).catch(() => {});
+    }
+    console.warn('[SP] Auto-deleted ' + (allItems.length - 1) + ' duplicate SHIC_Main row(s)');
+  }
   if (item.id) { _spItemId = item.id; localStorage.setItem('shic_sp_itemid', _spItemId); }
   const raw = item.fields?.DataBlob || '';
   if (!raw) return null;
@@ -4684,6 +4734,20 @@ async function _spWriteRemote(token, siteId, listId, payload, attempt = 0) {
     if (res.status === 404) { _spItemId = ''; localStorage.removeItem('shic_sp_itemid'); res = null; }
   }
   if (!_spItemId) {
+    // Search for an existing item before creating to prevent duplicates
+    try {
+      const existing = await fetch(
+        `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=5`,
+        { headers: { Authorization: 'Bearer ' + token } }
+      );
+      if (existing.ok) {
+        const exData = await existing.json();
+        const found = (exData.value || []).find(i => i.fields?.Title === 'SHIC_Main' || i.fields?.DataKey === 'main');
+        if (found) { _spItemId = found.id; localStorage.setItem('shic_sp_itemid', _spItemId); }
+      }
+    } catch(e) { /* ignore — fall through to POST */ }
+  }
+  if (!_spItemId) {
     res = await fetch(
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`,
       { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body }
@@ -4692,6 +4756,12 @@ async function _spWriteRemote(token, siteId, listId, payload, attempt = 0) {
       const created = await res.json();
       _spItemId = created.id; localStorage.setItem('shic_sp_itemid', _spItemId);
     }
+  } else {
+    res = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${_spItemId}`,
+      { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body }
+    );
+    if (res && res.status === 404) { _spItemId = ''; localStorage.removeItem('shic_sp_itemid'); }
   }
   // ── Handle 429 Too Many Requests (throttling) ──────────
   if (res && res.status === 429) {
@@ -4793,7 +4863,17 @@ function _spApplyRemote(data, _ts, _by) {
         key   // deletion tracking
       );
     });
-    merged.settings = Object.assign({}, data.settings || {}, AppState.data.settings || {});
+    {
+      const _rSet2 = data.settings || {};
+      const _lSet2 = AppState.data.settings || {};
+      merged.settings = Object.assign({}, _rSet2, _lSet2);
+      const _rPA2 = _rSet2.dropdowns?._adminPushedAt || 0;
+      const _lPA2 = _lSet2.dropdowns?._adminPushedAt || 0;
+      if (_rPA2 > _lPA2) {
+        merged.settings.dropdowns = Object.assign({}, _rSet2.dropdowns || {});
+        showToast('Admin dropdown settings applied from SharePoint', 'info', 3500);
+      }
+    }
     AppState.data = Object.assign(getDefaultData(), merged);
     if (typeof migrateData === 'function') migrateData();
     AppState.save();
@@ -5529,8 +5609,15 @@ async function spPushData(silent = false) {
           key   // deletion tracking
         );
       });
-      // Merge settings — local wins
-      merged.settings = Object.assign({}, remoteData.settings || {}, AppState.data.settings || {});
+      // Merge settings — local wins, EXCEPT admin-pushed dropdowns take priority
+      const _rSet = remoteData.settings || {};
+      const _lSet = AppState.data.settings || {};
+      merged.settings = Object.assign({}, _rSet, _lSet);
+      const _rPushedAt = _rSet.dropdowns?._adminPushedAt || 0;
+      const _lPushedAt = _lSet.dropdowns?._adminPushedAt || 0;
+      if (_rPushedAt > _lPushedAt) {
+        merged.settings.dropdowns = Object.assign({}, _rSet.dropdowns || {});
+      }
       AppState.data = Object.assign(getDefaultData(), merged);
       _spLastWriteTs = _ts;
       _spDataHash = _spHash(remoteData) + _ts;
@@ -6680,11 +6767,26 @@ setInterval(()=>{if(_m365LoggedIn)AppState.save();},30000);
 }
 </script>
 <script>
+let _dashDateFilter=localStorage.getItem('shic_dash_filter')||'all';
+function _dashFilterProjects(all){
+  if(_dashDateFilter==='all')return all;
+  const now=new Date();
+  let cutoff=new Date();
+  if(_dashDateFilter==='month')cutoff.setDate(1);
+  else if(_dashDateFilter==='quarter')cutoff.setMonth(Math.floor(now.getMonth()/3)*3,1);
+  else if(_dashDateFilter==='year')cutoff=new Date(now.getFullYear(),0,1);
+  return all.filter(p=>{
+    const d=new Date(p.startDate||p._createdAt||0);
+    return d>=cutoff||p.status==='active';
+  });
+}
+function setDashFilter(val){_dashDateFilter=val;localStorage.setItem('shic_dash_filter',val);renderDashboard();}
+
 function renderDashboard(){
 AppState.ensureData();
 const{tasks,risks,actions,qaqc,manpower}=AppState.data;
 // Exclude prospect projects from dashboard KPIs — they aren't real projects yet
-const projects=(AppState.data.projects||[]).filter(p=>p.status!=='prospect');
+const projects=_dashFilterProjects((AppState.data.projects||[]).filter(p=>p.status!=='prospect'));
 const active=projects.filter(p=>p.status==='active').length;
 const completed=projects.filter(p=>p.status==='completed').length;
 const planned=projects.filter(p=>p.status==='planned').length;
@@ -6711,6 +6813,10 @@ $('#dashboard').innerHTML=`
 <div><div class="banner-title">Project Control Center</div><div class="banner-sub">${dateStr} &middot; ${AppState.data.settings.companyName}</div></div>
 <div style="text-align:right"><div class="banner-time" id="dashClock">${timeStr}</div><div style="font-size:10px;color:rgba(255,255,255,.6)">Local Time</div></div></div>
 ${_renderRecentStrip()}
+<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">
+  ${[['all','All Time'],['month','This Month'],['quarter','This Quarter'],['year','This Year']].map(([v,l])=>`
+  <button onclick="setDashFilter('${v}')" style="padding:5px 14px;border-radius:20px;border:1px solid ${_dashDateFilter===v?'var(--accent-blue)':'var(--border)'};background:${_dashDateFilter===v?'rgba(56,139,253,.15)':'var(--bg-hover)'};color:${_dashDateFilter===v?'var(--accent-blue)':'var(--text-secondary)'};font-size:11px;font-weight:${_dashDateFilter===v?'700':'400'};cursor:pointer;transition:all .15s">${l}</button>`).join('')}
+</div>
 <div class="grid grid-4" style="margin-bottom:14px">
 ${sc('fas fa-briefcase','Total Projects',projects.length,`${active} active`,'#388bfd','rgba(56,139,253,.15)',"navigate('projects')")}
 ${sc('fas fa-chart-line','Avg Progress',avgProg+'%',`${completed} completed`,'#3fb950','rgba(63,185,80,.15)',"navigate('projects')")}
@@ -7210,6 +7316,7 @@ function _renderProjCards(projects) {
       <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
         <button class="btn btn-primary btn-sm" onclick="showProjectDetail('${p.id}')"><i class="fas fa-eye"></i> View</button>
         <button class="btn btn-secondary btn-sm" onclick="showProjectForm('${p.id}')"><i class="fas fa-pen"></i> Edit</button>
+        <button class="btn btn-secondary btn-sm" onclick="duplicateProject('${p.id}')" title="Duplicate project"><i class="fas fa-copy"></i></button>
         <button class="btn btn-danger btn-sm" onclick="deleteProject('${p.id}')"><i class="fas fa-trash"></i></button>
       </div>
     </div>`;
@@ -7546,6 +7653,106 @@ if(!confirm('Delete this project?'))return;
 AppState.data.projects=(AppState.data.projects||[]).filter(p=>p.id!==id);
 AppState.save();showToast('Project deleted','warning');renderProjects();}
 
+function duplicateProject(id){
+  const src=(AppState.data.projects||[]).find(p=>p.id===id);
+  if(!src){showToast('Project not found','error');return;}
+  const newId='PROJ-'+String(Date.now()).slice(-6);
+  const copy=JSON.parse(JSON.stringify(src));
+  copy.id=newId;
+  copy.name='Copy of '+src.name;
+  copy.status='planned';
+  copy.progress=0;
+  copy.spent=0;
+  copy._deleted=false;
+  copy._purged=false;
+  delete copy._deletedAt; delete copy._deletedBy; delete copy._purgedAt;
+  copy._createdAt=new Date().toISOString();
+  copy._createdBy=_currentUserProfile?.name||_currentUserProfile?.email||'unknown';
+  // Copy allocations for this project
+  const allocsToCopy=(AppState.data.resourceAllocations||[]).filter(a=>a.projectId===id&&!a._deleted);
+  allocsToCopy.forEach(a=>{
+    const na=JSON.parse(JSON.stringify(a));
+    na.id='ALLOC-'+Math.random().toString(36).slice(2,8).toUpperCase();
+    na.projectId=newId;
+    na.actualCost=0;
+    if(!AppState.data.resourceAllocations)AppState.data.resourceAllocations=[];
+    AppState.data.resourceAllocations.push(na);
+  });
+  // Copy costs
+  const costsToCopy=(AppState.data.costs||[]).filter(c=>c.projectId===id&&!c._deleted);
+  costsToCopy.forEach(c=>{
+    const nc=JSON.parse(JSON.stringify(c));
+    nc.id='CST-'+Math.random().toString(36).slice(2,8).toUpperCase();
+    nc.projectId=newId;
+    nc.actual=0;
+    if(!AppState.data.costs)AppState.data.costs=[];
+    AppState.data.costs.push(nc);
+  });
+  if(!AppState.data.projects)AppState.data.projects=[];
+  AppState.data.projects.push(copy);
+  AppState.save();
+  renderProjects();
+  showToast(`Project duplicated as ${newId} — allocations & costs copied, usage logs not copied`,'success',5000);
+}
+
+function printProjectDetail(pid){
+  const p=(AppState.data.projects||[]).find(x=>x.id===pid);
+  if(!p)return;
+  const allocs=(AppState.data.resourceAllocations||[]).filter(a=>a.projectId===pid&&!a._deleted);
+  const logs=(AppState.data.resourceUsageLogs||[]).filter(l=>l.projectId===pid);
+  const costs=(AppState.data.costs||[]).filter(c=>c.projectId===pid&&!c._deleted);
+  const risks=(AppState.data.risks||[]).filter(r=>r.projectId===pid&&!r._deleted);
+  const cur=(AppState.data.settings?.currency)||'PHP';
+  const sym={PHP:'₱',USD:'$',EUR:'€',SAR:'﷼',GBP:'£',SGD:'S$'}[cur]||cur+' ';
+  const fmt=n=>Number(n||0).toLocaleString();
+  const usageMap={};
+  logs.forEach(l=>{
+    if(!usageMap[l.allocationId])usageMap[l.allocationId]={issued:0,returned:0};
+    l.transactionType==='Return'?usageMap[l.allocationId].returned+=l.quantity:usageMap[l.allocationId].issued+=l.quantity;
+  });
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>Project Summary — ${p.id}</title>
+  <style>
+    body{font-family:Arial,sans-serif;font-size:11px;color:#111;margin:0;padding:20px}
+    h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;margin:16px 0 6px;border-bottom:2px solid #333;padding-bottom:3px}
+    table{width:100%;border-collapse:collapse;margin-bottom:12px}
+    th{background:#1a237e;color:#fff;padding:5px 8px;text-align:left;font-size:10px}
+    td{padding:4px 8px;border-bottom:1px solid #ddd;font-size:10px}
+    tr:nth-child(even){background:#f5f5f5}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+    .kpi{border:1px solid #ccc;border-radius:6px;padding:8px;text-align:center}
+    .kpi-val{font-size:16px;font-weight:700;font-family:monospace}
+    .kpi-lbl{font-size:9px;color:#666}
+    @media print{body{padding:10px}}
+  </style></head><body>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+    <div><h1>${p.name}</h1><div style="font-size:11px;color:#555">${p.id} · ${p.client} · PM: ${p.pm||'—'}</div></div>
+    <div style="font-size:10px;color:#777;text-align:right">Printed: ${new Date().toLocaleString()}<br>Status: ${p.status} · Priority: ${p.priority}</div>
+  </div>
+  <div class="grid">
+    <div class="kpi"><div class="kpi-val">${p.progress}%</div><div class="kpi-lbl">Progress</div></div>
+    <div class="kpi"><div class="kpi-val">${sym}${fmt(p.budget)}</div><div class="kpi-lbl">Budget</div></div>
+    <div class="kpi"><div class="kpi-val">${sym}${fmt(p.spent)}</div><div class="kpi-lbl">Spent</div></div>
+    <div class="kpi"><div class="kpi-val">${allocs.length}</div><div class="kpi-lbl">Allocations</div></div>
+  </div>
+  <h2>Resource Allocations (${allocs.length})</h2>
+  <table><thead><tr><th>ID</th><th>Resource</th><th>Type</th><th>Unit</th><th>Alloc.</th><th>Issued</th><th>Returned</th><th>Net</th><th>Remaining</th><th>Planned</th><th>Actual</th></tr></thead><tbody>
+  ${allocs.map(a=>{const u=usageMap[a.id]||{issued:0,returned:0};const net=u.issued-u.returned;const rem=a.allocatedQty-net;
+    return`<tr><td>${a.id}</td><td>${a.resourceName}</td><td>${a.resourceType}</td><td>${a.unit}</td><td>${a.allocatedQty}</td><td>${u.issued}</td><td>${u.returned}</td><td>${net}</td><td style="color:${rem<0?'red':rem===0?'#e65100':'green'}">${rem}</td><td>${sym}${fmt(a.plannedCost)}</td><td>${sym}${fmt(a.actualCost)}</td></tr>`;
+  }).join('')}</tbody></table>
+  <h2>Costs (${costs.length})</h2>
+  <table><thead><tr><th>ID</th><th>Category</th><th>Description</th><th>Planned</th><th>Actual</th><th>Variance</th></tr></thead><tbody>
+  ${costs.map(c=>{const v=c.planned-c.actual;return`<tr><td>${c.id}</td><td>${c.category}</td><td>${c.description}</td><td>${sym}${fmt(c.planned)}</td><td>${sym}${fmt(c.actual)}</td><td style="color:${v<0?'red':'green'}">${sym}${fmt(v)}</td></tr>`;}).join('')}
+  </tbody></table>
+  <h2>Risks (${risks.length})</h2>
+  <table><thead><tr><th>ID</th><th>Description</th><th>Category</th><th>Score</th><th>Status</th><th>Mitigation</th></tr></thead><tbody>
+  ${risks.map(r=>`<tr><td>${r.id}</td><td>${r.description||r.title||''}</td><td>${r.category||'—'}</td><td>${(r.probability||1)*(r.impact||1)}</td><td>${r.status}</td><td>${r.mitigation||'—'}</td></tr>`).join('')}
+  </tbody></table>
+  </body></html>`);
+  w.document.close();
+  setTimeout(()=>w.print(),500);
+}
+
 // ═══════════════════════════════════════════════════════════
 // ── PROSPECTS MODULE + EDITABLE PROJECT ID ────────────────
 // ═══════════════════════════════════════════════════════════
@@ -7616,6 +7823,7 @@ function renderProjectDetail(){
     <div style="margin-left:auto;display:flex;gap:7px">
       ${sBadge(p.status)} ${pBadge(p.priority)}
       ${p.status==='completed'||p.status==='archived'?'':`<button class="btn btn-secondary btn-sm" onclick="showChangeProjectId('${p.id}')" title="Change Project ID"><i class="fas fa-id-card"></i> Change ID</button>`}
+      <button class="btn btn-secondary btn-sm" onclick="printProjectDetail('${p.id}')" title="Print project summary"><i class="fas fa-print"></i> Print</button>
       <button class="btn btn-primary btn-sm" onclick="showProjectForm('${p.id}')"><i class="fas fa-edit"></i> Edit Project</button>
     </div>
   </div>
@@ -8477,7 +8685,7 @@ function deleteCostItem(id){ return requestOrDelete('costs', id); }
 function showAddCostItem(){
   $('#genericModalTitle').textContent='Add Cost Item';
   $('#genericModalBody').innerHTML=`<div class="form-grid">
-    <div class="form-group"><label class="form-label">Category</label><select class="form-select" id="gCat">${['Mobilization', 'Demobilization', 'Manpower Cost', 'Tools and Equipments', 'Materials and Consumables', 'Personal Protective Equipment', 'Miscellaneous'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Category</label><select class="form-select" id="gCat">${_getDropdown('cost_categories').map(c=>`<option>${c}</option>`).join('')}</select></div>
     <div class="form-group"><label class="form-label">Description</label><input class="form-input" id="gDesc" placeholder="Cost description"></div>
     <div class="form-group"><label class="form-label">Planned (₱)</label><input class="form-input" type="number" id="gPlan" placeholder="0"></div>
     <div class="form-group"><label class="form-label">Actual (₱)</label><input class="form-input" type="number" id="gAct" placeholder="0"></div>
@@ -8515,7 +8723,7 @@ function renderDetailDocRows(docs){
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700">${d.number}</td>
     <td><input class="form-input" value="${d.rev}" style="width:48px;height:26px;font-size:11px" onchange="updateDocField('${d.id}','rev',this.value)"></td>
     <td><input class="form-input" value="${d.name}" style="min-width:160px;height:26px;font-size:12px;font-weight:500" onchange="updateDocField('${d.id}','name',this.value)"></td>
-    <td><select class="form-select" style="height:30px;font-size:11px" onchange="updateDocField('${d.id}','category',this.value)">${['Engineering','Management','QA/QC','Civil','Mechanical','Electrical','Environmental','Inspection','Finance','General'].map(c=>`<option ${d.category===c?'selected':''}>${c}</option>`).join('')}</select></td>
+    <td><select class="form-select" style="height:30px;font-size:11px" onchange="updateDocField('${d.id}','category',this.value)">${_getDropdown('doc_categories').map(c=>`<option ${d.category===c?'selected':''}>${c}</option>`).join('')}</select></td>
     <td><input class="form-input" value="${d.author}" style="min-width:100px;height:26px;font-size:11px" onchange="updateDocField('${d.id}','author',this.value)"></td>
     <td><input class="form-input" type="date" value="${safeDate(d.date)}" style="height:26px;font-size:11px" onchange="updateDocField('${d.id}','date',this.value)"></td>
     <td style="font-size:11px;color:var(--text-secondary)">${d.size}</td>
@@ -8873,6 +9081,48 @@ function renderDetailAllocation(){
     </div>
   </div>
 
+  ${(()=>{
+    const varLogs=logs.filter(l=>l.category&&l.category!=='Budgeted');
+    if(!varLogs.length)return'';
+    const varAlt=varLogs.filter(l=>l.category==='Variation - Alternative');
+    const varUnb=varLogs.filter(l=>l.category==='Variation - Unbudgeted');
+    return`<div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent-amber)">
+    <div class="section-header" style="margin-bottom:10px">
+      <div class="section-title"><i class="fas fa-exclamation-triangle" style="color:var(--accent-amber);margin-right:6px"></i>Variation Register <span style="font-size:11px;font-weight:400;color:var(--text-secondary)">${varLogs.length} variation${varLogs.length!==1?'s':''}</span></div>
+      <div style="display:flex;gap:8px">
+        <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:rgba(240,164,80,.15);color:var(--accent-amber)"><i class="fas fa-exchange-alt" style="margin-right:4px"></i>${varAlt.length} Alternative</span>
+        <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:rgba(248,81,73,.15);color:var(--accent-red)"><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i>${varUnb.length} Unbudgeted</span>
+      </div>
+    </div>
+    <div style="overflow:auto;max-height:280px;border:1px solid var(--border);border-radius:6px">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:700px">
+        <thead style="position:sticky;top:0;z-index:3;background:var(--bg-hover)">
+          <tr style="border-bottom:2px solid var(--border)">
+            <th style="padding:6px 8px">Log ID</th><th style="padding:6px 8px">Date</th><th style="padding:6px 8px">Type</th>
+            <th style="padding:6px 8px">Resource</th><th style="padding:6px 8px">Variation Code</th>
+            <th style="padding:6px 8px">Authorized By</th><th style="padding:6px 8px">Qty</th>
+            <th style="padding:6px 8px">Justification</th>
+          </tr>
+        </thead>
+        <tbody>${varLogs.slice().reverse().map((l,i)=>{
+          const isUnb=l.category==='Variation - Unbudgeted';
+          const col=isUnb?'var(--accent-red)':'var(--accent-amber)';
+          return`<tr style="border-top:1px solid var(--border);background:${i%2?'rgba(255,255,255,.02)':'transparent'}">
+            <td style="padding:4px 8px;font-size:10px;font-family:var(--font-mono)">${l.id}</td>
+            <td style="padding:4px 8px;font-size:11px;white-space:nowrap">${l.date}</td>
+            <td style="padding:4px 8px"><span style="background:${col}22;color:${col};font-size:9px;padding:2px 7px;border-radius:10px;font-weight:700">${isUnb?'Unbudgeted':'Alt'}</span></td>
+            <td style="padding:4px 8px;font-weight:500;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.resourceName}</td>
+            <td style="padding:4px 8px;font-size:10px">${l.variationCode||'—'}</td>
+            <td style="padding:4px 8px;font-size:11px">${l.variationAuthorizedBy||'—'}</td>
+            <td style="padding:4px 8px;font-family:var(--font-mono);font-weight:700;color:${col}">${l.quantity} ${l.unit||''}</td>
+            <td style="padding:4px 8px;font-size:10px;color:var(--text-secondary);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(l.variationReason||'').replace(/"/g,'&quot;')}">${l.variationReason||'—'}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>
+  </div>`;
+  })()}
+
   <div class="card">
     <div class="section-header" style="margin-bottom:8px">
       <div class="section-title">Transaction Log <span style="font-size:11px;font-weight:400;color:var(--text-secondary)">${logs.length} entries</span></div>
@@ -8983,7 +9233,7 @@ function renderLogBody(){
 <td style="padding:4px 8px;font-size:10px;font-family:var(--font-mono);white-space:nowrap">${l.id}</td>
 <td style="padding:4px 8px;font-size:11px;font-family:var(--font-mono);white-space:nowrap">${l.date}</td>
 <td style="padding:4px 8px"><span class="badge ${l.transactionType==='Return'?'badge-amber':'badge-green'}" style="font-size:10px"><i class="fas ${l.transactionType==='Return'?'fa-undo':'fa-sign-out-alt'}" style="margin-right:3px"></i>${l.transactionType}</span></td>
-<td style="padding:4px 8px">${(()=>{const cat=l.category||'Budgeted';const catMap={'Budgeted':['var(--accent-green)','fa-check-circle'],'Variation - Alternative':['var(--accent-amber)','fa-exchange-alt'],'Variation - Unbudgeted':['var(--accent-red)','fa-exclamation-triangle']};const[col,ico]=catMap[cat]||catMap['Budgeted'];return`<span style="background:${col}22;color:${col};font-size:9px;padding:2px 7px;border-radius:10px;white-space:nowrap;font-weight:600"><i class="fas ${ico}" style="margin-right:3px;font-size:8px"></i>${cat==='Budgeted'?'Budgeted':cat==='Variation - Alternative'?'Var-Alt':'Var-Unbud'}</span>`;})()}</td>
+<td style="padding:4px 8px">${(()=>{const cat=l.category||'Budgeted';const catMap={'Budgeted':['var(--accent-green)','fa-check-circle'],'Variation - Alternative':['var(--accent-amber)','fa-exchange-alt'],'Variation - Unbudgeted':['var(--accent-red)','fa-exclamation-triangle']};const[col,ico]=catMap[cat]||catMap['Budgeted'];const tip=cat!=='Budgeted'&&l.variationReason?`title="${(l.variationCode||'')+': '+(l.variationReason||'').replace(/"/g,'&quot;')}"`:'' ;return`<span ${tip} style="background:${col}22;color:${col};font-size:9px;padding:2px 7px;border-radius:10px;white-space:nowrap;font-weight:600;cursor:${cat!=='Budgeted'?'help':'default'}"><i class="fas ${ico}" style="margin-right:3px;font-size:8px"></i>${cat==='Budgeted'?'Budgeted':cat==='Variation - Alternative'?'Var-Alt':'Var-Unbud'}</span>`;})()}</td>
 <td style="padding:4px 8px;font-weight:500;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(l.resourceName||'').replace(/"/g,'&quot;')}">${l.resourceName}</td>
 <td style="padding:4px 8px"><span style="background:${c.color}22;color:${c.color};font-size:9px;padding:1px 6px;border-radius:4px;white-space:nowrap">${c.label}</span></td>
 <td style="padding:4px 8px;text-align:center;font-family:var(--font-mono);font-weight:700;font-size:12px;color:${l.transactionType==='Return'?'var(--accent-amber)':'var(--accent-green)'}">
@@ -8993,7 +9243,7 @@ ${l.transactionType==='Return'?'-':'+'}${l.quantity}</td>
 <td style="padding:4px 8px;font-size:11px;color:var(--text-secondary)">${l.approvedBy||'—'}</td>
 <td style="padding:4px 8px;font-size:10px;font-family:var(--font-mono);color:var(--text-secondary)">${l.reference||'—'}</td>
 <td style="padding:4px 8px;font-size:10px;color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.notes||'—'}</td>
-<td style="padding:4px 6px"><button class="btn btn-danger btn-sm btn-icon" onclick="deleteUsageLog('${l.id}')"><i class="fas fa-trash"></i></button></td>
+<td style="padding:4px 6px;white-space:nowrap"><button class="btn btn-secondary btn-sm btn-icon" onclick="editUsageLog('${l.id}')" title="Edit"><i class="fas fa-pen"></i></button> <button class="btn btn-danger btn-sm btn-icon" onclick="deleteUsageLog('${l.id}')"><i class="fas fa-trash"></i></button></td>
 </tr>`;
     });
   }
@@ -9166,310 +9416,402 @@ function saveAllocation(){
   renderDetailAllocation();showToast('Resource allocated','success');
 }
 
-// ── USAGE / RETURN LOG ─────────────────────────────────────
-function showLogUsage(pid,txType='Issue',preselectedAllocId=''){
-  if(!AppState.data.resourceAllocations)AppState.data.resourceAllocations=[];
-  const allocs=(AppState.data.resourceAllocations||[]).filter(a=>a.projectId===pid);
-  const isReturn=txType==='Return';
+// ── USAGE / RETURN LOG (multi-item) ────────────────────────
+function _UL_VAR_CODES(){return _getDropdown('variation_codes');}
+const _UL_TYPE_COLORS={Equipment:'#f0a450',Tool:'#bc8cff',Vehicle:'#39d3f2',Consumable:'#3fb950',Material:'#fb8f44',Manpower:'#f85149',Personnel:'#388bfd'};
 
-  // ── Build all searchable resources from all resource types ──
+function _ulBuildResources(pid){
   const allResources=[];
-  const RESOURCE_POOLS=[
-    {key:'equipment',type:'Equipment',nameField:'name',idField:'id',unitField:'unit'},
-    {key:'tools',type:'Tool',nameField:'name',idField:'id',unitField:'unit'},
-    {key:'vehicles',type:'Vehicle',nameField:'name',idField:'id',unitField:'unit'},
-    {key:'consumables',type:'Consumable',nameField:'name',idField:'id',unitField:'unit'},
-    {key:'materials',type:'Material',nameField:'name',idField:'id',unitField:'unit'},
-    {key:'manpower',type:'Manpower',nameField:'name',idField:'id',unitField:'unit'},
-    {key:'resources',type:'Personnel',nameField:'name',idField:'id',unitField:'unit'},
+  const POOLS=[
+    {key:'equipment',type:'Equipment'},{key:'tools',type:'Tool'},{key:'vehicles',type:'Vehicle'},
+    {key:'consumables',type:'Consumable'},{key:'materials',type:'Material'},
+    {key:'manpower',type:'Manpower'},{key:'resources',type:'Personnel'},
   ];
-  RESOURCE_POOLS.forEach(({key,type,nameField,idField,unitField})=>{
+  POOLS.forEach(({key,type})=>{
     (AppState.data[key]||[]).forEach(r=>{
-      allResources.push({
-        id:r[idField]||r.id,
-        name:r[nameField]||r.name||'',
-        type,
-        unit:r[unitField]||r.unit||'pcs',
-        source:key
-      });
+      allResources.push({id:r.id,name:r.name||'',type,unit:r.unit||'pcs',source:key});
     });
   });
-  // Also add from allocations (already allocated resources)
-  allocs.forEach(a=>{
+  (AppState.data.resourceAllocations||[]).filter(a=>a.projectId===pid).forEach(a=>{
     if(!allResources.find(r=>r.id===a.resourceId)){
       allResources.push({id:a.resourceId||a.id,name:a.resourceName,type:a.resourceType,unit:a.unit||'pcs',source:'allocation'});
     }
   });
-
-  $('#genericModalTitle').textContent=(isReturn?'Log Return (Excess)':'Log Issue / Usage')+' — '+pid;
-  $('#genericModalBody').innerHTML=`
-  <div style="padding:8px 12px;background:${isReturn?'rgba(240,164,80,.1)':'rgba(63,185,80,.1)'};border-radius:6px;margin-bottom:12px;border-left:3px solid ${isReturn?'var(--accent-amber)':'var(--accent-green)'}">
-    <strong>${isReturn?'↩ Return Excess':'↗ Issue to Site'}</strong> — ${isReturn?'Log materials/resources being returned from site back to store/warehouse.':'Log resources being issued/deployed to site.'}
-  </div>
-
-  <!-- ── Resource Search ── -->
-  <div style="margin-bottom:12px">
-    <label class="form-label">Search Resource *</label>
-    <div style="position:relative">
-      <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:12px;pointer-events:none"></i>
-      <input class="form-input" id="ulResourceSearch" placeholder="Type to search resource name or ID..."
-        style="padding-left:32px"
-        oninput="filterUsageLogResources(this.value)"
-        autocomplete="off">
-    </div>
-    <div id="ulResourceResults" style="display:none;position:relative;z-index:100;margin-top:2px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;max-height:180px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.3)"></div>
-    <!-- Selected resource display -->
-    <div id="ulSelectedResource" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.25);border-radius:7px;font-size:12px">
-      <div style="display:flex;align-items:center;justify-content:space-between">
-        <div>
-          <span id="ulSelResName" style="font-weight:700"></span>
-          <span id="ulSelResType" style="margin-left:8px;font-size:10px;padding:1px 7px;border-radius:10px;background:rgba(56,139,253,.15);color:var(--accent-blue)"></span>
-          <span id="ulSelResId" style="margin-left:6px;font-size:10px;color:var(--text-muted);font-family:var(--font-mono)"></span>
-        </div>
-        <button class="btn btn-secondary btn-sm" onclick="clearUsageLogResource()" style="font-size:10px;padding:2px 8px">✕ Clear</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Transaction Category ── -->
-  <div style="margin-bottom:12px">
-    <label class="form-label">Transaction Category *</label>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
-      <label style="cursor:pointer">
-        <input type="radio" name="ulCategory" value="Budgeted" id="ulCatBudgeted" checked onchange="onUsageLogCategoryChange(this.value)" style="display:none">
-        <div id="ulCatBudgetedDiv" style="padding:8px 10px;border-radius:8px;border:2px solid var(--accent-green);background:rgba(63,185,80,.1);text-align:center;transition:all .2s">
-          <i class="fas fa-check-circle" style="color:var(--accent-green);display:block;margin-bottom:3px"></i>
-          <div style="font-size:11px;font-weight:700;color:var(--accent-green)">Budgeted</div>
-          <div style="font-size:9px;color:var(--text-muted)">In allocation</div>
-        </div>
-      </label>
-      <label style="cursor:pointer">
-        <input type="radio" name="ulCategory" value="Variation - Alternative" id="ulCatVarAlt" onchange="onUsageLogCategoryChange(this.value)" style="display:none">
-        <div id="ulCatVarAltDiv" style="padding:8px 10px;border-radius:8px;border:2px solid var(--border);background:var(--bg-hover);text-align:center;transition:all .2s">
-          <i class="fas fa-exchange-alt" style="color:var(--accent-amber);display:block;margin-bottom:3px"></i>
-          <div style="font-size:11px;font-weight:700;color:var(--accent-amber)">Variation</div>
-          <div style="font-size:9px;color:var(--text-muted)">Alternative</div>
-        </div>
-      </label>
-      <label style="cursor:pointer">
-        <input type="radio" name="ulCategory" value="Variation - Unbudgeted" id="ulCatVarUnb" onchange="onUsageLogCategoryChange(this.value)" style="display:none">
-        <div id="ulCatVarUnbDiv" style="padding:8px 10px;border-radius:8px;border:2px solid var(--border);background:var(--bg-hover);text-align:center;transition:all .2s">
-          <i class="fas fa-exclamation-triangle" style="color:var(--accent-red);display:block;margin-bottom:3px"></i>
-          <div style="font-size:11px;font-weight:700;color:var(--accent-red)">Variation</div>
-          <div style="font-size:9px;color:var(--text-muted)">Unbudgeted</div>
-        </div>
-      </label>
-    </div>
-    <div id="ulCategoryNote" style="margin-top:6px;font-size:10px;padding:5px 10px;border-radius:5px;background:rgba(63,185,80,.08);color:var(--accent-green)">
-      <i class="fas fa-info-circle" style="margin-right:4px"></i>Resource is within the approved project allocation.
-    </div>
-  </div>
-
-  <!-- ── Allocation link (for Budgeted) ── -->
-  <div id="ulAllocRow" style="margin-bottom:12px">
-    <label class="form-label">Link to Allocation <span style="color:var(--text-muted);font-size:10px">(optional for Variation)</span></label>
-    <select class="form-select" id="ulAlloc" onchange="prefillUsageLog(this.value)">
-      <option value="">— Select Allocation (optional) —</option>
-      ${allocs.map(a=>`<option value="${a.id}" ${a.id===preselectedAllocId?'selected':''}>${a.id} · ${a.resourceName} [${a.unit}] (${a.resourceType})</option>`).join('')}
-    </select>
-  </div>
-
-  <div class="form-grid">
-    <div class="form-group"><label class="form-label">Date *</label><input class="form-input" type="date" id="ulDate" value="${new Date().toISOString().split('T')[0]}"></div>
-    <div class="form-group"><label class="form-label">Quantity *</label><input class="form-input" type="number" id="ulQty" value="0" min="0.01" step="any" placeholder="0"></div>
-    <div class="form-group"><label class="form-label">Unit</label><input class="form-input" id="ulUnit" placeholder="unit" value="unit"></div>
-    <div class="form-group"><label class="form-label">${isReturn?'Returned By':'Issued To'}</label><input class="form-input" id="ulIssuedTo" placeholder="${isReturn?'Name or team':'Person / team / location'}"></div>
-    <div class="form-group"><label class="form-label">Approved By</label><input class="form-input" id="ulApproved" placeholder="Supervisor / approver name"></div>
-    <div class="form-group"><label class="form-label">Reference / DR No.</label><input class="form-input" id="ulRef" placeholder="Delivery receipt, slip no."></div>
-    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Remarks</label><input class="form-input" id="ulNotes" placeholder="${isReturn?'Reason for return, condition of item...':'Purpose, work area, remarks...'}"></div>
-  </div>
-  <div id="ulBalance" style="margin-top:8px;font-size:11px;color:var(--text-secondary)"></div>`;
-
-  // Store resources for search
-  window._ulAllResources = allResources;
-  window._ulSelectedResource = null;
-
-  // Pre-fill if allocation pre-selected
-  if(preselectedAllocId){
-    const a=(AppState.data.resourceAllocations||[]).find(x=>x.id===preselectedAllocId);
-    if(a){
-      window._ulSelectedResource={id:a.resourceId,name:a.resourceName,type:a.resourceType,unit:a.unit};
-      const srEl=$('#ulSelectedResource');
-      if(srEl){srEl.style.display='block';}
-      $('#ulSelResName').textContent=a.resourceName;
-      $('#ulSelResType').textContent=a.resourceType;
-      $('#ulSelResId').textContent=a.resourceId||a.id;
-      $('#ulResourceSearch').value=a.resourceName;
-      prefillUsageLog(preselectedAllocId);
-    }
-  }
-
-  window._usageLogPid=pid;
-  window._usageTxType=txType;
-  $('#genericModalFooter').innerHTML=`<button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
-  <button class="btn ${isReturn?'btn-warning':'btn-success'}" onclick="saveUsageLog()"><i class="fas fa-save"></i> Save ${txType}</button>`;
-  openModal('genericModal');
+  return allResources;
 }
 
-// ── Resource search for usage log ─────────────────────────
-function filterUsageLogResources(query){
-  const results=$('#ulResourceResults');
-  if(!results)return;
+function _ulLineHtml(line,i){
+  const isVar=line.category!=='Budgeted';
+  const allocs=(AppState.data.resourceAllocations||[]).filter(a=>a.projectId===window._ulPid);
+  const col=isVar?(line.category==='Variation - Unbudgeted'?'var(--accent-red)':'var(--accent-amber)'):'var(--border)';
+  return`<div style="margin-bottom:10px;padding:12px;background:var(--bg-card);border:1px solid ${col};border-radius:10px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span style="font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;background:var(--bg-hover);color:var(--text-secondary)">Line ${i+1}</span>
+    ${window._ulLines.length>1?`<button class="btn btn-danger btn-sm btn-icon" onclick="_ulRemoveLine(${i})" style="margin-left:auto;padding:2px 7px"><i class="fas fa-times"></i></button>`:''}
+  </div>
+  <div style="margin-bottom:10px">
+    <label class="form-label">Resource *</label>
+    ${line.resource?`
+    <div style="padding:7px 12px;background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.25);border-radius:7px;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <span style="font-weight:700;font-size:12px">${line.resource.name}</span>
+        <span style="margin-left:6px;font-size:10px;padding:1px 7px;border-radius:10px;background:${_UL_TYPE_COLORS[line.resource.type]||'#888'}22;color:${_UL_TYPE_COLORS[line.resource.type]||'#888'}">${line.resource.type}</span>
+        <span style="margin-left:5px;font-size:10px;color:var(--text-muted);font-family:var(--font-mono)">${line.resource.id}</span>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="_ulClearRes(${i})" style="font-size:10px;padding:2px 8px">✕ Clear</button>
+    </div>`:`
+    <div style="position:relative">
+      <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:12px;pointer-events:none"></i>
+      <input class="form-input" id="ulRS_${i}" placeholder="Search resource name, ID or type..." style="padding-left:32px"
+        oninput="_ulFilterRes(${i},this.value)" autocomplete="off">
+      <div id="ulRR_${i}" style="display:none;position:absolute;z-index:300;width:100%;margin-top:2px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;max-height:160px;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,.4)"></div>
+    </div>`}
+  </div>
+  <div class="form-grid">
+    <div class="form-group">
+      <label class="form-label">Category *</label>
+      <select class="form-select" onchange="_ulCatChange(${i},this.value)">
+        <option value="Budgeted" ${line.category==='Budgeted'?'selected':''}>✓ Budgeted</option>
+        <option value="Variation - Alternative" ${line.category==='Variation - Alternative'?'selected':''}>⇄ Variation – Alternative</option>
+        <option value="Variation - Unbudgeted" ${line.category==='Variation - Unbudgeted'?'selected':''}>⚠ Variation – Unbudgeted</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Link to Allocation</label>
+      <select class="form-select" id="ulAL_${i}" onchange="_ulPrefill(${i},this.value)">
+        <option value="">— Optional —</option>
+        ${allocs.map(a=>`<option value="${a.id}" ${a.id===line.allocId?'selected':''}>${a.id} · ${a.resourceName} [${a.unit}]</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Quantity *</label>
+      <input class="form-input" type="number" id="ulQT_${i}" value="${line.qty||''}" min="0.01" step="any" placeholder="0"
+        oninput="_ulLV(${i},'qty',this.value)">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Unit</label>
+      <input class="form-input" id="ulUN_${i}" value="${line.unit||'unit'}" oninput="_ulLV(${i},'unit',this.value)">
+    </div>
+  </div>
+  ${isVar?`
+  <div style="margin-top:10px;padding:10px 12px;background:rgba(248,81,73,.06);border:1px solid rgba(248,81,73,.3);border-radius:8px">
+    <div style="font-size:10px;font-weight:700;color:var(--accent-red);margin-bottom:8px"><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i>Variation Justification Required</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Variation Code <span style="color:var(--accent-red)">*</span></label>
+        <select class="form-select" id="ulVC_${i}" onchange="_ulLV(${i},'varCode',this.value)">
+          <option value="">— Select —</option>
+          ${_UL_VAR_CODES().map(v=>`<option value="${v}" ${line.varCode===v?'selected':''}>${v}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Authorized By <span style="color:var(--accent-red)">*</span></label>
+        <input class="form-input" id="ulVA_${i}" value="${line.varAuth||''}" placeholder="Name of approver"
+          oninput="_ulLV(${i},'varAuth',this.value)">
+      </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label class="form-label">Justification <span style="color:var(--accent-red)">*</span></label>
+        <textarea class="form-input" id="ulVR_${i}" rows="2" style="resize:vertical"
+          placeholder="Why did this variation occur?" oninput="_ulLV(${i},'varReason',this.value)">${line.varReason||''}</textarea>
+      </div>
+    </div>
+  </div>`:''}
+  <div id="ulBAL_${i}" style="margin-top:8px;font-size:11px"></div>
+</div>`;
+}
+
+function _ulRenderLines(){
+  const c=$('#ulLinesContainer');if(!c)return;
+  c.innerHTML=window._ulLines.map((l,i)=>_ulLineHtml(l,i)).join('');
+  // Restore balance for lines that have allocations
+  window._ulLines.forEach((l,i)=>{if(l.allocId)_ulShowBal(i,l.allocId);});
+}
+
+function _ulFilterRes(i,query){
+  const results=$(`#ulRR_${i}`);if(!results)return;
   if(!query||query.length<1){results.style.display='none';return;}
   const q=query.toLowerCase();
   const matches=(window._ulAllResources||[]).filter(r=>
     r.name.toLowerCase().includes(q)||r.id.toLowerCase().includes(q)||r.type.toLowerCase().includes(q)
   ).slice(0,12);
   if(!matches.length){results.style.display='none';return;}
-  const typeColors={Equipment:'#f0a450',Tool:'#bc8cff',Vehicle:'#39d3f2',Consumable:'#3fb950',Material:'#fb8f44',Manpower:'#f85149',Personnel:'#388bfd'};
   results.style.display='block';
   results.innerHTML=matches.map(r=>`
-    <div onclick="selectUsageLogResource(${JSON.stringify(r).replace(/"/g,'&quot;')})"
+    <div onclick="_ulSelectRes(${i},${JSON.stringify(r).replace(/"/g,'&quot;')})"
       style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)"
       onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">
-      <div style="width:28px;height:28px;border-radius:6px;background:${typeColors[r.type]||'#888'}22;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-        <i class="fas fa-box" style="font-size:11px;color:${typeColors[r.type]||'#888'}"></i>
-      </div>
       <div style="flex:1;min-width:0">
         <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name}</div>
         <div style="font-size:10px;color:var(--text-muted)">${r.id} · ${r.unit}</div>
       </div>
-      <span style="font-size:10px;padding:1px 7px;border-radius:10px;background:${typeColors[r.type]||'#888'}22;color:${typeColors[r.type]||'#888'};flex-shrink:0">${r.type}</span>
+      <span style="font-size:10px;padding:1px 7px;border-radius:10px;background:${_UL_TYPE_COLORS[r.type]||'#888'}22;color:${_UL_TYPE_COLORS[r.type]||'#888'};white-space:nowrap">${r.type}</span>
     </div>`).join('');
 }
 
-function selectUsageLogResource(r){
-  window._ulSelectedResource=r;
-  const srEl=$('#ulSelectedResource');
-  if(srEl)srEl.style.display='block';
-  $('#ulSelResName').textContent=r.name;
-  $('#ulSelResType').textContent=r.type;
-  $('#ulSelResId').textContent=r.id;
-  $('#ulResourceSearch').value=r.name;
-  $('#ulResourceResults').style.display='none';
-  // Auto-fill unit
-  const unitEl=$('#ulUnit');if(unitEl)unitEl.value=r.unit||'unit';
-  // Auto-select matching allocation if exists
-  const pid=window._usageLogPid;
+function _ulSelectRes(i,r){
+  window._ulLines[i].resource=r;
+  window._ulLines[i].unit=r.unit||'unit';
+  const pid=window._ulPid;
   const matchAlloc=(AppState.data.resourceAllocations||[]).find(a=>a.projectId===pid&&(a.resourceId===r.id||a.resourceName===r.name));
-  if(matchAlloc){
-    const allocEl=$('#ulAlloc');
-    if(allocEl){allocEl.value=matchAlloc.id;prefillUsageLog(matchAlloc.id);}
-  }
+  if(matchAlloc)window._ulLines[i].allocId=matchAlloc.id;
+  _ulRenderLines();
+  if(matchAlloc)_ulShowBal(i,matchAlloc.id);
 }
 
-function clearUsageLogResource(){
-  window._ulSelectedResource=null;
-  const srEl=$('#ulSelectedResource');if(srEl)srEl.style.display='none';
-  $('#ulResourceSearch').value='';
-  $('#ulResourceResults').style.display='none';
-  const allocEl=$('#ulAlloc');if(allocEl)allocEl.value='';
-  const balEl=$('#ulBalance');if(balEl)balEl.innerHTML='';
+function _ulClearRes(i){
+  window._ulLines[i].resource=null;
+  window._ulLines[i].allocId='';
+  _ulRenderLines();
 }
 
-// ── Category toggle styling ───────────────────────────────
-function onUsageLogCategoryChange(val){
-  const cats={
-    'Budgeted':    {id:'ulCatBudgetedDiv',color:'var(--accent-green)',  note:'Resource is within the approved project allocation.',        bg:'rgba(63,185,80,.08)'},
-    'Variation - Alternative': {id:'ulCatVarAltDiv',color:'var(--accent-amber)', note:'Resource is a substitution/alternative to budgeted item.',    bg:'rgba(240,164,80,.08)'},
-    'Variation - Unbudgeted':  {id:'ulCatVarUnbDiv',color:'var(--accent-red)',   note:'Resource is outside the budget — requires justification.',    bg:'rgba(248,81,73,.08)'},
-  };
-  // Reset all
-  Object.values(cats).forEach(c=>{
-    const el=$('#'+c.id);
-    if(el){el.style.border='2px solid var(--border)';el.style.background='var(--bg-hover)';}
-  });
-  // Highlight selected
-  const sel=cats[val];
-  if(sel){
-    const el=$('#'+sel.id);
-    if(el){el.style.border=`2px solid ${sel.color}`;el.style.background=`${sel.bg.replace('08','15')}`;}
-    const note=$('#ulCategoryNote');
-    if(note){note.style.background=sel.bg;note.style.color=sel.color;note.innerHTML=`<i class="fas fa-info-circle" style="margin-right:4px"></i>${sel.note}`;}
-  }
-  // For Variation: allocation link is optional, show/hide note
-  const allocRow=$('#ulAllocRow');
-  if(allocRow){
-    const lbl=allocRow.querySelector('.form-label');
-    if(lbl)lbl.innerHTML=val==='Budgeted'
-      ?'Link to Allocation <span style="color:var(--text-muted);font-size:10px">(recommended)</span>'
-      :'Link to Allocation <span style="color:var(--text-muted);font-size:10px">(optional for Variation)</span>';
-  }
+function _ulCatChange(i,val){
+  window._ulLines[i].category=val;
+  _ulRenderLines();
 }
 
-function prefillUsageLog(allocId){
-  if(!allocId)return;
-  const a=(AppState.data.resourceAllocations||[]).find(a=>a.id===allocId);
+function _ulLV(i,field,val){window._ulLines[i][field]=val;}
+
+function _ulPrefill(i,allocId){
+  window._ulLines[i].allocId=allocId;
+  if(!allocId){const b=$(`#ulBAL_${i}`);if(b)b.innerHTML='';return;}
+  const a=(AppState.data.resourceAllocations||[]).find(x=>x.id===allocId);
   if(!a)return;
-  const unitEl=$('#ulUnit');if(unitEl)unitEl.value=a.unit||'unit';
-  // Auto-select resource in search if not already set
-  if(!window._ulSelectedResource){
-    window._ulSelectedResource={id:a.resourceId,name:a.resourceName,type:a.resourceType,unit:a.unit};
-    const srEl=$('#ulSelectedResource');if(srEl)srEl.style.display='block';
-    if($('#ulSelResName'))$('#ulSelResName').textContent=a.resourceName;
-    if($('#ulSelResType'))$('#ulSelResType').textContent=a.resourceType;
-    if($('#ulSelResId'))$('#ulSelResId').textContent=a.resourceId||a.id;
-    if($('#ulResourceSearch'))$('#ulResourceSearch').value=a.resourceName;
+  if(!window._ulLines[i].resource){
+    window._ulLines[i].resource={id:a.resourceId,name:a.resourceName,type:a.resourceType,unit:a.unit};
+    window._ulLines[i].unit=a.unit||'unit';
+    _ulRenderLines();
+  } else {
+    const uEl=$(`#ulUN_${i}`);if(uEl)uEl.value=a.unit||'unit';
+    window._ulLines[i].unit=a.unit||'unit';
   }
-  // Compute balance
+  _ulShowBal(i,allocId);
+}
+
+function _ulShowBal(i,allocId){
+  const a=(AppState.data.resourceAllocations||[]).find(x=>x.id===allocId);if(!a)return;
   const logs=(AppState.data.resourceUsageLogs||[]).filter(l=>l.allocationId===allocId);
   const issued=logs.filter(l=>l.transactionType==='Issue').reduce((s,l)=>s+l.quantity,0);
   const returned=logs.filter(l=>l.transactionType==='Return').reduce((s,l)=>s+l.quantity,0);
-  const net=issued-returned;
-  const remaining=a.allocatedQty-net;
-  const balEl=$('#ulBalance');
-  if(balEl)balEl.innerHTML=`<div style="padding:8px;background:var(--bg-hover);border-radius:6px">
-    <span style="margin-right:12px">Allocated: <strong style="font-family:var(--font-mono)">${a.allocatedQty} ${a.unit}</strong></span>
-    <span style="margin-right:12px">Issued: <strong style="font-family:var(--font-mono);color:var(--accent-blue)">${issued}</strong></span>
-    <span style="margin-right:12px">Returned: <strong style="font-family:var(--font-mono);color:var(--accent-amber)">${returned}</strong></span>
-    <span style="margin-right:12px">Net Used: <strong style="font-family:var(--font-mono)">${net}</strong></span>
-    <span>Remaining: <strong style="font-family:var(--font-mono);color:${remaining<0?'var(--accent-red)':remaining===0?'var(--accent-amber)':'var(--accent-green)'}">${remaining} ${a.unit}</strong></span>
+  const rem=a.allocatedQty-(issued-returned);
+  const el=$(`#ulBAL_${i}`);
+  if(el)el.innerHTML=`<div style="padding:5px 8px;background:var(--bg-hover);border-radius:6px;font-size:10px;display:flex;gap:12px;flex-wrap:wrap">
+    <span>Allocated: <strong>${a.allocatedQty} ${a.unit}</strong></span>
+    <span>Issued: <strong style="color:var(--accent-blue)">${issued}</strong></span>
+    <span>Returned: <strong style="color:var(--accent-amber)">${returned}</strong></span>
+    <span>Remaining: <strong style="color:${rem<0?'var(--accent-red)':rem===0?'var(--accent-amber)':'var(--accent-green)'}">${rem} ${a.unit}</strong></span>
   </div>`;
 }
 
-function saveUsageLog(){
-  // ── Validate resource selected ──
-  const res=window._ulSelectedResource;
-  if(!res&&!($('#ulAlloc')?.value)){showToast('Search and select a resource first','error');return;}
-  const qty=parseFloat($('#ulQty')?.value)||0;
-  if(qty<=0){showToast('Quantity must be > 0','error');return;}
-  const allocId=$('#ulAlloc')?.value||'';
-  const a=allocId?(AppState.data.resourceAllocations||[]).find(x=>x.id===allocId):null;
-  const category=document.querySelector('input[name="ulCategory"]:checked')?.value||'Budgeted';
-  if(!AppState.data.resourceUsageLogs)AppState.data.resourceUsageLogs=[];
-  const log={
-    id:'RUL-'+((AppState.data.resourceUsageLogs||[]).length+1).toString().padStart(4,'0'),
-    projectId:window._usageLogPid,
-    allocationId:allocId||null,
-    resourceId:res?.id||a?.resourceId||'',
-    resourceName:res?.name||a?.resourceName||'',
-    resourceType:res?.type||a?.resourceType||'',
-    category:category,  // 'Budgeted' | 'Variation - Alternative' | 'Variation - Unbudgeted'
-    transactionType:window._usageTxType||'Issue',
-    date:$('#ulDate')?.value||new Date().toISOString().split('T')[0],
-    quantity:qty,
-    unit:$('#ulUnit')?.value||a?.unit||res?.unit||'unit',
-    issuedTo:$('#ulIssuedTo')?.value||'',
-    approvedBy:$('#ulApproved')?.value||'',
-    reference:$('#ulRef')?.value||'',
-    notes:$('#ulNotes')?.value||''
-  };
-  AppState.data.resourceUsageLogs.push(log);
-  // Auto-update actual cost if allocation has planned cost
-  if(a&&a.plannedCost>0&&a.allocatedQty>0){
-    const costPerUnit=a.plannedCost/a.allocatedQty;
-    const allLogs=(AppState.data.resourceUsageLogs||[]).filter(l=>l.allocationId===allocId);
-    const netIssued=allLogs.filter(l=>l.transactionType==='Issue').reduce((s,l)=>s+l.quantity,0)
-                  -allLogs.filter(l=>l.transactionType==='Return').reduce((s,l)=>s+l.quantity,0);
-    a.actualCost=Math.round(netIssued*costPerUnit);
+function _ulAddLine(){
+  window._ulLines.push({resource:null,allocId:'',category:'Budgeted',qty:'',unit:'unit',varCode:'',varAuth:'',varReason:''});
+  _ulRenderLines();
+  // Scroll to new line
+  const c=$('#ulLinesContainer');if(c)c.lastElementChild?.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+function _ulRemoveLine(i){
+  if(window._ulLines.length<=1)return;
+  window._ulLines.splice(i,1);
+  _ulRenderLines();
+}
+
+function showLogUsage(pid,txType='Issue',preselectedAllocId=''){
+  if(!AppState.data.resourceAllocations)AppState.data.resourceAllocations=[];
+  const isReturn=txType==='Return';
+  window._ulPid=pid;
+  window._ulTxType=txType;
+  window._ulAllResources=_ulBuildResources(pid);
+  window._ulLines=[{resource:null,allocId:preselectedAllocId||'',category:'Budgeted',qty:'',unit:'unit',varCode:'',varAuth:'',varReason:''}];
+
+  $('#genericModalTitle').textContent=(isReturn?'Log Return (Excess)':'Log Issue / Usage')+' — '+pid;
+  $('#genericModalBody').innerHTML=`
+  <div style="padding:8px 12px;background:${isReturn?'rgba(240,164,80,.1)':'rgba(63,185,80,.1)'};border-radius:6px;margin-bottom:14px;border-left:3px solid ${isReturn?'var(--accent-amber)':'var(--accent-green)'}">
+    <strong>${isReturn?'↩ Return Excess':'↗ Issue to Site'}</strong> — ${isReturn?'Log resources being returned from site to store/warehouse.':'Log resources being issued/deployed to site.'}
+  </div>
+  <div class="form-grid" style="margin-bottom:14px">
+    <div class="form-group"><label class="form-label">Date *</label><input class="form-input" type="date" id="ulDate" value="${new Date().toISOString().split('T')[0]}"></div>
+    <div class="form-group"><label class="form-label">${isReturn?'Returned By':'Issued To'} *</label><input class="form-input" id="ulIssuedTo" placeholder="${isReturn?'Name or team':'Person, team or location'}"></div>
+    <div class="form-group"><label class="form-label">Approved By</label><input class="form-input" id="ulApproved" placeholder="Supervisor / approver"></div>
+    <div class="form-group"><label class="form-label">Reference / DR No.</label><input class="form-input" id="ulRef" placeholder="Delivery receipt, slip no."></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Remarks</label><input class="form-input" id="ulNotes" placeholder="${isReturn?'Condition of items, reason for return...':'Work area, purpose, remarks...'}"></div>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <div style="font-weight:700;font-size:13px">Line Items</div>
+    <button class="btn btn-primary btn-sm" onclick="_ulAddLine()"><i class="fas fa-plus"></i> Add Item</button>
+  </div>
+  <div id="ulLinesContainer"></div>`;
+
+  $('#genericModalFooter').innerHTML=`
+  <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+  <button class="btn ${isReturn?'btn-warning':'btn-success'}" onclick="saveUsageLog()"><i class="fas fa-save"></i> Save ${txType}</button>`;
+  openModal('genericModal');
+  _ulRenderLines();
+
+  // Pre-fill line 0 if allocation pre-selected
+  if(preselectedAllocId){
+    const a=(AppState.data.resourceAllocations||[]).find(x=>x.id===preselectedAllocId);
+    if(a){
+      window._ulLines[0].resource={id:a.resourceId,name:a.resourceName,type:a.resourceType,unit:a.unit};
+      window._ulLines[0].unit=a.unit||'unit';
+      _ulRenderLines();
+      _ulShowBal(0,preselectedAllocId);
+    }
   }
+}
+
+function saveUsageLog(){
+  const date=$('#ulDate')?.value||new Date().toISOString().split('T')[0];
+  const issuedTo=$('#ulIssuedTo')?.value||'';
+  const approvedBy=$('#ulApproved')?.value||'';
+  const reference=$('#ulRef')?.value||'';
+  const notes=$('#ulNotes')?.value||'';
+  const txType=window._ulTxType||'Issue';
+  const pid=window._ulPid;
+  const lines=window._ulLines||[];
+  if(!lines.length){showToast('Add at least one line item','error');return;}
+
+  // Sync any still-focused text inputs into line state
+  lines.forEach((line,i)=>{
+    const qt=$(`#ulQT_${i}`);if(qt)line.qty=qt.value;
+    const un=$(`#ulUN_${i}`);if(un)line.unit=un.value;
+    const vc=$(`#ulVC_${i}`);if(vc)line.varCode=vc.value;
+    const va=$(`#ulVA_${i}`);if(va)line.varAuth=va.value;
+    const vr=$(`#ulVR_${i}`);if(vr)line.varReason=vr.value;
+  });
+
+  // Validate all lines
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+    if(!line.resource){showToast(`Line ${i+1}: Select a resource`,'error');return;}
+    const qty=parseFloat(line.qty)||0;
+    if(qty<=0){showToast(`Line ${i+1}: Quantity must be greater than 0`,'error');return;}
+    if(line.category!=='Budgeted'){
+      if(!line.varCode){showToast(`Line ${i+1}: Select a Variation Code`,'error');return;}
+      if(!(line.varAuth||'').trim()){showToast(`Line ${i+1}: Authorized By is required`,'error');return;}
+      if(!(line.varReason||'').trim()){showToast(`Line ${i+1}: Justification is required`,'error');return;}
+    }
+  }
+
+  if(!AppState.data.resourceUsageLogs)AppState.data.resourceUsageLogs=[];
+  lines.forEach(line=>{
+    const qty=parseFloat(line.qty);
+    const allocId=line.allocId||'';
+    const a=allocId?(AppState.data.resourceAllocations||[]).find(x=>x.id===allocId):null;
+    const log={
+      id:'RUL-'+((AppState.data.resourceUsageLogs||[]).length+1).toString().padStart(4,'0'),
+      projectId:pid,
+      allocationId:allocId||null,
+      resourceId:line.resource.id||'',
+      resourceName:line.resource.name||'',
+      resourceType:line.resource.type||'',
+      category:line.category,
+      variationCode:line.category!=='Budgeted'?line.varCode:'',
+      variationAuthorizedBy:line.category!=='Budgeted'?(line.varAuth||'').trim():'',
+      variationReason:line.category!=='Budgeted'?(line.varReason||'').trim():'',
+      transactionType:txType,
+      date,quantity:qty,
+      unit:line.unit||a?.unit||line.resource.unit||'unit',
+      issuedTo,approvedBy,reference,notes
+    };
+    AppState.data.resourceUsageLogs.push(log);
+    if(a&&a.plannedCost>0&&a.allocatedQty>0){
+      const cpu=a.plannedCost/a.allocatedQty;
+      const allLogs=(AppState.data.resourceUsageLogs||[]).filter(l=>l.allocationId===allocId);
+      const net=allLogs.filter(l=>l.transactionType==='Issue').reduce((s,l)=>s+l.quantity,0)
+               -allLogs.filter(l=>l.transactionType==='Return').reduce((s,l)=>s+l.quantity,0);
+      a.actualCost=Math.round(net*cpu);
+    }
+  });
+
   AppState.save();closeModal('genericModal');renderDetailAllocation();
-  const catLabel=category==='Budgeted'?'Budgeted':(category==='Variation - Alternative'?'Variation (Alt)':'Variation (Unbudgeted)');
-  showToast(`${log.transactionType==='Return'?'Return':'Issue'} logged · ${catLabel}`,'success');
+  const varCount=lines.filter(l=>l.category!=='Budgeted').length;
+  showToast(`${lines.length} ${txType} line${lines.length!==1?'s':''} saved`+(varCount?` · ${varCount} variation${varCount!==1?'s':''}`:``),txType==='Return'?'warning':'success');
 }
 
 function deleteUsageLog(id){
   if(requestOrDelete('resourceUsageLogs',id)){renderDetailAllocation();}
+}
+
+function editUsageLog(id){
+  const l=(AppState.data.resourceUsageLogs||[]).find(x=>x.id===id);
+  if(!l){showToast('Log entry not found','error');return;}
+  const isVar=l.category&&l.category!=='Budgeted';
+  $('#genericModalTitle').textContent='Edit Log Entry — '+id;
+  $('#genericModalBody').innerHTML=`
+  <div style="padding:6px 10px;background:rgba(56,139,253,.08);border-radius:6px;margin-bottom:12px;font-size:11px;font-family:var(--font-mono)">
+    ${l.id} · ${l.resourceName} · ${l.transactionType}
+  </div>
+  <div class="form-grid">
+    <div class="form-group"><label class="form-label">Date</label><input class="form-input" type="date" id="elDate" value="${l.date||''}"></div>
+    <div class="form-group"><label class="form-label">Quantity</label><input class="form-input" type="number" id="elQty" value="${l.quantity||0}" min="0.01" step="any"></div>
+    <div class="form-group"><label class="form-label">Unit</label><input class="form-input" id="elUnit" value="${l.unit||'unit'}"></div>
+    <div class="form-group"><label class="form-label">${l.transactionType==='Return'?'Returned By':'Issued To'}</label><input class="form-input" id="elIssuedTo" value="${l.issuedTo||''}"></div>
+    <div class="form-group"><label class="form-label">Approved By</label><input class="form-input" id="elApproved" value="${l.approvedBy||''}"></div>
+    <div class="form-group"><label class="form-label">Reference / DR No.</label><input class="form-input" id="elRef" value="${l.reference||''}"></div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Remarks</label><input class="form-input" id="elNotes" value="${l.notes||''}"></div>
+  </div>
+  ${isVar?`
+  <div style="margin-top:10px;padding:10px 12px;background:rgba(248,81,73,.06);border:1px solid rgba(248,81,73,.25);border-radius:8px">
+    <div style="font-size:10px;font-weight:700;color:var(--accent-red);margin-bottom:8px"><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i>Variation Details</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Variation Code</label>
+        <select class="form-select" id="elVarCode">
+          <option value="">— Select —</option>
+          ${_UL_VAR_CODES().map(v=>`<option value="${v}" ${l.variationCode===v?'selected':''}>${v}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Authorized By</label><input class="form-input" id="elVarAuth" value="${l.variationAuthorizedBy||''}"></div>
+      <div class="form-group" style="grid-column:1/-1"><label class="form-label">Justification</label>
+        <textarea class="form-input" id="elVarReason" rows="2" style="resize:vertical">${l.variationReason||''}</textarea>
+      </div>
+    </div>
+  </div>`:''}`;
+  $('#genericModalFooter').innerHTML=`
+  <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+  <button class="btn btn-primary" onclick="_saveEditUsageLog('${id}')"><i class="fas fa-save"></i> Save Changes</button>`;
+  openModal('genericModal');
+}
+
+function _saveEditUsageLog(id){
+  const l=(AppState.data.resourceUsageLogs||[]).find(x=>x.id===id);
+  if(!l)return;
+  const qty=parseFloat($('#elQty')?.value)||0;
+  if(qty<=0){showToast('Quantity must be > 0','error');return;}
+  const isVar=l.category&&l.category!=='Budgeted';
+  if(isVar){
+    if(!($('#elVarCode')?.value)){showToast('Variation Code required','error');return;}
+    if(!($('#elVarAuth')?.value?.trim())){showToast('Authorized By required','error');return;}
+    if(!($('#elVarReason')?.value?.trim())){showToast('Justification required','error');return;}
+  }
+  const oldQty=l.quantity;
+  l.date=$('#elDate')?.value||l.date;
+  l.quantity=qty;
+  l.unit=$('#elUnit')?.value||l.unit;
+  l.issuedTo=$('#elIssuedTo')?.value||'';
+  l.approvedBy=$('#elApproved')?.value||'';
+  l.reference=$('#elRef')?.value||'';
+  l.notes=$('#elNotes')?.value||'';
+  if(isVar){
+    l.variationCode=$('#elVarCode')?.value||'';
+    l.variationAuthorizedBy=$('#elVarAuth')?.value?.trim()||'';
+    l.variationReason=$('#elVarReason')?.value?.trim()||'';
+  }
+  l._updatedAt=new Date().toISOString();
+  l._updatedBy=_currentUserProfile?.name||_currentUserProfile?.email||'unknown';
+  // Recalculate actual cost on linked allocation
+  if(l.allocationId){
+    const a=(AppState.data.resourceAllocations||[]).find(x=>x.id===l.allocationId);
+    if(a&&a.plannedCost>0&&a.allocatedQty>0){
+      const cpu=a.plannedCost/a.allocatedQty;
+      const allLogs=(AppState.data.resourceUsageLogs||[]).filter(x=>x.allocationId===l.allocationId);
+      const net=allLogs.filter(x=>x.transactionType==='Issue').reduce((s,x)=>s+x.quantity,0)
+               -allLogs.filter(x=>x.transactionType==='Return').reduce((s,x)=>s+x.quantity,0);
+      a.actualCost=Math.round(net*cpu);
+    }
+  }
+  AppState.save();closeModal('genericModal');renderDetailAllocation();
+  showToast('Log entry updated','success');
 }
 
 // ── RESOURCE ALLOCATION EXCEL EXPORT ──────────────────────
@@ -9992,7 +10334,7 @@ function renderDetailCostControl(){
         const pct=Math.min(999,Math.round((c.actual/Math.max(c.planned,1))*100));
         return`<tr>
         <td style="font-size:10px;font-family:var(--font-mono)">${c.id}</td>
-        <td><select class="form-select" style="height:30px;font-size:11px;min-width:100px" onchange="updateCostField('${c.id}','category',this.value)">${['Mobilization', 'Demobilization', 'Manpower Cost', 'Tools and Equipments', 'Materials and Consumables', 'Personal Protective Equipment', 'Miscellaneous'].map(cat=>`<option value="${cat}" ${c.category===cat?'selected':''}>${cat}</option>`).join('')}</select></td>
+        <td><select class="form-select" style="height:30px;font-size:11px;min-width:100px" onchange="updateCostField('${c.id}','category',this.value)">${_getDropdown('cost_categories').map(cat=>`<option value="${cat}" ${c.category===cat?'selected':''}>${cat}</option>`).join('')}</select></td>
         <td><input class="form-input" value="${c.description}" style="min-width:160px;height:26px;font-size:11px" oninput="updateCostField('${c.id}','description',this.value)" onchange="updateCostField('${c.id}','description',this.value)"></td>
         <td><input class="form-input" type="number" value="${c.planned}" style="width:110px;height:26px;font-family:var(--font-mono);font-size:11px" oninput="updateCostField('${c.id}','planned',+this.value)" onchange="updateCostField('${c.id}','planned',+this.value);setTimeout(()=>renderDetailCostControl(),700)"></td>
         <td><input class="form-input" type="number" value="${c.actual}" style="width:110px;height:26px;font-family:var(--font-mono);font-size:11px;${c.actual>c.planned?'border-color:var(--accent-red);color:var(--accent-red)':''}" oninput="updateCostField('${c.id}','actual',+this.value)" onchange="updateCostField('${c.id}','actual',+this.value);setTimeout(()=>renderDetailCostControl(),700)"></td>
@@ -13908,7 +14250,7 @@ return manpower.map(m=>{
     <input class="form-input" type="number" value="${m.cost}" style="width:90px;height:26px;font-family:var(--font-mono);font-size:11px;text-align:right" onchange="updateMp('${m.id}','cost',+this.value);setTimeout(renderManpower,700)">
   </div>
 </td>
-<td style="padding:3px 4px"><select class="form-select" style="height:30px;font-size:11px;min-width:90px" onchange="updateMp('${m.id}','shift',this.value)">${['Day','Night','Day/Night','Rotating'].map(s=>`<option value="${s}" ${m.shift===s?'selected':''}>${s}</option>`).join('')}</select></td>
+<td style="padding:3px 4px"><select class="form-select" style="height:30px;font-size:11px;min-width:90px" onchange="updateMp('${m.id}','shift',this.value)">${_getDropdown('manpower_shifts').map(s=>`<option value="${s}" ${m.shift===s?'selected':''}>${s}</option>`).join('')}</select></td>
 <td style="padding:3px 4px"><input class="form-input" type="number" value="${m.overtime}" style="width:62px;height:30px;font-family:var(--font-mono);font-size:11px;text-align:right;${m.overtime>100?'color:var(--accent-amber)':''}" onchange="updateMp('${m.id}','overtime',+this.value);setTimeout(renderManpower,700)"></td>
 <td style="padding:3px 6px"><button class="btn btn-danger btn-sm btn-icon" onclick="deleteMpRecord('${m.id}')" title="Delete"><i class="fas fa-trash"></i></button></td>
 </tr>`;}).join('');
@@ -14121,7 +14463,7 @@ $('#genericModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">Planned Headcount *</label><input class="form-input" type="number" id="mpPlan" value="0" min="0"></div>
 <div class="form-group"><label class="form-label">Actual Headcount</label><input class="form-input" type="number" id="mpAct" value="0" min="0"></div>
 <div class="form-group"><label class="form-label">Weekly Labor Cost (₱)</label><input class="form-input" type="number" id="mpCost" value="0" min="0"></div>
-<div class="form-group"><label class="form-label">Shift</label><select class="form-select" id="mpShift"><option>Day</option><option>Night</option><option>Day/Night</option><option>Rotating</option></select></div>
+<div class="form-group"><label class="form-label">Shift</label><select class="form-select" id="mpShift">${_getDropdown('manpower_shifts').map(s=>`<option>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Overtime Hours</label><input class="form-input" type="number" id="mpOT" value="0" min="0"></div>
 </div>`;
 $('#genericModalFooter').innerHTML=`<button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button><button class="btn btn-primary" onclick="saveMpRecord()"><i class="fas fa-save"></i> Add Record</button>`;
@@ -15443,7 +15785,7 @@ if(!pid && typeof detailProjectId !== 'undefined') pid = detailProjectId;
 $('#genericModalTitle').textContent='New Inspection Record';
 $('#genericModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">Project</label><select class="form-select" id="gProj">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${p.id===pid?'selected':''}>${p.id}${p.name?' — '+p.name.substring(0,30):''}</option>`).join('')}</select></div>
-<div class="form-group"><label class="form-label">Type</label><select class="form-select" id="gType">${['Inspection','NCR','Punch','Test','Audit'].map(t=>`<option>${t}</option>`).join('')}</select></div>
+<div class="form-group"><label class="form-label">Type</label><select class="form-select" id="gType">${_getDropdown('qaqc_types').map(t=>`<option>${t}</option>`).join('')}</select></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Description *</label><input class="form-input" id="gDesc" placeholder="Inspection description"></div>
 <div class="form-group"><label class="form-label">Inspector</label><input class="form-input" id="gInsp" placeholder="Inspector name"></div>
 <div class="form-group"><label class="form-label">Date</label><input class="form-input" type="date" id="gDate" value="${new Date().toISOString().split('T')[0]}"></div>
@@ -15516,7 +15858,7 @@ if(!pid && typeof detailProjectId !== 'undefined') pid = detailProjectId;
 $('#genericModalTitle').textContent='New Risk';
 $('#genericModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">Project</label><select class="form-select" id="gProj">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${p.id===pid?'selected':''}>${p.id}${p.name?' — '+p.name.substring(0,30):''}</option>`).join('')}</select></div>
-<div class="form-group"><label class="form-label">Category</label><select class="form-select" id="gCat">${['Procurement','Resources','Technical','HSE','Regulatory','Financial','Schedule'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+<div class="form-group"><label class="form-label">Category</label><select class="form-select" id="gCat">${_getDropdown('risk_categories').map(c=>`<option>${c}</option>`).join('')}</select></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Risk Description *</label><input class="form-input" id="gDesc" placeholder="Describe the risk"></div>
 <div class="form-group"><label class="form-label">Probability (1-5)</label><input class="form-input" type="number" id="gProb" min="1" max="5" value="3"></div>
 <div class="form-group"><label class="form-label">Impact (1-5)</label><input class="form-input" type="number" id="gImp" min="1" max="5" value="3"></div>
@@ -15567,7 +15909,7 @@ $('#genericModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Description *</label><input class="form-input" id="gDesc" placeholder="Action description"></div>
 <div class="form-group"><label class="form-label">Assigned To</label><input class="form-input" id="gAss" placeholder="Person name"></div>
 <div class="form-group"><label class="form-label">Due Date</label><input class="form-input" type="date" id="gDate"></div>
-<div class="form-group"><label class="form-label">Priority</label><select class="form-select" id="gPri">${['critical','high','medium','low'].map(p=>`<option>${p}</option>`).join('')}</select></div>
+<div class="form-group"><label class="form-label">Priority</label><select class="form-select" id="gPri">${_getDropdown('action_priority').map(p=>`<option>${p}</option>`).join('')}</select></div>
 </div>`;
 $('#genericModalFooter').innerHTML=`<button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button><button class="btn btn-primary" onclick="saveAction()">Create</button>`;
 openModal('genericModal');}
@@ -15987,7 +16329,7 @@ function showDocDetail(id){
       </select></div>
     <div class="form-group"><label class="form-label">Category</label>
       <select class="form-select" id="dd_category">
-        ${['Engineering','Management','QA/QC','Finance','Legal','Safety','Photos','General','Procurement','As-Built'].map(c=>`<option ${d.category===c?'selected':''}>${c}</option>`).join('')}
+        ${_getDropdown('doc_categories').map(c=>`<option ${d.category===c?'selected':''}>${c}</option>`).join('')}
       </select></div>
     <div class="form-group"><label class="form-label">Author / Uploaded By</label>
       <input class="form-input" id="dd_author" value="${(d.author||'').replace(/"/g,'&quot;')}"></div>
@@ -15995,7 +16337,7 @@ function showDocDetail(id){
       <input class="form-input" type="date" id="dd_date" value="${safeDate(d.date)}"></div>
     <div class="form-group"><label class="form-label">Status</label>
       <select class="form-select" id="dd_status">
-        ${['draft','review','approved','issued','superseded'].map(s=>`<option value="${s}" ${d.status===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+        ${_getDropdown('doc_status').map(s=>`<option value="${s}" ${d.status===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
       </select></div>
     <div class="form-group"><label class="form-label">Tags</label>
       <input class="form-input" id="dd_tags" value="${(d.tags||[]).join(', ')}" placeholder="tag1, tag2, tag3"></div>
@@ -18117,6 +18459,7 @@ ${renderSpPanel()}
           <i class="fas fa-shield-alt" style="margin-right:5px"></i><strong>Admin Only</strong> — affects all team members
         </div>
         <button class="btn btn-secondary" onclick="showAuditLogPanel()"><i class="fas fa-history" style="margin-right:6px;color:var(--accent-blue)"></i> View SharePoint Audit Log</button>
+        <button class="btn btn-secondary" onclick="showDropdownManager()"><i class="fas fa-list-ul" style="margin-right:6px;color:var(--accent-blue)"></i> Manage Dropdown Options</button>
       </div>
     </div>
     <div style="margin-top:12px;padding:10px;background:var(--bg-hover);border-radius:6px;font-size:10px;color:var(--text-secondary);line-height:1.7">
@@ -18218,6 +18561,183 @@ async function showAuditLogPanel(){
     $('#genericModalBody').innerHTML=`<div class="empty-state"><p>Error loading audit log: ${e.message}</p></div>`;
   }
   $('#genericModalFooter').innerHTML='<button class="btn btn-secondary" onclick="closeModal(\'genericModal\')">Close</button>';
+}
+
+// ── DROPDOWN MANAGER ─────────────────────────────────────────
+let _dmActiveKey = null;
+
+function showDropdownManager(){
+  if(!isAdminUser()){showToast('Admins only','error');return;}
+  _dmActiveKey = null;
+  $('#genericModalTitle').textContent = 'Manage Dropdown Options';
+  _dmRender();
+  $('#genericModalFooter').innerHTML = `<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
+  openModal('genericModal');
+}
+
+async function _dmPushToAllUsers(){
+  if(!isAdminUser()){showToast('Admins only','error');return;}
+  if(typeof _spConnected==='undefined'||!_spConnected){showToast('SharePoint not connected — connect first to push dropdowns','error',4000);return;}
+  if(!confirm('Push current dropdown options to ALL users?\n\nAll users will receive these dropdowns on their next sync. This cannot be undone automatically.'))return;
+  if(!AppState.data.settings)AppState.data.settings={};
+  if(!AppState.data.settings.dropdowns)AppState.data.settings.dropdowns={};
+  AppState.data.settings.dropdowns._adminPushedAt=Date.now();
+  AppState.save();
+  showToast('Pushing dropdown settings to SharePoint...','info',2500);
+  try{
+    await spPushData(true);
+    showToast('Dropdown settings pushed — users will receive them on next sync','success',5000);
+  }catch(e){showToast('Push failed: '+e.message,'error');}
+  _dmRender();
+}
+
+function _dmRender(){
+  const body = $('#genericModalBody');
+  if(!body) return;
+
+  if(!_dmActiveKey){
+    // Show list of all dropdown categories
+    const keys = Object.keys(DROPDOWN_REGISTRY);
+    const _adminPushedAt = AppState.data.settings?.dropdowns?._adminPushedAt;
+    const _pushedLabel = _adminPushedAt ? new Date(_adminPushedAt).toLocaleString() : null;
+    body.innerHTML = `
+    <div style="margin-bottom:10px;font-size:11px;color:var(--text-secondary)">Select a dropdown to manage its options. Changes apply immediately across the entire app.</div>
+    ${typeof _spConnected!=='undefined'&&_spConnected?`<div style="margin-bottom:12px;padding:10px 14px;background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.25);border-radius:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--accent-blue)"><i class="fas fa-cloud-upload-alt" style="margin-right:6px"></i>Push Dropdowns to All Users</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${_pushedLabel?'Last pushed: '+_pushedLabel:'Never pushed — users see default values'}</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="_dmPushToAllUsers()"><i class="fas fa-share-nodes"></i> Push Now</button>
+    </div>`:''}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">
+      ${keys.map(key=>{
+        const reg=DROPDOWN_REGISTRY[key];
+        const items=_getDropdown(key);
+        const isCustom=!!(AppState.data.settings?.dropdowns?.[key]?.length);
+        return`<div onclick="_dmOpenKey('${key}')" style="padding:12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:all .15s;background:var(--bg-card)"
+          onmouseover="this.style.borderColor='var(--accent-blue)';this.style.background='rgba(56,139,253,.05)'"
+          onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-card)'">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <i class="fas ${reg.icon}" style="color:var(--accent-blue);font-size:13px;width:16px"></i>
+            <span style="font-size:12px;font-weight:600">${reg.label}</span>
+            ${isCustom?`<span style="margin-left:auto;font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(63,185,80,.15);color:var(--accent-green);font-weight:700">CUSTOM</span>`:''}
+          </div>
+          <div style="font-size:10px;color:var(--text-muted)">${items.length} option${items.length!==1?'s':''} · ${isCustom?'Customized':'Using defaults'}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+    $('#genericModalFooter').innerHTML = `<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
+    return;
+  }
+
+  // Show editor for active key
+  const reg = DROPDOWN_REGISTRY[_dmActiveKey];
+  const items = _getDropdown(_dmActiveKey);
+  const isCustom = !!(AppState.data.settings?.dropdowns?.[_dmActiveKey]?.length);
+  body.innerHTML = `
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+    <button class="btn btn-secondary btn-sm" onclick="_dmActiveKey=null;_dmRender()"><i class="fas fa-arrow-left"></i> All Dropdowns</button>
+    <div>
+      <div style="font-weight:700;font-size:13px"><i class="fas ${reg.icon}" style="color:var(--accent-blue);margin-right:6px"></i>${reg.label}</div>
+      <div style="font-size:10px;color:var(--text-muted)">${isCustom?'Using custom values':'Using default values'} · ${items.length} item${items.length!==1?'s':''}</div>
+    </div>
+    ${isCustom?`<button class="btn btn-secondary btn-sm" style="margin-left:auto;color:var(--accent-amber)" onclick="_dmResetToDefault('${_dmActiveKey}')"><i class="fas fa-undo"></i> Reset to Defaults</button>`:''}
+  </div>
+  <div id="dmItemList" style="margin-bottom:12px">
+    ${items.map((item,i)=>`
+    <div id="dmItem_${i}" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--border);border-radius:7px;margin-bottom:5px;background:var(--bg-card)">
+      <i class="fas fa-grip-vertical" style="color:var(--text-muted);font-size:11px;cursor:grab"></i>
+      <span id="dmItemText_${i}" style="flex:1;font-size:12px">${item}</span>
+      <input id="dmItemInput_${i}" class="form-input" value="${item.replace(/"/g,'&quot;')}" style="display:none;flex:1;height:28px;font-size:12px">
+      <button class="btn btn-secondary btn-sm btn-icon" onclick="_dmEditItem(${i})" id="dmEditBtn_${i}" title="Edit"><i class="fas fa-pen"></i></button>
+      <button class="btn btn-success btn-sm btn-icon" onclick="_dmSaveItem(${i})" id="dmSaveBtn_${i}" style="display:none" title="Save"><i class="fas fa-check"></i></button>
+      <button class="btn btn-secondary btn-sm btn-icon" onclick="_dmCancelEdit(${i})" id="dmCancelBtn_${i}" style="display:none" title="Cancel"><i class="fas fa-times"></i></button>
+      <button class="btn btn-danger btn-sm btn-icon" onclick="_dmDeleteItem(${i})" title="Remove"><i class="fas fa-trash"></i></button>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <button class="btn btn-secondary btn-sm btn-icon" onclick="_dmMoveItem(${i},-1)" ${i===0?'disabled':''} style="padding:1px 5px;font-size:9px"><i class="fas fa-chevron-up"></i></button>
+        <button class="btn btn-secondary btn-sm btn-icon" onclick="_dmMoveItem(${i},1)" ${i===items.length-1?'disabled':''} style="padding:1px 5px;font-size:9px"><i class="fas fa-chevron-down"></i></button>
+      </div>
+    </div>`).join('')}
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <input class="form-input" id="dmNewItem" placeholder="New option value..." style="flex:1" onkeydown="if(event.key==='Enter')_dmAddItem()">
+    <button class="btn btn-primary btn-sm" onclick="_dmAddItem()"><i class="fas fa-plus"></i> Add</button>
+  </div>`;
+  $('#genericModalFooter').innerHTML = `
+  <button class="btn btn-secondary" onclick="_dmActiveKey=null;_dmRender()"><i class="fas fa-arrow-left"></i> Back</button>
+  <button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
+}
+
+function _dmOpenKey(key){_dmActiveKey=key;_dmRender();}
+
+function _dmGetCurrentItems(){return _getDropdown(_dmActiveKey);}
+
+function _dmSave(items){
+  _setDropdown(_dmActiveKey,items);
+  _dmRender();
+  showToast('Dropdown updated','success',2000);
+}
+
+function _dmAddItem(){
+  const inp=$('#dmNewItem');if(!inp)return;
+  const val=inp.value.trim();
+  if(!val){showToast('Enter a value first','error');return;}
+  const items=[..._dmGetCurrentItems(),val];
+  inp.value='';
+  _dmSave(items);
+}
+
+function _dmEditItem(i){
+  $(`#dmItemText_${i}`).style.display='none';
+  $(`#dmItemInput_${i}`).style.display='';
+  $(`#dmEditBtn_${i}`).style.display='none';
+  $(`#dmSaveBtn_${i}`).style.display='';
+  $(`#dmCancelBtn_${i}`).style.display='';
+  $(`#dmItemInput_${i}`).focus();
+}
+
+function _dmCancelEdit(i){
+  const items=_dmGetCurrentItems();
+  $(`#dmItemText_${i}`).style.display='';
+  $(`#dmItemInput_${i}`).style.display='none';
+  $(`#dmEditBtn_${i}`).style.display='';
+  $(`#dmSaveBtn_${i}`).style.display='none';
+  $(`#dmCancelBtn_${i}`).style.display='none';
+  $(`#dmItemInput_${i}`).value=items[i];
+}
+
+function _dmSaveItem(i){
+  const val=$(`#dmItemInput_${i}`)?.value?.trim();
+  if(!val){showToast('Value cannot be empty','error');return;}
+  const items=[..._dmGetCurrentItems()];
+  items[i]=val;
+  _dmSave(items);
+}
+
+function _dmDeleteItem(i){
+  const items=[..._dmGetCurrentItems()];
+  if(items.length<=1){showToast('Must keep at least one option','error');return;}
+  if(!confirm(`Remove "${items[i]}" from this dropdown?`))return;
+  items.splice(i,1);
+  _dmSave(items);
+}
+
+function _dmMoveItem(i,dir){
+  const items=[..._dmGetCurrentItems()];
+  const j=i+dir;
+  if(j<0||j>=items.length)return;
+  [items[i],items[j]]=[items[j],items[i]];
+  _dmSave(items);
+}
+
+function _dmResetToDefault(key){
+  if(!confirm(`Reset "${DROPDOWN_REGISTRY[key].label}" to default values?\n\nAll custom changes will be lost.`))return;
+  if(!AppState.data.settings)AppState.data.settings={};
+  if(!AppState.data.settings.dropdowns)AppState.data.settings.dropdowns={};
+  delete AppState.data.settings.dropdowns[key];
+  AppState.save();
+  _dmRender();
+  showToast('Reset to defaults','success',2000);
 }
 
 function saveSettings(){
@@ -18851,7 +19371,7 @@ function renderMlPersonnel(){
       <div class="progress-bar" style="flex:1;height:5px"><div class="progress-fill" style="width:${r.utilization}%;background:${r.utilization>90?'var(--accent-red)':r.utilization>70?'var(--accent-amber)':'var(--accent-blue)'}"></div></div>
       <input class="form-input" type="number" value="${r.utilization}" style="width:46px;height:24px;font-family:var(--font-mono);font-size:10px;padding:0 4px" min="0" max="100" oninput="mlSavePersonnel('${r.id}','utilization',+this.value)" onchange="mlSavePersonnel('${r.id}','utilization',+this.value);setTimeout(renderMlPersonnel,700)">
     </div></td>
-    <td><select class="form-select" style="height:30px;font-size:11px;min-width:100px" onchange="mlSavePersonnel('${r.id}','availability',this.value);setTimeout(renderMlPersonnel,700)">${['available','busy','unavailable'].map(s=>`<option value="${s}" ${r.availability===s?'selected':''}>${s}</option>`).join('')}</select></td>
+    <td><select class="form-select" style="height:30px;font-size:11px;min-width:100px" onchange="mlSavePersonnel('${r.id}','availability',this.value);setTimeout(renderMlPersonnel,700)">${_getDropdown('personnel_avail').map(s=>`<option value="${s}" ${r.availability===s?'selected':''}>${s}</option>`).join('')}</select></td>
     <td><input class="form-input" type="number" value="${r.hourlyRate||0}" style="width:85px;height:26px;font-family:var(--font-mono);font-size:11px" oninput="mlSavePersonnel('${r.id}','hourlyRate',+this.value)" onchange="mlSavePersonnel('${r.id}','hourlyRate',+this.value);setTimeout(renderMlPersonnel,700)"></td>
     <td style="font-family:var(--font-mono);font-size:11px;font-weight:600">₱${Number((r.hourlyRate||0)*8).toLocaleString()}</td>
     <td><div style="display:flex;flex-direction:column;gap:3px">
@@ -18886,7 +19406,7 @@ function showEditPersonnel(id){
     <div class="form-group"><label class="form-label">Department</label><input class="form-input" id="prDept" value="${r?.dept||''}" placeholder="Department"></div>
     <div class="form-group"><label class="form-label">Hourly Rate (₱)</label><input class="form-input" type="number" id="prRate" value="${r?.hourlyRate||0}" min="0"></div>
     <div class="form-group"><label class="form-label">Utilization %</label><input class="form-input" type="number" id="prUtil" value="${r?.utilization||0}" min="0" max="100"></div>
-    <div class="form-group"><label class="form-label">Availability</label><select class="form-select" id="prAvail">${['available','busy','unavailable'].map(s=>`<option value="${s}" ${r?.availability===s?'selected':''}>${s}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Availability</label><select class="form-select" id="prAvail">${_getDropdown('personnel_avail').map(s=>`<option value="${s}" ${r?.availability===s?'selected':''}>${s}</option>`).join('')}</select></div>
     <div class="form-group"><label class="form-label">Contact / Mobile</label><input class="form-input" id="prContact" value="${r?.contact||''}" placeholder="+63-xxx-xxx-xxxx"></div>
     <div class="form-group" style="grid-column:1/-1"><label class="form-label">Skills <span style="color:var(--text-muted);font-size:10px">(comma separated)</span></label><input class="form-input" id="prSkills" value="${(r?.skills||[]).join(', ')}" placeholder="e.g., Welding, Structural, AutoCAD"></div>
     <div class="form-group" style="grid-column:1/-1"><label class="form-label">Certifications <span style="color:var(--text-muted);font-size:10px">(comma separated)</span></label><input class="form-input" id="prCerts" value="${(r?.certifications||[]).join(', ')}" placeholder="e.g., PMP, AWS-CWI, OSHA-30"></div>
@@ -18931,7 +19451,7 @@ function renderMlEquipment(){
   let data=mlFilter(AppState.data.equipment||[]);
   if(mlStatusFilter!=='all')data=data.filter(r=>r.status===mlStatusFilter);
   const now=new Date().toISOString().split('T')[0];
-  const statOp=statOpts('',['available','in-use','maintenance','standby','out-of-service']);
+  const statOp=statOpts('',_getDropdown('equipment_status'));
   $('#mlTabContent').innerHTML=`
   <div class="grid grid-4" style="margin-bottom:12px">
     ${sc('fas fa-cog','Total Equipment',getActive('equipment').length,'In register','#f0a450','rgba(240,164,80,.15)')}
@@ -18959,7 +19479,7 @@ function renderMlEquipment(){
     <td style="font-size:11px">${r.make}</td>
     <td style="font-size:11px">${r.model}</td>
     <td style="font-size:10px;font-family:var(--font-mono)">${r.serialNo}</td>
-    <td><select class="form-select" style="height:30px;font-size:11px;min-width:105px" onchange="mlSave('${r.id}','equipment','status',this.value);renderMlEquipment()">${statOpts(r.status,['available','in-use','maintenance','standby','out-of-service'])}</select></td>
+    <td><select class="form-select" style="height:30px;font-size:11px;min-width:105px" onchange="mlSave('${r.id}','equipment','status',this.value);renderMlEquipment()">${statOpts(r.status,_getDropdown('equipment_status'))}</select></td>
     <td><select class="form-select" style="height:30px;font-size:11px;min-width:85px" onchange="mlSave('${r.id}','equipment','projectId',this.value)">${projOpts(r.projectId)}</select></td>
     <td>${mlInput(r.id,'equipment','location',r.location,'min-width:100px')}</td>
     <td style="font-size:10px;font-family:var(--font-mono)">${mlNA(r.lastMaint)}</td>
@@ -19004,7 +19524,7 @@ function renderMlTools(){
     <td style="font-size:11px">${r.make}</td>
     <td style="font-size:11px">${r.model}</td>
     <td style="font-size:10px;font-family:var(--font-mono)">${r.serialNo}</td>
-    <td><select class="form-select" style="height:30px;font-size:11px;min-width:105px" onchange="mlSave('${r.id}','tools','status',this.value);renderMlTools()">${statOpts(r.status,['available','in-use','maintenance','standby'])}</select></td>
+    <td><select class="form-select" style="height:30px;font-size:11px;min-width:105px" onchange="mlSave('${r.id}','tools','status',this.value);renderMlTools()">${statOpts(r.status,_getDropdown('tool_status'))}</select></td>
     <td><select class="form-select" style="height:30px;font-size:11px;min-width:85px" onchange="mlSave('${r.id}','tools','projectId',this.value)">${projOpts(r.projectId)}</select></td>
     <td>${mlInput(r.id,'tools','location',r.location,'min-width:100px')}</td>
     <td style="font-size:10px;font-family:var(--font-mono)">${mlNA(r.lastCal)}</td>
@@ -19046,7 +19566,7 @@ function renderMlVehicles(){
     <td style="font-size:11px">${r.make}</td>
     <td style="font-size:11px">${r.model}</td>
     <td>${mlInput(r.id,'vehicles','regNo',r.regNo||'','min-width:90px;font-family:var(--font-mono);font-size:10px')}</td>
-    <td><select class="form-select" style="height:30px;font-size:11px;min-width:105px" onchange="mlSave('${r.id}','vehicles','status',this.value);renderMlVehicles()">${statOpts(r.status,['available','in-use','maintenance','standby','out-of-service'])}</select></td>
+    <td><select class="form-select" style="height:30px;font-size:11px;min-width:105px" onchange="mlSave('${r.id}','vehicles','status',this.value);renderMlVehicles()">${statOpts(r.status,_getDropdown('vehicle_status'))}</select></td>
     <td><select class="form-select" style="height:30px;font-size:11px;min-width:85px" onchange="mlSave('${r.id}','vehicles','projectId',this.value)">${projOpts(r.projectId)}</select></td>
     <td>${mlInput(r.id,'vehicles','location',r.location,'min-width:100px')}</td>
     <td style="font-size:10px;font-family:var(--font-mono)">${mlNA(r.lastMaint)}</td>
@@ -19169,7 +19689,7 @@ function renderMlWarehouse(){
       +'<td style="font-family:var(--font-mono);font-size:11px;font-weight:600">₱'+(m.qty*m.unitCost).toLocaleString()+'</td>'
       +'<td><input class="form-input" value="'+(m.supplier||'')+'" style="min-width:120px;height:26px;font-size:11px" onchange="mlSaveMaterial(\''+m.id+'\',\'supplier\',this.value)"></td>'
       +'<td><input class="form-input" type="date" value="'+(m.deliveryDate||'')+'" style="height:26px;font-size:11px;'+(isOverdue(m.deliveryDate)&&m.status!=='delivered'?'border-color:var(--accent-red);color:var(--accent-red)':'')+'" onchange="mlSaveMaterial(\''+m.id+'\',\'deliveryDate\',this.value)"></td>'
-      +'<td><select class="form-select" style="height:30px;font-size:11px;min-width:90px" onchange="mlSaveMaterial(\''+m.id+'\',\'status\',this.value);setTimeout(renderMlWarehouse,700)">'+statOpts(m.status,['pending','ordered','partial','delivered'])+'</select></td>'
+      +'<td><select class="form-select" style="height:30px;font-size:11px;min-width:90px" onchange="mlSaveMaterial(\''+m.id+'\',\'status\',this.value);setTimeout(renderMlWarehouse,700)">'+statOpts(m.status,_getDropdown('material_status'))+'</select></td>'
       +'<td><label class="toggle" style="width:36px;height:18px"><input type="checkbox" '+(m.critical?'checked':'')+' onchange="mlSaveMaterial(\''+m.id+'\',\'critical\',this.checked)"><span class="toggle-slider"></span></label> '+(m.critical?'<span class="badge badge-amber" style="font-size:9px">Critical</span>':'')+'</td>'
       +'<td><div style="display:flex;gap:3px;position:relative">'
       +'<button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail(\''+m.id+'\',\'materials\')" title="View attachments"><i class="fas fa-paperclip"></i>'+(m.attachments&&m.attachments.length?'<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">'+m.attachments.length+'</span>':'')+'</button>'
@@ -19260,7 +19780,7 @@ function renderMlMaterials(){
     <td style="font-family:var(--font-mono);font-size:11px;font-weight:600">₱${(m.qty*m.unitCost).toLocaleString()}</td>
     <td><input class="form-input" value="${m.supplier||''}" style="min-width:120px;height:26px;font-size:11px" oninput="mlSaveMaterial('${m.id}','supplier',this.value)" onchange="mlSaveMaterial('${m.id}','supplier',this.value)"></td>
     <td><input class="form-input" type="date" value="${m.deliveryDate||''}" style="height:26px;font-size:11px;${isOverdue(m.deliveryDate)&&m.status!=='delivered'?'border-color:var(--accent-red);color:var(--accent-red)':''}" onchange="mlSaveMaterial('${m.id}','deliveryDate',this.value)"></td>
-    <td><select class="form-select" style="height:30px;font-size:11px;min-width:90px" onchange="mlSaveMaterial('${m.id}','status',this.value);setTimeout(renderMlMaterials,700)">${statOpts(m.status,['pending','ordered','partial','delivered'])}</select></td>
+    <td><select class="form-select" style="height:30px;font-size:11px;min-width:90px" onchange="mlSaveMaterial('${m.id}','status',this.value);setTimeout(renderMlMaterials,700)">${statOpts(m.status,_getDropdown('material_status'))}</select></td>
     <td><label class="toggle" style="width:36px;height:18px"><input type="checkbox" ${m.critical?'checked':''} onchange="mlSaveMaterial('${m.id}','critical',this.checked)"><span class="toggle-slider"></span></label> ${m.critical?'<span class="badge badge-amber" style="font-size:9px">Critical</span>':''}</td>
     <td><div style="display:flex;gap:3px;position:relative">
       <button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail('${m.id}','materials')" title="View attachments"><i class="fas fa-paperclip"></i>${(m.attachments&&m.attachments.length)?`<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">${m.attachments.length}</span>`:''}</button>
@@ -19308,7 +19828,7 @@ function renderMlThirdParty(){
     <td><input class="form-input" type="number" value="${t.monthlyRate}" style="width:110px;height:26px;font-family:var(--font-mono);font-size:11px" oninput="mlSaveTp('${t.id}','monthlyRate',+this.value)" onchange="mlSaveTp('${t.id}','monthlyRate',+this.value)"></td>
     <td style="font-size:10px">${t.accreditation}</td>
     <td><div>${mlCB(t.accreditationExpiry)}</div><input class="form-input" type="date" value="${safeDate(t.accreditationExpiry)}" style="height:26px;font-size:11px;min-width:110px;margin-top:2px" onchange="mlSaveTp('${t.id}','accreditationExpiry',this.value)"></td>
-    <td><select class="form-select" style="height:30px;font-size:11px;min-width:90px" onchange="mlSaveTp('${t.id}','status',this.value);setTimeout(renderMlThirdParty,700)">${statOpts(t.status,['active','inactive','expired','pending'])}</select></td>
+    <td><select class="form-select" style="height:30px;font-size:11px;min-width:90px" onchange="mlSaveTp('${t.id}','status',this.value);setTimeout(renderMlThirdParty,700)">${statOpts(t.status,_getDropdown('tp_status'))}</select></td>
     <td><input class="form-input" value="${t.notes||''}" style="min-width:120px;height:26px;font-size:10px" oninput="mlSaveTp('${t.id}','notes',this.value)" onchange="mlSaveTp('${t.id}','notes',this.value)"></td>
     <td><button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlTp('${t.id}')"><i class="fas fa-trash"></i></button></td>
   </tr>`;}).join(''):mlEmpty('vendors')}
@@ -19344,7 +19864,7 @@ function showAddMaterial(){
     <div class="form-group"><label class="form-label">Quantity</label><input class="form-input" type="number" id="mlMQ" value="0"></div>
     <div class="form-group"><label class="form-label">Unit</label><input class="form-input" id="mlMU" placeholder="MT, M, PCS, L, M2..."></div>
     <div class="form-group"><label class="form-label">Unit Cost (₱)</label><input class="form-input" type="number" id="mlMC" value="0"></div>
-    <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="mlMSt">${['pending','ordered','partial','delivered'].map(s=>`<option>${s}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="mlMSt">${_getDropdown('material_status').map(s=>`<option>${s}</option>`).join('')}</select></div>
     <div class="form-group"><label class="form-label">Delivery Date</label><input class="form-input" type="date" id="mlMD"></div>
     <div class="form-group"><label class="form-label">Critical Path?</label><select class="form-select" id="mlMCr"><option value="false">No</option><option value="true">Yes — Critical</option></select></div>
   </div>`;
@@ -20938,37 +21458,82 @@ function renderTrash() {
 
 function showTrashFor(arrayKey, label) {
   let items = getTrashed(arrayKey);
-  // Non-admins only see items they deleted themselves
   if (typeof isAdminUser === 'function' && !isAdminUser()) {
     const me = (_currentUserProfile?.email||_currentUserProfile?.name||'').toLowerCase();
     items = items.filter(r => (r._deletedBy||'').toLowerCase().includes(me));
   }
   items.sort((a,b) => (b._deletedAt||'').localeCompare(a._deletedAt||''));
+  window._trashKey = arrayKey; window._trashLabel = label;
+  const isAdm = typeof isAdminUser === 'function' && isAdminUser();
   $('#genericModalTitle').textContent = 'Trash · ' + label;
   $('#genericModalBody').innerHTML = `
-    <div style="max-height:60vh;overflow-y:auto">
+    ${items.length > 1 ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px 10px;background:var(--bg-hover);border-radius:7px">
+      <input type="checkbox" id="trashSelectAll" onchange="_trashToggleAll(this.checked)" style="width:15px;height:15px;cursor:pointer">
+      <label for="trashSelectAll" style="font-size:12px;cursor:pointer;flex:1">Select All (${items.length})</label>
+      <button class="btn btn-success btn-sm" onclick="_trashBatchRestore()" style="display:none" id="trashBatchRestoreBtn"><i class="fas fa-undo"></i> Restore Selected</button>
+      ${isAdm?`<button class="btn btn-danger btn-sm" onclick="_trashBatchPurge()" style="display:none" id="trashBatchPurgeBtn"><i class="fas fa-skull"></i> Purge Selected</button>`:''}
+    </div>` : ''}
+    <div style="max-height:55vh;overflow-y:auto" id="trashItemsList">
       ${items.length === 0 ? '<div class="empty-state">No items</div>' :
       items.map(r => {
         const daysOld = Math.floor((Date.now() - new Date(r._deletedAt||0).getTime()) / (24*60*60*1000));
         const daysLeft = SOFT_DELETE_RETENTION_DAYS - daysOld;
         const name = r.name || r.description || r.title || r.id || '(unnamed)';
         return `<div style="padding:10px 12px;border:1px solid var(--border);border-radius:7px;margin-bottom:6px;display:flex;align-items:center;gap:10px">
+          <input type="checkbox" class="trash-chk" data-id="${r.id}" onchange="_trashChkChange()" style="width:15px;height:15px;cursor:pointer;flex-shrink:0">
           <div style="flex:1;min-width:0">
             <div style="font-family:var(--font-mono);font-size:10px;color:var(--accent-blue)">${r.id||'-'}</div>
             <div style="font-size:12px;font-weight:600;line-height:1.3;margin-top:2px">${name}</div>
             <div style="font-size:10px;color:var(--text-muted);margin-top:3px">
               Deleted by ${r._deletedBy||'unknown'} · ${daysOld} day${daysOld!==1?'s':''} ago
-              ${daysLeft <= 7 ? `<span style="color:var(--accent-amber);font-weight:600;margin-left:5px">⚠ ${daysLeft} day${daysLeft!==1?'s':''} until permanent delete</span>` : ''}
+              ${daysLeft <= 7 ? `<span style="color:var(--accent-amber);font-weight:600;margin-left:5px">⚠ ${daysLeft}d left</span>` : ''}
             </div>
           </div>
-          <button class="btn btn-success btn-sm" onclick="_restoreItem('${arrayKey}','${r.id}','${label.replace(/'/g,"&#39;")}')"><i class="fas fa-undo"></i> Restore</button>
-          <button class="btn btn-danger btn-sm btn-icon" onclick="_purgeItem('${arrayKey}','${r.id}','${label.replace(/'/g,"&#39;")}')" title="Permanently delete"><i class="fas fa-times"></i></button>
+          <button class="btn btn-success btn-sm" onclick="_restoreItem('${arrayKey}','${r.id}','${label.replace(/'/g,"&#39;")}')"><i class="fas fa-undo"></i></button>
+          ${isAdm?`<button class="btn btn-danger btn-sm btn-icon" onclick="_purgeItem('${arrayKey}','${r.id}','${label.replace(/'/g,"&#39;")}')" title="Permanently delete"><i class="fas fa-times"></i></button>`:''}
         </div>`;
       }).join('')}
     </div>
   `;
   $('#genericModalFooter').innerHTML = `<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
   openModal('genericModal');
+}
+
+function _trashToggleAll(checked){
+  document.querySelectorAll('.trash-chk').forEach(c=>c.checked=checked);
+  _trashChkChange();
+}
+
+function _trashChkChange(){
+  const selected=document.querySelectorAll('.trash-chk:checked').length;
+  const rb=$('#trashBatchRestoreBtn'),pb=$('#trashBatchPurgeBtn');
+  if(rb)rb.style.display=selected>0?'':'none';
+  if(pb)pb.style.display=selected>0?'':'none';
+  if(rb)rb.innerHTML=`<i class="fas fa-undo"></i> Restore (${selected})`;
+  if(pb)pb.innerHTML=`<i class="fas fa-skull"></i> Purge (${selected})`;
+}
+
+function _trashBatchRestore(){
+  const ids=[...document.querySelectorAll('.trash-chk:checked')].map(c=>c.dataset.id);
+  if(!ids.length)return;
+  let count=0;
+  ids.forEach(id=>{if(restoreFromTrash(window._trashKey,id))count++;});
+  AppState.save();
+  showToast(`Restored ${count} item${count!==1?'s':''}`, 'success');
+  closeModal('genericModal');
+  if(AppState.currentPage==='trash')renderTrash();
+}
+
+function _trashBatchPurge(){
+  if(typeof isAdminUser==='function'&&!isAdminUser()){showToast('Admins only','warning');return;}
+  const ids=[...document.querySelectorAll('.trash-chk:checked')].map(c=>c.dataset.id);
+  if(!ids.length)return;
+  if(!confirm(`Permanently delete ${ids.length} item${ids.length!==1?'s':''}?\n\nThis CANNOT be undone.`))return;
+  let count=0;
+  ids.forEach(id=>{if(purgeFromTrash(window._trashKey,id))count++;});
+  AppState.save();
+  showToast(`Purged ${count} item${count!==1?'s':''}`, 'warning');
+  showTrashFor(window._trashKey, window._trashLabel);
 }
 
 function _restoreItem(arrayKey, id, label) {
