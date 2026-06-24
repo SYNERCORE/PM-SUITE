@@ -7962,9 +7962,11 @@ function _projectReadiness(pid){
   const equipment=AppState.data.equipment||[];
   const tools=AppState.data.tools||[];
   const vehicles=AppState.data.vehicles||[];
-  const materials=(AppState.data.materials||[]).filter(m=>m.projectId===pid&&!m._deleted);
+  const allMaterials=AppState.data.materials||[];
+  const allConsumables=AppState.data.consumables||[];
   const docs=(AppState.data.documents||[]).filter(d=>d.projectId===pid&&!d._deleted);
   const manpower=(AppState.data.manpower||[]).filter(m=>m.projectId===pid&&!m._deleted);
+  const procurement=(AppState.data.procurement||[]).filter(po=>po.projectId===pid&&!po._deleted);
 
   const checks=[];
 
@@ -8026,18 +8028,52 @@ function _projectReadiness(pid){
     summary:assetItems.length===0?'No assets allocated':`${assetItems.filter(i=>i.status==='go').length}/${assetItems.length} available`,
     items:assetItems,emptyMsg:'No equipment, tool, or vehicle allocations found for this project.'});
 
-  // ── CHECK 4: Material Delivery ───────────────────────────
-  const matItems=materials.map(m=>{
-    const st=m.status==='delivered'?'go':m.status==='partial'?'warn':'fail';
-    const overdueFlag=m.deliveryDate&&m.deliveryDate<today&&m.status!=='delivered';
-    return{name:m.description||m.name||m.id,detail:`Status: ${m.status||'pending'}${m.deliveryDate?' · Due: '+m.deliveryDate:''}${overdueFlag?' ⚠ Overdue':''}`,status:overdueFlag?'fail':st,link:'masterlist'};
+  // ── CHECK 4: Materials & Consumables — Warehouse Sufficiency ──
+  // Source: Resource Allocation tab items of type Material/Consumable
+  // Logic: compare allocatedQty needed vs qtyOnHand in warehouse
+  const matAllocItems=[];
+  allocs.filter(a=>a.resourceType==='Material'||a.resourceType==='Consumable').forEach(a=>{
+    const warehouseList=a.resourceType==='Consumable'?allConsumables:allMaterials;
+    const wh=warehouseList.find(m=>m.id===a.resourceId);
+    const needed=a.allocatedQty||0;
+    const onHand=wh?.qtyOnHand||0;
+    const unit=a.unit||wh?.unit||'';
+    // Also check how much has already been issued so far
+    const issued=(AppState.data.resourceUsageLogs||[]).filter(l=>l.projectId===pid&&l.allocationId===a.id&&l.transactionType==='Issue').reduce((s,l)=>s+l.quantity,0);
+    const returned=(AppState.data.resourceUsageLogs||[]).filter(l=>l.projectId===pid&&l.allocationId===a.id&&l.transactionType==='Return').reduce((s,l)=>s+l.quantity,0);
+    const stillNeeded=Math.max(0,needed-(issued-returned));
+    let st,detail;
+    if(!wh){
+      st='warn';detail=`Not found in warehouse · Need: ${needed} ${unit}`;
+    } else if(onHand>=stillNeeded){
+      st='go';detail=`On hand: ${onHand} ${unit} · Still needed: ${stillNeeded} ${unit} ✓`;
+    } else if(onHand>0){
+      st='warn';detail=`On hand: ${onHand} ${unit} · Still needed: ${stillNeeded} ${unit} — SHORT by ${stillNeeded-onHand} ${unit}`;
+    } else {
+      st='fail';detail=`On hand: 0 ${unit} · Need: ${stillNeeded} ${unit} — NOT AVAILABLE`;
+    }
+    matAllocItems.push({name:a.resourceName,detail,status:st,type:a.resourceType,link:'masterlist'});
   });
-  const mFail=matItems.filter(i=>i.status==='fail').length;
-  const mWarn=matItems.filter(i=>i.status==='warn').length;
-  checks.push({id:'materials',icon:'fa-cubes',label:'Material Delivery',
-    status:mFail>0?'fail':mWarn>0?'warn':matItems.length===0?'warn':'go',
-    summary:matItems.length===0?'No materials linked':mFail>0?`${mFail} not delivered`:mWarn>0?`${mWarn} partially delivered`:'All delivered',
-    items:matItems,emptyMsg:'No materials linked to this project yet.'});
+  const m4Fail=matAllocItems.filter(i=>i.status==='fail').length;
+  const m4Warn=matAllocItems.filter(i=>i.status==='warn').length;
+  checks.push({id:'materials',icon:'fa-cubes',label:'Materials & Consumables',
+    status:m4Fail>0?'fail':m4Warn>0?'warn':matAllocItems.length===0?'warn':'go',
+    summary:matAllocItems.length===0?'No materials/consumables in allocation':m4Fail>0?`${m4Fail} item(s) unavailable in warehouse`:m4Warn>0?`${m4Warn} item(s) insufficient`:'All items available in warehouse',
+    items:matAllocItems,emptyMsg:'Add Material or Consumable items in the Resource Allocation tab to check warehouse sufficiency.'});
+
+  // ── CHECK 7: Procurement Status ──────────────────────────
+  const poItems=procurement.map(po=>{
+    const st=po.status==='delivered'||po.status==='closed'||po.status==='active'?'go':po.status==='partial'||po.status==='po_issued'||po.status==='ordered'?'warn':'fail';
+    const overdueFlag=po.deliveryDate&&po.deliveryDate<today&&po.status!=='delivered'&&po.status!=='closed';
+    const finalSt=overdueFlag?'fail':st;
+    return{name:po.description||po.id,detail:`${po.vendor||'No vendor'} · Status: ${po.status||'pending'}${po.deliveryDate?' · Due: '+po.deliveryDate:''}${overdueFlag?' ⚠ Overdue':''}`,status:finalSt,link:'procurement'};
+  });
+  const po7Fail=poItems.filter(i=>i.status==='fail').length;
+  const po7Warn=poItems.filter(i=>i.status==='warn').length;
+  checks.push({id:'procurement',icon:'fa-shopping-cart',label:'Procurement',
+    status:po7Fail>0?'fail':po7Warn>0?'warn':poItems.length===0?'warn':'go',
+    summary:poItems.length===0?'No POs raised for this project':po7Fail>0?`${po7Fail} PO(s) overdue/blocked`:po7Warn>0?`${po7Warn} PO(s) in progress`:`All ${poItems.length} PO(s) on track`,
+    items:poItems,emptyMsg:'No procurement orders found for this project.'});
 
   // ── CHECK 5: Required Documents Approved ─────────────────
   const reqTypes=['Method Statement','ITP','Safety Plan','Work Permit','Risk Assessment'];
