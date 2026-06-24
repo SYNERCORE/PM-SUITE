@@ -19799,10 +19799,10 @@ function _whReceiveHTML(){
   _whRcvLines=[{itemId:'',qty:'',unitCost:''}];
   const recent=_whTx().filter(t=>t.type==='receive').sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,15);
   return`
-  <div style="display:grid;grid-template-columns:1.2fr 0.8fr;gap:14px;align-items:start">
+  <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:14px;align-items:start">
 
     <!-- LEFT: form -->
-    <div class="card" style="padding:18px 20px">
+    <div class="card" style="padding:18px 20px;min-width:0;overflow:hidden">
       <div class="section-header" style="margin-bottom:14px">
         <div>
           <div style="font-size:13px;font-weight:700"><i class="fas fa-truck-loading" style="color:var(--accent-green);margin-right:8px"></i>Receive Goods</div>
@@ -19892,10 +19892,10 @@ function _whIssueHTML(){
   const recent=_whTx().filter(t=>t.type==='issue'||t.type==='return'||t.type==='adjust').sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,15);
   const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='completed');
   return`
-  <div style="display:grid;grid-template-columns:1.2fr 0.8fr;gap:14px;align-items:start">
+  <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:14px;align-items:start">
 
     <!-- LEFT: form -->
-    <div class="card" style="padding:18px 20px">
+    <div class="card" style="padding:18px 20px;min-width:0;overflow:hidden">
       <div class="section-header" style="margin-bottom:14px">
         <div>
           <div style="font-size:13px;font-weight:700"><i class="fas fa-dolly" style="color:var(--accent-amber);margin-right:8px"></i>Issue / Return Stock</div>
@@ -19913,11 +19913,11 @@ function _whIssueHTML(){
             <option value="adjust">Adjustment — Inventory Correction</option>
           </select>
         </div>
-        <div class="form-group" style="margin:0">
+        <div class="form-group" style="margin:0;grid-column:1/-1">
           <label class="form-label">Project</label>
-          <select class="form-control" id="wh-iss-proj">
+          <select class="form-control" id="wh-iss-proj" style="max-width:100%;overflow:hidden;text-overflow:ellipsis">
             <option value="">— No project —</option>
-            ${projects.map(p=>`<option value="${p.id}">${p.id} — ${p.name||''}</option>`).join('')}
+            ${projects.map(p=>{const label=`${p.id} — ${p.name||''}`;return`<option value="${p.id}">${label.length>60?label.slice(0,60)+'…':label}</option>`;}).join('')}
           </select>
         </div>
         <div class="form-group" style="margin:0">
