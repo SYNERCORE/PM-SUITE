@@ -19718,61 +19718,169 @@ function _whItemsHTML(){
   </div>`;
 }
 
+// ── MULTI-LINE TRANSACTION STATE ────────────────────────────
+let _whRcvLines=[];  // [{itemId,qty,unitCost}]
+let _whIssLines=[];  // [{itemId,qty}]
+
+function _whRcvLinesHTML(){
+  const items=_whItems();
+  const itemOpts=items.map(i=>`<option value="${i.id}">${i.name} (${i.code||i.id})</option>`).join('');
+  if(!_whRcvLines.length)_whRcvLines=[{itemId:'',qty:'',unitCost:''}];
+  return _whRcvLines.map((ln,idx)=>`
+  <tr>
+    <td style="padding:5px 4px">
+      <select class="form-control" style="font-size:12px;min-width:180px" onchange="_whRcvLines[${idx}].itemId=this.value;_whRcvAutoFillCost(${idx})">
+        <option value="">— Select Item —</option>${itemOpts.replace(`value="${ln.itemId}"`,`value="${ln.itemId}" selected`)}
+      </select>
+    </td>
+    <td style="padding:5px 4px;width:100px">
+      <input class="form-control" type="number" min="0.01" step="0.01" style="font-size:12px" placeholder="0" value="${ln.qty||''}"
+        oninput="_whRcvLines[${idx}].qty=this.value">
+    </td>
+    <td style="padding:5px 4px;width:120px">
+      <input class="form-control" type="number" min="0" step="0.01" style="font-size:12px" placeholder="0.00" value="${ln.unitCost||''}"
+        oninput="_whRcvLines[${idx}].unitCost=this.value">
+    </td>
+    <td style="padding:5px 4px;width:36px;text-align:center">
+      ${_whRcvLines.length>1?`<button class="btn btn-secondary btn-sm" style="padding:2px 6px;color:var(--accent-red)" onclick="_whRcvLines.splice(${idx},1);_whRefreshRcv()"><i class="fas fa-times"></i></button>`:''}
+    </td>
+  </tr>`).join('');
+}
+
+function _whRcvAutoFillCost(idx){
+  const id=_whRcvLines[idx].itemId;
+  if(!id)return;
+  const item=_whItems().find(i=>i.id===id);
+  if(item?.unitCost&&!_whRcvLines[idx].unitCost)_whRcvLines[idx].unitCost=item.unitCost;
+  _whRefreshRcv();
+}
+
+function _whRefreshRcv(){
+  const el=$('#wh-rcv-lines');
+  if(el)el.innerHTML=_whRcvLinesHTML();
+}
+
+function _whIssLinesHTML(){
+  const items=_whItems();
+  if(!_whIssLines.length)_whIssLines=[{itemId:'',qty:''}];
+  return _whIssLines.map((ln,idx)=>{
+    const q=ln.itemId?_whCalcQty(ln.itemId):null;
+    const item=ln.itemId?items.find(i=>i.id===ln.itemId):null;
+    const avail=q?q.qtyAvailable:null;
+    const availColor=avail===null?'var(--text-secondary)':avail<=0?'var(--accent-red)':'var(--accent-green)';
+    const itemOpts=items.map(i=>`<option value="${i.id}"${i.id===ln.itemId?' selected':''}>${i.name} (${i.code||i.id})</option>`).join('');
+    return`<tr>
+      <td style="padding:5px 4px">
+        <select class="form-control" style="font-size:12px;min-width:180px" onchange="_whIssLines[${idx}].itemId=this.value;_whRefreshIss()">
+          <option value="">— Select Item —</option>${itemOpts}
+        </select>
+      </td>
+      <td style="padding:5px 4px;font-size:11px;text-align:center">
+        ${q?`<span style="color:${availColor};font-weight:700">${avail}</span><span style="color:var(--text-secondary)"> ${item?.unit||''}</span>`:'—'}
+      </td>
+      <td style="padding:5px 4px;width:100px">
+        <input class="form-control" type="number" min="0.01" step="0.01" style="font-size:12px" placeholder="0" value="${ln.qty||''}"
+          oninput="_whIssLines[${idx}].qty=this.value">
+      </td>
+      <td style="padding:5px 4px;width:36px;text-align:center">
+        ${_whIssLines.length>1?`<button class="btn btn-secondary btn-sm" style="padding:2px 6px;color:var(--accent-red)" onclick="_whIssLines.splice(${idx},1);_whRefreshIss()"><i class="fas fa-times"></i></button>`:''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function _whRefreshIss(){
+  const el=$('#wh-iss-lines');
+  if(el)el.innerHTML=_whIssLinesHTML();
+}
+
 // ── TAB: RECEIVE ─────────────────────────────────────────────
 function _whReceiveHTML(){
-  const recent=_whTx().filter(t=>t.type==='receive').sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,20);
+  _whRcvLines=[{itemId:'',qty:'',unitCost:''}];
+  const recent=_whTx().filter(t=>t.type==='receive').sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,15);
   return`
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-    <div>
-      <div style="font-size:13px;font-weight:700;margin-bottom:10px"><i class="fas fa-truck-loading" style="color:var(--accent-green);margin-right:6px"></i>Receive Goods</div>
-      <div class="form-group">
-        <label class="form-label">Item *</label>
-        <select class="form-control" id="wh-rcv-item">
-          <option value="">— Select Item —</option>
-          ${_whItems().map(i=>`<option value="${i.id}">${i.name} (${i.code||i.id})</option>`).join('')}
-        </select>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div class="form-group">
-          <label class="form-label">Quantity Received *</label>
-          <input class="form-control" type="number" min="0.01" step="0.01" id="wh-rcv-qty" placeholder="0">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Unit Cost (₱)</label>
-          <input class="form-control" type="number" min="0" step="0.01" id="wh-rcv-cost" placeholder="0.00">
+  <div style="display:grid;grid-template-columns:1.2fr 0.8fr;gap:14px;align-items:start">
+
+    <!-- LEFT: form -->
+    <div class="card" style="padding:18px 20px">
+      <div class="section-header" style="margin-bottom:14px">
+        <div>
+          <div style="font-size:13px;font-weight:700"><i class="fas fa-truck-loading" style="color:var(--accent-green);margin-right:8px"></i>Receive Goods</div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Post incoming stock — supports multiple items per delivery</div>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div class="form-group">
-          <label class="form-label">Date Received</label>
+
+      <!-- Transaction header fields -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Date Received *</label>
           <input class="form-control" type="date" id="wh-rcv-date" value="${new Date().toISOString().slice(0,10)}">
         </div>
-        <div class="form-group">
-          <label class="form-label">PO / Delivery Ref</label>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">PO / DR Reference</label>
           <input class="form-control" id="wh-rcv-ref" placeholder="PO-0001 or DR#">
         </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Supplier / Vendor</label>
+          <input class="form-control" id="wh-rcv-vendor" placeholder="Vendor name">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Notes</label>
+          <input class="form-control" id="wh-rcv-notes" placeholder="Lot number, condition…">
+        </div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Supplier / Vendor</label>
-        <input class="form-control" id="wh-rcv-vendor" placeholder="Vendor name">
+
+      <!-- Line items -->
+      <div style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-secondary)"><i class="fas fa-list" style="margin-right:6px"></i>Line Items</div>
+          <button class="btn btn-secondary btn-sm" onclick="_whRcvLines.push({itemId:'',qty:'',unitCost:''});_whRefreshRcv()">
+            <i class="fas fa-plus"></i> Add Item
+          </button>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="background:var(--bg-tertiary)">
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left">Item</th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:100px">Qty</th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:120px">Unit Cost (₱)</th>
+                <th style="width:36px"></th>
+              </tr>
+            </thead>
+            <tbody id="wh-rcv-lines">${_whRcvLinesHTML()}</tbody>
+          </table>
+        </div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Notes</label>
-        <textarea class="form-control" id="wh-rcv-notes" rows="2" placeholder="Lot number, condition, etc."></textarea>
-      </div>
-      <button class="btn btn-primary" onclick="_whSaveReceive()"><i class="fas fa-save"></i> Post Receipt</button>
+
+      <button class="btn btn-primary" style="width:100%" onclick="_whSaveReceive()">
+        <i class="fas fa-save"></i> Post Receipt
+      </button>
     </div>
+
+    <!-- RIGHT: recent receipts -->
     <div>
-      <div style="font-size:13px;font-weight:700;margin-bottom:10px"><i class="fas fa-history" style="color:var(--text-secondary);margin-right:6px"></i>Recent Receipts</div>
-      ${recent.length?`<div style="display:flex;flex-direction:column;gap:6px">
-        ${recent.map(t=>{const item=_whItems().find(i=>i.id===t.itemId);return`
-        <div style="background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--accent-green);border-radius:6px;padding:8px 12px">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div style="font-weight:600;font-size:12px">${item?.name||t.itemId}</div>
-            <div style="font-family:var(--font-mono);color:var(--accent-green);font-size:13px;font-weight:700">+${t.qty} ${item?.unit||''}</div>
-          </div>
-          <div style="font-size:10px;color:var(--text-secondary)">${t.date||''} · ${t.vendor||'No vendor'} · ${t.ref||''}</div>
-        </div>`;}).join('')}
+      <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">
+        <i class="fas fa-history" style="margin-right:6px"></i>Recent Receipts
+      </div>
+      ${recent.length?`<div style="display:flex;flex-direction:column;gap:7px">
+        ${recent.map(t=>{
+          const item=_whItems().find(i=>i.id===t.itemId);
+          const val=t.qty*(t.unitCost||item?.unitCost||0);
+          return`<div class="card" style="padding:10px 14px;border-left:3px solid var(--accent-green)">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+              <div style="min-width:0">
+                <div style="font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item?.name||t.itemId}</div>
+                <div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${t.date||''} · ${t.vendor||'—'}</div>
+                <div style="font-size:10px;color:var(--text-secondary)">${t.ref||''}</div>
+              </div>
+              <div style="text-align:right;flex-shrink:0">
+                <div style="font-family:var(--font-mono);color:var(--accent-green);font-size:13px;font-weight:700">+${t.qty} ${item?.unit||''}</div>
+                ${val?`<div style="font-size:10px;color:var(--text-secondary)">₱${fmtNum(val)}</div>`:''}
+              </div>
+            </div>
+          </div>`;
+        }).join('')}
       </div>`:`<div class="empty-state" style="padding:30px"><i class="fas fa-truck"></i><p>No receipts yet</p></div>`}
     </div>
   </div>`;
@@ -19780,96 +19888,113 @@ function _whReceiveHTML(){
 
 // ── TAB: ISSUE / RETURN ──────────────────────────────────────
 function _whIssueHTML(){
-  const recent=_whTx().filter(t=>t.type==='issue'||t.type==='return').sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,20);
+  _whIssLines=[{itemId:'',qty:''}];
+  const recent=_whTx().filter(t=>t.type==='issue'||t.type==='return'||t.type==='adjust').sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,15);
   const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='completed');
   return`
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-    <div>
-      <div style="font-size:13px;font-weight:700;margin-bottom:10px"><i class="fas fa-dolly" style="color:var(--accent-amber);margin-right:6px"></i>Issue / Return Stock</div>
-      <div class="form-group">
-        <label class="form-label">Transaction Type *</label>
-        <select class="form-control" id="wh-iss-type">
-          <option value="issue">Issue (send to site)</option>
-          <option value="return">Return (back to warehouse)</option>
-          <option value="adjust">Adjustment (inventory correction)</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Item *</label>
-        <select class="form-control" id="wh-iss-item" onchange="_whFillIssueInfo()">
-          <option value="">— Select Item —</option>
-          ${_whItems().map(i=>{const q=_whCalcQty(i.id);return`<option value="${i.id}">${i.name} (Avail: ${q.qtyAvailable} ${i.unit||''})</option>`;}).join('')}
-        </select>
-      </div>
-      <div id="wh-iss-stock-info" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:11px;display:none">
-        <div style="display:flex;gap:16px">
-          <span>On Hand: <strong id="wh-info-hand">—</strong></span>
-          <span>Reserved: <strong id="wh-info-res">—</strong></span>
-          <span>Available: <strong id="wh-info-avail" style="color:var(--accent-green)">—</strong></span>
+  <div style="display:grid;grid-template-columns:1.2fr 0.8fr;gap:14px;align-items:start">
+
+    <!-- LEFT: form -->
+    <div class="card" style="padding:18px 20px">
+      <div class="section-header" style="margin-bottom:14px">
+        <div>
+          <div style="font-size:13px;font-weight:700"><i class="fas fa-dolly" style="color:var(--accent-amber);margin-right:8px"></i>Issue / Return Stock</div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Post multiple items in a single transaction batch</div>
         </div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Project</label>
-        <select class="form-control" id="wh-iss-proj">
-          <option value="">— No project —</option>
-          ${projects.map(p=>`<option value="${p.id}">${p.id} — ${p.name||''}</option>`).join('')}
-        </select>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div class="form-group">
-          <label class="form-label">Quantity *</label>
-          <input class="form-control" type="number" min="0.01" step="0.01" id="wh-iss-qty" placeholder="0">
+
+      <!-- Transaction header fields -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Transaction Type *</label>
+          <select class="form-control" id="wh-iss-type">
+            <option value="issue">Issue — Send to Site</option>
+            <option value="return">Return — Back to Warehouse</option>
+            <option value="adjust">Adjustment — Inventory Correction</option>
+          </select>
         </div>
-        <div class="form-group">
-          <label class="form-label">Date</label>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Project</label>
+          <select class="form-control" id="wh-iss-proj">
+            <option value="">— No project —</option>
+            ${projects.map(p=>`<option value="${p.id}">${p.id} — ${p.name||''}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Date *</label>
           <input class="form-control" type="date" id="wh-iss-date" value="${new Date().toISOString().slice(0,10)}">
         </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Issued / Returned By</label>
+          <input class="form-control" id="wh-iss-by" placeholder="Name" value="${AppState.currentUser?.displayName||''}">
+        </div>
+        <div class="form-group" style="margin:0;grid-column:1/-1">
+          <label class="form-label">Notes / Work Order Reference</label>
+          <input class="form-control" id="wh-iss-notes" placeholder="Work order, location, reason…">
+        </div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Issued / Received By</label>
-        <input class="form-control" id="wh-iss-by" placeholder="Name" value="${AppState.currentUser?.displayName||''}">
+
+      <!-- Line items -->
+      <div style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-secondary)"><i class="fas fa-list" style="margin-right:6px"></i>Line Items</div>
+          <button class="btn btn-secondary btn-sm" onclick="_whIssLines.push({itemId:'',qty:''});_whRefreshIss()">
+            <i class="fas fa-plus"></i> Add Item
+          </button>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="background:var(--bg-tertiary)">
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left">Item</th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:center;width:90px">Available</th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:100px">Qty</th>
+                <th style="width:36px"></th>
+              </tr>
+            </thead>
+            <tbody id="wh-iss-lines">${_whIssLinesHTML()}</tbody>
+          </table>
+        </div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Notes / Reference</label>
-        <textarea class="form-control" id="wh-iss-notes" rows="2" placeholder="Work order, location, reason…"></textarea>
-      </div>
-      <button class="btn btn-primary" onclick="_whSaveIssue()"><i class="fas fa-check"></i> Post Transaction</button>
+
+      <button class="btn btn-primary" style="width:100%" onclick="_whSaveIssue()">
+        <i class="fas fa-check"></i> Post Transaction
+      </button>
     </div>
+
+    <!-- RIGHT: recent -->
     <div>
-      <div style="font-size:13px;font-weight:700;margin-bottom:10px"><i class="fas fa-history" style="color:var(--text-secondary);margin-right:6px"></i>Recent Issues / Returns</div>
-      ${recent.length?`<div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">
+        <i class="fas fa-history" style="margin-right:6px"></i>Recent Transactions
+      </div>
+      ${recent.length?`<div style="display:flex;flex-direction:column;gap:7px">
         ${recent.map(t=>{
           const item=_whItems().find(i=>i.id===t.itemId);
           const isReturn=t.type==='return';
-          const color=isReturn?'var(--accent-green)':t.type==='adjust'?'#39d3f2':'var(--accent-amber)';
-          const sign=isReturn?'+':t.type==='adjust'?(t.qty>=0?'+':''):'−';
-          return`<div style="background:var(--bg-card);border:1px solid var(--border);border-left:3px solid ${color};border-radius:6px;padding:8px 12px">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <div><span style="font-weight:600;font-size:12px">${item?.name||t.itemId}</span> <span style="font-size:10px;color:var(--text-secondary)">${t.projectId||''}</span></div>
-              <div style="font-family:var(--font-mono);color:${color};font-size:13px;font-weight:700">${sign}${t.qty} ${item?.unit||''}</div>
+          const isAdj=t.type==='adjust';
+          const color=isReturn?'var(--accent-green)':isAdj?'#39d3f2':'var(--accent-amber)';
+          const sign=isReturn?'+':isAdj?(t.qty>=0?'+':''):'−';
+          const label={issue:'ISSUE',return:'RETURN',adjust:'ADJUST'}[t.type]||t.type.toUpperCase();
+          return`<div class="card" style="padding:10px 14px;border-left:3px solid ${color}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+              <div style="min-width:0">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span style="font-weight:600;font-size:12px">${item?.name||t.itemId}</span>
+                  <span class="badge" style="background:${color}22;color:${color};border:1px solid ${color}44;font-size:9px">${label}</span>
+                </div>
+                <div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${t.date||''} · ${t.issuedBy||t.by||'—'}</div>
+                ${t.projectId?`<div style="font-size:10px;color:var(--text-secondary)">${t.projectId}</div>`:''}
+              </div>
+              <div style="font-family:var(--font-mono);color:${color};font-size:13px;font-weight:700;flex-shrink:0">${sign}${Math.abs(t.qty)} ${item?.unit||''}</div>
             </div>
-            <div style="font-size:10px;color:var(--text-secondary)">${t.date||''} · ${t.issuedBy||t.by||''} · ${t.type.toUpperCase()}</div>
-          </div>`;}).join('')}
-      </div>`:`<div class="empty-state" style="padding:30px"><i class="fas fa-dolly"></i><p>No issue/return records yet</p></div>`}
+          </div>`;
+        }).join('')}
+      </div>`:`<div class="empty-state" style="padding:30px"><i class="fas fa-dolly"></i><p>No transactions yet</p></div>`}
     </div>
   </div>`;
 }
 
-function _whFillIssueInfo(){
-  const sel=$('#wh-iss-item');
-  const info=$('#wh-iss-stock-info');
-  if(!sel||!info)return;
-  const id=sel.value;
-  if(!id){info.style.display='none';return;}
-  const q=_whCalcQty(id);
-  const item=_whItems().find(i=>i.id===id);
-  $('#wh-info-hand').textContent=`${q.qtyOnHand} ${item?.unit||''}`;
-  $('#wh-info-res').textContent=`${q.qtyReserved} ${item?.unit||''}`;
-  const avEl=$('#wh-info-avail');
-  avEl.textContent=`${q.qtyAvailable} ${item?.unit||''}`;
-  avEl.style.color=q.qtyAvailable<=0?'var(--accent-red)':'var(--accent-green)';
-  info.style.display='block';
-}
+function _whFillIssueInfo(){} // kept for backward compat
 
 // ── TAB: ISSUANCE REQUESTS ───────────────────────────────────
 function _whRequestsHTML(){
@@ -19963,68 +20088,75 @@ function _whLedgerHTML(){
 
 // ── SAVE HELPERS ─────────────────────────────────────────────
 function _whSaveReceive(){
-  const itemId=$('#wh-rcv-item')?.value;
-  const qty=parseFloat($('#wh-rcv-qty')?.value||0);
-  const cost=parseFloat($('#wh-rcv-cost')?.value||0);
   const date=$('#wh-rcv-date')?.value||new Date().toISOString().slice(0,10);
   const ref=$('#wh-rcv-ref')?.value.trim();
   const vendor=$('#wh-rcv-vendor')?.value.trim();
   const notes=$('#wh-rcv-notes')?.value.trim();
-  if(!itemId){showToast('Select an item','error');return;}
-  if(!qty||qty<=0){showToast('Quantity must be > 0','error');return;}
+
+  const valid=_whRcvLines.filter(ln=>ln.itemId&&parseFloat(ln.qty)>0);
+  if(!valid.length){showToast('Add at least one item with qty > 0','error');return;}
 
   if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
-  const tx={
-    id:_whNextId('TX-',AppState.data.stockTransactions),
-    itemId,type:'receive',qty,date,ref,vendor,notes,
-    by:AppState.currentUser?.displayName||'',
-    postedAt:new Date().toISOString(),
-  };
-  AppState.data.stockTransactions.push(tx);
-
-  // Update unit cost on item if provided
-  if(cost>0){
-    const idx=(AppState.data.warehouseItems||[]).findIndex(i=>i.id===itemId);
-    if(idx!==-1)AppState.data.warehouseItems[idx].unitCost=cost;
-  }
-  _whSyncQty(itemId);
+  const postedAt=new Date().toISOString();
+  const by=AppState.currentUser?.displayName||'';
+  valid.forEach(ln=>{
+    const qty=parseFloat(ln.qty);
+    const cost=parseFloat(ln.unitCost||0);
+    AppState.data.stockTransactions.push({
+      id:_whNextId('TX-',AppState.data.stockTransactions),
+      itemId:ln.itemId,type:'receive',qty,date,ref,vendor,notes,by,postedAt,
+      unitCost:cost||undefined,
+    });
+    if(cost>0){
+      const idx=(AppState.data.warehouseItems||[]).findIndex(i=>i.id===ln.itemId);
+      if(idx!==-1)AppState.data.warehouseItems[idx].unitCost=cost;
+    }
+    _whSyncQty(ln.itemId);
+  });
   AppState.save();
-  showToast('Receipt posted','success');
-  // clear form
-  ['wh-rcv-item','wh-rcv-qty','wh-rcv-cost','wh-rcv-ref','wh-rcv-vendor','wh-rcv-notes'].forEach(id=>{const el=$(`#${id}`);if(el)el.value=el.tagName==='SELECT'?'':'';});
+  showToast(`${valid.length} item${valid.length>1?'s':''} received & posted`,'success',3500);
+  _whRcvLines=[{itemId:'',qty:'',unitCost:''}];
   _whRenderTab();
 }
 
 function _whSaveIssue(){
   const type=$('#wh-iss-type')?.value||'issue';
-  const itemId=$('#wh-iss-item')?.value;
   const projId=$('#wh-iss-proj')?.value;
-  const qty=parseFloat($('#wh-iss-qty')?.value||0);
   const date=$('#wh-iss-date')?.value||new Date().toISOString().slice(0,10);
   const by=$('#wh-iss-by')?.value.trim();
   const notes=$('#wh-iss-notes')?.value.trim();
-  if(!itemId){showToast('Select an item','error');return;}
-  if(!qty||qty===0){showToast('Quantity must be non-zero','error');return;}
 
-  // For issue: check available
+  const valid=_whIssLines.filter(ln=>ln.itemId&&parseFloat(ln.qty)!==0&&ln.qty!=='');
+  if(!valid.length){showToast('Add at least one item with a quantity','error');return;}
+
+  // Validate available qty for issues
   if(type==='issue'){
-    const q=_whCalcQty(itemId);
-    if(qty>q.qtyOnHand){showToast(`Only ${q.qtyOnHand} on hand — cannot issue ${qty}`,'error',4000);return;}
+    for(const ln of valid){
+      const q=_whCalcQty(ln.itemId);
+      const qty=parseFloat(ln.qty);
+      if(qty>q.qtyOnHand){
+        const item=_whItems().find(i=>i.id===ln.itemId);
+        showToast(`"${item?.name||ln.itemId}": only ${q.qtyOnHand} on hand — cannot issue ${qty}`,'error',5000);
+        return;
+      }
+    }
   }
 
   if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
-  const tx={
-    id:_whNextId('TX-',AppState.data.stockTransactions),
-    itemId,type,qty:(type==='adjust'&&$('#wh-iss-qty')?.value?.startsWith('-'))?-Math.abs(qty):qty,
-    projectId:projId||null,date,issuedBy:by,notes,
-    by:by,postedAt:new Date().toISOString(),
-  };
-  AppState.data.stockTransactions.push(tx);
-  _whSyncQty(itemId);
+  const postedAt=new Date().toISOString();
+  valid.forEach(ln=>{
+    const qty=parseFloat(ln.qty);
+    AppState.data.stockTransactions.push({
+      id:_whNextId('TX-',AppState.data.stockTransactions),
+      itemId:ln.itemId,type,
+      qty:type==='adjust'&&String(ln.qty).startsWith('-')?-Math.abs(qty):qty,
+      projectId:projId||null,date,issuedBy:by,by,notes,postedAt,
+    });
+    _whSyncQty(ln.itemId);
+  });
   AppState.save();
-  showToast(`${type.charAt(0).toUpperCase()+type.slice(1)} posted`,'success');
-  ['wh-iss-item','wh-iss-proj','wh-iss-qty','wh-iss-notes'].forEach(id=>{const el=$(`#${id}`);if(el)el.value=el.tagName==='SELECT'?'':'';});
-  $('#wh-iss-stock-info').style.display='none';
+  showToast(`${valid.length} item${valid.length>1?'s':''} — ${type} posted`,'success',3500);
+  _whIssLines=[{itemId:'',qty:''}];
   _whRenderTab();
 }
 
