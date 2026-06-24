@@ -1517,8 +1517,8 @@ $('#notifDot').style.display=unread?'':'none';}
 
 function markAllRead(){(AppState.data.notifications||[]).forEach(n=>n.read=true);renderNotifPanel();}
 function openModal(id){$(`#${id}`).classList.add('open');if(typeof _ssm!=='undefined')_ssm.startEdit();}
-function closeModal(id){$(`#${id}`).classList.remove('open');if(typeof _ssm!=='undefined')_ssm.endEdit();}
-document.addEventListener('click',e=>{if(e.target.classList.contains('modal-overlay'))e.target.classList.remove('open');});
+function closeModal(id){const el=document.getElementById(id);if(!el)return;el.classList.remove('open');if(el.dataset.dynamic)el.remove();if(typeof _ssm!=='undefined')_ssm.endEdit();}
+document.addEventListener('click',e=>{if(e.target.classList.contains('modal-overlay')){e.target.classList.remove('open');if(e.target.dataset.dynamic)e.target.remove();}});
 
 function showQuickAdd(){
 const map={dashboard:'project',projects:'project',tasks:'task',risks:'risk',actions:'action',qaqc:'inspection',procurement:'po'};
@@ -15907,7 +15907,7 @@ function _procPickFromMaster(){
   const cons=(AppState.data.consumables||[]).filter(c=>!c._deleted);
   const all=[...mats.map(m=>({...m,_type:'materials'})),...cons.map(c=>({...c,_type:'consumables'}))];
   const html=`
-  <div class="modal-overlay active" id="procMasterPickModal" onclick="if(event.target===this)closeModal('procMasterPickModal')">
+  <div class="modal-overlay open" data-dynamic="1" id="procMasterPickModal" onclick="if(event.target===this)closeModal('procMasterPickModal')">
     <div class="modal" style="max-width:540px">
       <div class="modal-header">
         <div class="modal-title"><i class="fas fa-book-open" style="color:var(--accent-blue);margin-right:8px"></i>Pick from Item Master</div>
@@ -20075,7 +20075,7 @@ function _whPickFromMaster(){
   const enrolled=new Set((AppState.data.warehouseItems||[]).filter(w=>!w._deleted).map(w=>w.itemMasterId).filter(Boolean));
   const all=[...mats.map(m=>({...m,_type:'materials'})),...cons.map(c=>({...c,_type:'consumables'}))];
   const html=`
-  <div class="modal-overlay active" id="whMasterPickModal" onclick="if(event.target===this)closeModal('whMasterPickModal')">
+  <div class="modal-overlay open" data-dynamic="1" id="whMasterPickModal" onclick="if(event.target===this)closeModal('whMasterPickModal')">
     <div class="modal" style="max-width:540px">
       <div class="modal-header">
         <div class="modal-title"><i class="fas fa-book-open" style="color:var(--accent-blue);margin-right:8px"></i>Pick from Item Master</div>
@@ -20139,7 +20139,7 @@ function _whShowAddItem(editId){
     return (arr||[]).find(i=>i.id===existing.itemMasterId);
   })():null;
   const html=`
-  <div class="modal-overlay active" id="whItemModal" onclick="if(event.target===this)closeModal('whItemModal')">
+  <div class="modal-overlay open" data-dynamic="1" id="whItemModal" onclick="if(event.target===this)closeModal('whItemModal')">
     <div class="modal" style="max-width:520px">
       <div class="modal-header">
         <div class="modal-title">${existing?'Edit Warehouse Item':'Add Warehouse Item'}</div>
@@ -20256,7 +20256,7 @@ function _whDeleteItem(id){
 function _whShowAddRequest(){
   const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='completed');
   const html=`
-  <div class="modal-overlay active" id="whReqModal" onclick="if(event.target===this)closeModal('whReqModal')">
+  <div class="modal-overlay open" data-dynamic="1" id="whReqModal" onclick="if(event.target===this)closeModal('whReqModal')">
     <div class="modal" style="max-width:480px">
       <div class="modal-header">
         <div class="modal-title">New Issuance Request</div>
