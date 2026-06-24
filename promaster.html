@@ -19763,38 +19763,45 @@ function renderWarehouse(){
   ];
 
   $('#warehouse').innerHTML=`
-  <div class="section-header" style="margin-bottom:14px">
+  <div class="section-header" style="margin-bottom:16px">
     <div>
-      <div class="section-title"><i class="fas fa-warehouse" style="color:var(--accent-blue);margin-right:8px"></i>Warehouse</div>
+      <div class="section-title"><i class="fas fa-warehouse" style="color:var(--accent-blue);margin-right:9px"></i>Warehouse</div>
       <div class="section-sub">Stock management — receive, reserve, issue, return, and track all materials &amp; consumables</div>
     </div>
-    <div style="display:flex;gap:7px">
+    <div style="display:flex;gap:8px;align-items:center">
       <button class="btn btn-secondary btn-sm" onclick="_whExportItems()"><i class="fas fa-download"></i> Export</button>
       <button class="btn btn-primary btn-sm" onclick="_whShowAddItem()"><i class="fas fa-plus"></i> Add Item</button>
     </div>
   </div>
 
   <!-- KPI strip -->
-  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px">
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:18px">
     ${[
-      ['fa-boxes','Items',totalItems,'var(--accent-blue)'],
+      ['fa-boxes','Total Items',totalItems,'var(--accent-blue)'],
       ['fa-exclamation-circle','Low Stock',lowStock,'var(--accent-red)'],
       ['fa-peso-sign','Inventory Value','₱'+fmtNum(totalValue),'var(--accent-green)'],
-      ['fa-clock','Pending Requests',pendingReqs,'var(--accent-amber)'],
+      ['fa-clipboard-list','Pending Requests',pendingReqs,'var(--accent-amber)'],
       ['fa-exchange-alt',"Today's Transactions",todayTx,'#39d3f2'],
-    ].map(([ic,l,v,c])=>`<div class="stat-card" style="border-left:3px solid ${c}">
-      <div class="stat-icon" style="background:${c}22"><i class="fas ${ic}" style="color:${c}"></i></div>
-      <div class="stat-info"><div class="label">${l}</div><div class="value" style="color:${c}">${v}</div></div>
+    ].map(([ic,l,v,c])=>`
+    <div class="stat-card" style="border-left:3px solid ${c};cursor:default">
+      <div class="stat-icon" style="background:${c}18"><i class="fas ${ic}" style="color:${c}"></i></div>
+      <div class="stat-info">
+        <div class="label">${l}</div>
+        <div class="value" style="color:${c};font-size:20px">${v}</div>
+      </div>
     </div>`).join('')}
   </div>
 
   <!-- Tabs -->
-  <div class="tab-bar" style="margin-bottom:14px">
-    ${tabs.map(t=>`<button class="tab-btn ${_whTab===t.id?'active':''}" onclick="_whSetTab('${t.id}')">
-      <i class="fas ${t.icon}"></i> ${t.label}
-      ${t.count?`<span class="nav-badge" style="position:static;margin-left:5px">${t.count}</span>`:''}
-    </button>`).join('')}
+  <div class="tabs">
+    ${tabs.map(t=>`
+    <div class="tab ${_whTab===t.id?'active':''}" onclick="_whSetTab('${t.id}')" style="display:flex;align-items:center;gap:6px;padding:9px 16px;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">
+      <i class="fas ${t.icon}" style="font-size:13px"></i>
+      <span>${t.label}</span>
+      ${t.count?`<span style="background:var(--accent-amber);color:#000;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;min-width:18px;text-align:center">${t.count}</span>`:''}
+    </div>`).join('')}
   </div>
+
   <div id="wh-tab-body"></div>`;
 
   _whRenderTab();
