@@ -8316,7 +8316,95 @@ function renderDetailOverview(){
     </div>`;
   });
 
-  html+=`</div></div></div>
+  html+=`</div></div></div>`;
+
+  // ── BUDGET CONTROL CARD ───────────────────────────────────────
+  (()=>{
+    const matAllocs=allocs.filter(a=>!a._deleted&&a.resourceType==='Material');
+    const conAllocs=allocs.filter(a=>!a._deleted&&a.resourceType==='Consumable');
+    const matBudget=matAllocs.reduce((s,a)=>s+(a.plannedCost||0),0);
+    const conBudget=conAllocs.reduce((s,a)=>s+(a.plannedCost||0),0);
+    const totalBudget=matBudget+conBudget;
+    const matPO=procurement.filter(po=>po.category==='Materials'&&po.status!=='cancelled').reduce((s,po)=>s+(po.budgetAmount||0),0);
+    const conPO=procurement.filter(po=>po.category==='Consumables'&&po.status!=='cancelled').reduce((s,po)=>s+(po.budgetAmount||0),0);
+    const totalPO=matPO+conPO;
+    const whFn=typeof _whActualIssueCost==='function';
+    const matIssued=whFn?matAllocs.reduce((s,a)=>s+_whActualIssueCost(pid,a.resourceId),0):0;
+    const conIssued=whFn?conAllocs.reduce((s,a)=>s+_whActualIssueCost(pid,a.resourceId),0):0;
+    const totalIssued=matIssued+conIssued;
+    const varMat=matBudget-matPO;
+    const varCon=conBudget-conPO;
+    const varTot=totalBudget-totalPO;
+    const varMatA=matBudget-matIssued;
+    const varConA=conBudget-conIssued;
+    const varTotA=totalBudget-totalIssued;
+    const vc=v=>v<0?'var(--accent-red)':v===0?'var(--text-secondary)':'var(--accent-green)';
+    const vi=v=>v<0?'▼':'▲';
+    const poUtilPct=totalBudget>0?Math.min(100,Math.round(totalPO/totalBudget*100)):0;
+    const whUtilPct=totalBudget>0?Math.min(100,Math.round(totalIssued/totalBudget*100)):0;
+    html+=`
+  <div class="card" style="margin-bottom:16px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:14px"><i class="fas fa-balance-scale" style="color:#bc8cff;margin-right:7px"></i>Budget Control <span style="font-size:11px;font-weight:400;color:var(--text-secondary)">Materials &amp; Consumables</span></div>
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead>
+        <tr style="border-bottom:2px solid var(--border)">
+          <th style="text-align:left;padding:6px 8px;color:var(--text-secondary);font-weight:600">Category</th>
+          <th style="text-align:right;padding:6px 8px;color:var(--text-secondary);font-weight:600">Alloc. Budget</th>
+          <th style="text-align:right;padding:6px 8px;color:var(--text-secondary);font-weight:600">PO Committed</th>
+          <th style="text-align:right;padding:6px 8px;color:var(--text-secondary);font-weight:600">PO Variance</th>
+          <th style="text-align:right;padding:6px 8px;color:var(--text-secondary);font-weight:600">WH Issued</th>
+          <th style="text-align:right;padding:6px 8px;color:var(--text-secondary);font-weight:600">WH Variance</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:7px 8px;font-weight:600;color:var(--accent-blue)"><i class="fas fa-cubes" style="font-size:10px;margin-right:5px"></i>Material</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono)">&#8369;${fmtNum(matBudget)}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);color:${matPO>matBudget?'var(--accent-red)':'var(--text-primary)'}">&#8369;${fmtNum(matPO)}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;color:${vc(varMat)}">${vi(varMat)} &#8369;${fmtNum(Math.abs(varMat))}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);color:${matIssued>matBudget?'var(--accent-red)':'var(--text-primary)'}">&#8369;${fmtNum(matIssued)}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;color:${vc(varMatA)}">${vi(varMatA)} &#8369;${fmtNum(Math.abs(varMatA))}</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:7px 8px;font-weight:600;color:var(--accent-amber)"><i class="fas fa-box" style="font-size:10px;margin-right:5px"></i>Consumable</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono)">&#8369;${fmtNum(conBudget)}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);color:${conPO>conBudget?'var(--accent-red)':'var(--text-primary)'}">&#8369;${fmtNum(conPO)}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;color:${vc(varCon)}">${vi(varCon)} &#8369;${fmtNum(Math.abs(varCon))}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);color:${conIssued>conBudget?'var(--accent-red)':'var(--text-primary)'}">&#8369;${fmtNum(conIssued)}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;color:${vc(varConA)}">${vi(varConA)} &#8369;${fmtNum(Math.abs(varConA))}</td>
+        </tr>
+        <tr style="background:var(--bg-hover)">
+          <td style="padding:7px 8px;font-weight:700">TOTAL</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:700">&#8369;${fmtNum(totalBudget)}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;color:${totalPO>totalBudget?'var(--accent-red)':'var(--text-primary)'}">&#8369;${fmtNum(totalPO)}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:800;color:${vc(varTot)}">${vi(varTot)} &#8369;${fmtNum(Math.abs(varTot))}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;color:${totalIssued>totalBudget?'var(--accent-red)':'var(--text-primary)'}">&#8369;${fmtNum(totalIssued)}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:800;color:${vc(varTotA)}">${vi(varTotA)} &#8369;${fmtNum(Math.abs(varTotA))}</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px">
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:10px;color:var(--text-secondary)">PO Commitment Rate</span>
+          <span style="font-size:11px;font-weight:700;font-family:var(--font-mono);color:${poUtilPct>100?'var(--accent-red)':poUtilPct>80?'var(--accent-amber)':'var(--accent-blue)'}">${poUtilPct}%</span>
+        </div>
+        <div class="progress-bar" style="height:8px"><div class="progress-fill" style="width:${Math.min(100,poUtilPct)}%;background:${poUtilPct>100?'var(--accent-red)':poUtilPct>80?'var(--accent-amber)':'var(--accent-blue)'};border-radius:4px"></div></div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:10px;color:var(--text-secondary)">WH Issuance Rate</span>
+          <span style="font-size:11px;font-weight:700;font-family:var(--font-mono);color:${whUtilPct>100?'var(--accent-red)':whUtilPct>80?'var(--accent-amber)':'var(--accent-green)'}">${whUtilPct}%</span>
+        </div>
+        <div class="progress-bar" style="height:8px"><div class="progress-fill" style="width:${Math.min(100,whUtilPct)}%;background:${whUtilPct>100?'var(--accent-red)':whUtilPct>80?'var(--accent-amber)':'var(--accent-green)'};border-radius:4px"></div></div>
+      </div>
+    </div>
+  </div>`;
+  })();
+
+  html+=`
   <div class="card" style="margin-bottom:16px">
     <div style="font-size:13px;font-weight:600;margin-bottom:12px"><i class="fas fa-th" style="color:var(--accent-blue);margin-right:7px"></i>Project Snapshot</div>
     <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:8px">`;
@@ -16019,6 +16107,21 @@ function saveProcurement(id){
     itemMasterId:$('#poItemMasterId')?.value||null,
   };
 
+  // Budget check — warn if PO budget would exceed allocation for linked project
+  if(rec.projectId&&(rec.category==='Materials'||rec.category==='Consumables')){
+    const allocBudget=(AppState.data.resourceAllocations||[])
+      .filter(a=>!a._deleted&&a.projectId===rec.projectId&&(rec.category==='Materials'?a.resourceType==='Material':a.resourceType==='Consumable'))
+      .reduce((s,a)=>s+(a.plannedCost||0),0);
+    const committed=(AppState.data.procurement||[])
+      .filter(po=>!po._deleted&&po.projectId===rec.projectId&&po.category===rec.category&&po.status!=='cancelled'&&po.id!==rec.id)
+      .reduce((s,po)=>s+(po.budgetAmount||0),0);
+    const projected=committed+rec.budgetAmount;
+    if(allocBudget>0&&projected>allocBudget){
+      const over=projected-allocBudget;
+      if(!confirm(`⚠️ Budget Overrun Warning\n\n${rec.category} allocation budget: ₱${fmtNum(allocBudget)}\nAlready committed: ₱${fmtNum(committed)}\nThis PO adds: ₱${fmtNum(rec.budgetAmount)}\nProjected total: ₱${fmtNum(projected)} (over by ₱${fmtNum(over)})\n\nProceed with saving anyway?`))return;
+    }
+  }
+
   if(!AppState.data.procurement)AppState.data.procurement=[];
   const existing=(AppState.data.procurement||[]).findIndex(x=>x.id===id);
   if(existing>=0){
@@ -20176,6 +20279,26 @@ function _whSaveIssue(){
         return;
       }
     }
+  }
+
+  // Budget check — warn if issuing would exceed allocation planned cost
+  if(type==='issue'&&projId){
+    const overBudget=[];
+    for(const ln of valid){
+      const qty=parseFloat(ln.qty);
+      const wac=_whCalcWAC(ln.itemId);
+      const newCost=qty*wac;
+      const item=_whItems().find(i=>i.id===ln.itemId);
+      const alloc=(AppState.data.resourceAllocations||[]).find(a=>!a._deleted&&a.projectId===projId&&(a.resourceId===ln.itemId||a.resourceId===(item?.itemMasterId)));
+      if(alloc&&(alloc.plannedCost||0)>0){
+        const currentIssued=_whActualIssueCost(projId,alloc.resourceId);
+        const projected=currentIssued+newCost;
+        if(projected>alloc.plannedCost){
+          overBudget.push(`• ${item?.name||ln.itemId}: ₱${fmtNum(Math.round(projected))} issued vs ₱${fmtNum(alloc.plannedCost)} budget`);
+        }
+      }
+    }
+    if(overBudget.length&&!confirm(`⚠️ Budget Overrun Warning\n\nThe following items will exceed their allocation budget:\n${overBudget.join('\n')}\n\nProceed with issuance anyway?`))return;
   }
 
   if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
