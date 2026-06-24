@@ -376,6 +376,7 @@ canvas{display:block}
     <div id="dailymeeting" class="page"></div>
 <div id="calendar" class="page"></div>
     <div id="reports" class="page"></div>
+    <div id="warehouse" class="page"></div>
     <div id="masterlist" class="page"></div>
     <div id="deletionRequests" class="page"></div>
     <div id="trash" class="page"></div>
@@ -478,6 +479,12 @@ const APP_CHANGELOG=[
 ];
 // Migration registry — add new migration functions here when adding new data structures
 const DATA_MIGRATIONS={
+  '2.4.0': function(data){
+    if(!data.warehouseItems)data.warehouseItems=[];
+    if(!data.stockTransactions)data.stockTransactions=[];
+    if(!data.issuanceRequests)data.issuanceRequests=[];
+    return data;
+  },
   '2.3.0': function(data){
     // Baseline fields: ensure all projects have baselines array and activeBaseline
     (data.projects||[]).forEach(p=>{
@@ -736,6 +743,7 @@ const NAV_ITEMS=[
 {id:'dailymeeting',label:'Daily Meeting',icon:'fas fa-clipboard-check',section:'Analytics'},
 {id:'calendar',label:'Calendar',icon:'fas fa-calendar-alt',section:'Analytics'},
 {id:'reports',label:'Reports',icon:'fas fa-file-alt',section:'Analytics'},
+{id:'warehouse',label:'Warehouse',icon:'fas fa-warehouse',section:'Supply'},
 {id:'masterlist',label:'Asset Masterlist',icon:'fas fa-clipboard-list',section:'Assets'}];
 
 // ── DROPDOWN REGISTRY ──────────────────────────────────────
@@ -779,6 +787,7 @@ function getDefaultData(){
   return{
     projects:[],tasks:[],resources:[],equipment:[],tools:[],vehicles:[],
     consumables:[],materials:[],manpower:[],procurement:[],procurementLogs:[],
+    warehouseItems:[],stockTransactions:[],issuanceRequests:[],
     resourceAllocations:[],resourceUsageLogs:[],costs:[],qaqc:[],risks:[],
     actions:[],documents:[],progress:[],kpiData:[],calendar:[],
     assetHistory:[],thirdParties:[],projectTeam:[],activities:[],notifications:[],
@@ -1419,7 +1428,7 @@ if (!window._snapshotCaptured) {
   try { _captureSyncedSnapshot(); } catch(e) {}
 }
 const map={dashboard:renderDashboard,projects:renderProjects,tasks:renderTasks,gantt:renderGantt,
-resources:renderResources,manpower:renderManpower,materials:renderMaterials,procurement:renderProcurement,
+resources:renderResources,manpower:renderManpower,materials:renderMaterials,procurement:renderProcurement,warehouse:renderWarehouse,
 costs:renderCosts,qaqc:renderQAQC,risks:renderRisks,actions:renderActions,documents:renderDocuments,
 progress:renderProgress,kpi:renderKPI,dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist,prospects:renderProspects,library:renderLibrary,
 trash:typeof renderTrash==='function'?renderTrash:null,
@@ -8029,37 +8038,40 @@ function _projectReadiness(pid){
     items:assetItems,emptyMsg:'No equipment, tool, or vehicle allocations found for this project.'});
 
   // ── CHECK 4: Materials & Consumables — Warehouse Sufficiency ──
-  // Source: Resource Allocation tab items of type Material/Consumable
-  // Logic: compare allocatedQty needed vs qtyOnHand in warehouse
+  // Uses warehouse module: compares allocatedQty vs live qtyAvailable per warehouse item
   const matAllocItems=[];
+  const whItems=AppState.data.warehouseItems||[];
   allocs.filter(a=>a.resourceType==='Material'||a.resourceType==='Consumable').forEach(a=>{
-    const warehouseList=a.resourceType==='Consumable'?allConsumables:allMaterials;
-    const wh=warehouseList.find(m=>m.id===a.resourceId);
     const needed=a.allocatedQty||0;
-    const onHand=wh?.qtyOnHand||0;
-    const unit=a.unit||wh?.unit||'';
-    // Also check how much has already been issued so far
-    const issued=(AppState.data.resourceUsageLogs||[]).filter(l=>l.projectId===pid&&l.allocationId===a.id&&l.transactionType==='Issue').reduce((s,l)=>s+l.quantity,0);
-    const returned=(AppState.data.resourceUsageLogs||[]).filter(l=>l.projectId===pid&&l.allocationId===a.id&&l.transactionType==='Return').reduce((s,l)=>s+l.quantity,0);
-    const stillNeeded=Math.max(0,needed-(issued-returned));
-    let st,detail;
-    if(!wh){
-      st='warn';detail=`Not found in warehouse · Need: ${needed} ${unit}`;
-    } else if(onHand>=stillNeeded){
-      st='go';detail=`On hand: ${onHand} ${unit} · Still needed: ${stillNeeded} ${unit} ✓`;
-    } else if(onHand>0){
-      st='warn';detail=`On hand: ${onHand} ${unit} · Still needed: ${stillNeeded} ${unit} — SHORT by ${stillNeeded-onHand} ${unit}`;
+    // Try warehouse first, fall back to old masterlist arrays
+    // Match by warehouse item's own id OR by itemMasterId (enrolled from Item Master)
+    const whItem=whItems.find(w=>!w._deleted&&(w.id===a.resourceId||w.itemMasterId===a.resourceId));
+    let unit,qtyAvail,qtyOnHand,st,detail;
+    if(whItem){
+      const q=(typeof _whCalcQty==='function')?_whCalcQty(whItem.id):{qtyOnHand:whItem.qtyOnHand||0,qtyAvailable:whItem.qtyAvailable||0};
+      qtyOnHand=q.qtyOnHand; qtyAvail=q.qtyAvailable; unit=a.unit||whItem.unit||'';
+      if(qtyAvail>=needed){st='go';detail=`Available: ${qtyAvail} ${unit} · Needed: ${needed} ${unit} ✓`;}
+      else if(qtyAvail>0){st='warn';detail=`Available: ${qtyAvail} ${unit} · Needed: ${needed} ${unit} — SHORT by ${needed-qtyAvail} ${unit}`;}
+      else{st='fail';detail=`Available: 0 ${unit} · Needed: ${needed} ${unit} — NOT IN WAREHOUSE`;}
     } else {
-      st='fail';detail=`On hand: 0 ${unit} · Need: ${stillNeeded} ${unit} — NOT AVAILABLE`;
+      // fallback to old masterlist
+      const warehouseList=a.resourceType==='Consumable'?allConsumables:allMaterials;
+      const wh=warehouseList.find(m=>m.id===a.resourceId);
+      unit=a.unit||wh?.unit||'';
+      qtyOnHand=wh?.qtyOnHand||0;
+      if(!wh){st='warn';detail=`Not found in warehouse · Need: ${needed} ${unit}`;}
+      else if(qtyOnHand>=needed){st='go';detail=`On hand: ${qtyOnHand} ${unit} · Needed: ${needed} ${unit} ✓`;}
+      else if(qtyOnHand>0){st='warn';detail=`On hand: ${qtyOnHand} ${unit} · Needed: ${needed} ${unit} — SHORT by ${needed-qtyOnHand} ${unit}`;}
+      else{st='fail';detail=`On hand: 0 ${unit} · Need: ${needed} ${unit} — NOT AVAILABLE`;}
     }
-    matAllocItems.push({name:a.resourceName,detail,status:st,type:a.resourceType,link:'masterlist'});
+    matAllocItems.push({name:a.resourceName,detail,status:st,type:a.resourceType,link:'warehouse'});
   });
   const m4Fail=matAllocItems.filter(i=>i.status==='fail').length;
   const m4Warn=matAllocItems.filter(i=>i.status==='warn').length;
   checks.push({id:'materials',icon:'fa-cubes',label:'Materials & Consumables',
     status:m4Fail>0?'fail':m4Warn>0?'warn':matAllocItems.length===0?'warn':'go',
     summary:matAllocItems.length===0?'No materials/consumables in allocation':m4Fail>0?`${m4Fail} item(s) unavailable in warehouse`:m4Warn>0?`${m4Warn} item(s) insufficient`:'All items available in warehouse',
-    items:matAllocItems,emptyMsg:'Add Material or Consumable items in the Resource Allocation tab to check warehouse sufficiency.'});
+    items:matAllocItems,emptyMsg:'Add Material or Consumable items in Resource Allocation, then add them to the Warehouse module to check live stock.'});
 
   // ── CHECK 7: Procurement Status ──────────────────────────
   const poItems=procurement.map(po=>{
@@ -9574,8 +9586,20 @@ function renderAllocTabContent(){
       if(r.overtimeRate>0)rates.push('OT: ₱'+r.overtimeRate+'/hr');
       return r.name+(rates.length?' <span style="color:var(--accent-green);font-size:10px">· '+rates.join(' · ')+'</span>':'<span style="color:var(--text-muted);font-size:10px"> · No rates set</span>');
     }
-    if(idx===5)return`${r.name} [${r.category}] · Stock: ${r.qtyOnHand} ${r.unit} · Min: ${r.minStock}`;
-    if(idx===6)return`${r.name} [${r.unit}] · Qty: ${r.qty} · Status: ${r.status}`;
+    if(idx===5){
+      // Consumable: check if enrolled in warehouse for live qty
+      const whLink=(AppState.data.warehouseItems||[]).find(w=>!w._deleted&&w.itemMasterId===r.id);
+      const liveQty=whLink&&typeof _whCalcQty==='function'?_whCalcQty(whLink.id):null;
+      const qtyLabel=liveQty?`Avail: ${liveQty.qtyAvailable} ${r.unit} (WH)`:`Stock: ${r.qtyOnHand} ${r.unit}`;
+      const low=liveQty?liveQty.qtyAvailable<=0:(r.qtyOnHand<=r.minStock);
+      return`${r.name} [${r.category}] · ${qtyLabel}${low?' ⚠':''} · Min: ${r.minStock}`;
+    }
+    if(idx===6){
+      const whLink=(AppState.data.warehouseItems||[]).find(w=>!w._deleted&&w.itemMasterId===r.id);
+      const liveQty=whLink&&typeof _whCalcQty==='function'?_whCalcQty(whLink.id):null;
+      const qtyLabel=liveQty?`Avail: ${liveQty.qtyAvailable} ${r.unit} (WH)`:`Qty: ${r.qty} ${r.unit}`;
+      return`${r.name} [${r.unit}] · ${qtyLabel} · Status: ${r.status}`;
+    }
     return`${r.name} [${r.category||''}] · ${r.status||''}`;
   };
   const getUnit=r=>{
@@ -9602,8 +9626,8 @@ function renderAllocTabContent(){
     <i class="fas ${icons[idx]}" style="color:${colors[idx]};width:14px;text-align:center;flex-shrink:0"></i>
     <div style="flex:1;min-width:0">
       <div style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${formatRow(r)}</div>
-      ${idx===5?`<div style="font-size:10px;color:${r.qtyOnHand<=r.minStock?'var(--accent-red)':'var(--text-muted)'}">Supplier: ${r.supplier||'—'}${r.qtyOnHand<=r.minStock?' · ⚠ Low Stock':''}</div>`:''}
-      ${idx===6?`<div style="font-size:10px;color:${r.status==='pending'?'var(--accent-amber)':r.status==='delivered'?'var(--accent-green)':'var(--text-muted)'}">Supplier: ${r.supplier||'—'} · ${r.status}</div>`:''}
+      ${idx===5?(()=>{const wh=(AppState.data.warehouseItems||[]).find(w=>!w._deleted&&w.itemMasterId===r.id);const lq=wh&&typeof _whCalcQty==='function'?_whCalcQty(wh.id):null;const low=lq?lq.qtyAvailable<=0:(r.qtyOnHand<=r.minStock);return`<div style="font-size:10px;color:${low?'var(--accent-red)':'var(--text-muted)'}">Supplier: ${r.supplier||'—'}${wh?` · WH Avail: ${lq?.qtyAvailable} ${r.unit}`:''}${low?' · ⚠ Low/None':''}</div>`;})():''}
+      ${idx===6?(()=>{const wh=(AppState.data.warehouseItems||[]).find(w=>!w._deleted&&w.itemMasterId===r.id);const lq=wh&&typeof _whCalcQty==='function'?_whCalcQty(wh.id):null;return`<div style="font-size:10px;color:${r.status==='pending'?'var(--accent-amber)':r.status==='delivered'?'var(--accent-green)':'var(--text-muted)'}">Supplier: ${r.supplier||'—'}${wh?` · WH Avail: ${lq?.qtyAvailable} ${r.unit}`:''}· ${r.status}</div>`;})():''}
     </div>
   </div>`).join('')}
   </div>`;
@@ -15633,8 +15657,16 @@ function showEditProcurement(id){
       <input class="form-input" type="date" id="poPRDate" value="${safeDate(p?.prDate||new Date().toISOString().split('T')[0])}">
     </div>
     <div class="form-group" style="grid-column:1/-1">
-      <label class="form-label">Description / Scope of Work *</label>
-      <input class="form-input" id="poDesc" value="${(p?.description||'').replace(/"/g,'&quot;')}" placeholder="Full description of goods/services to be procured">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <label class="form-label" style="margin:0">Description / Scope of Work *</label>
+        <button type="button" class="btn btn-secondary btn-sm" style="font-size:10px;padding:2px 8px" onclick="_procPickFromMaster()"><i class="fas fa-book-open" style="margin-right:4px"></i>Pick from Item Master</button>
+      </div>
+      <input class="form-input" id="poDesc" value="${(p?.description||'').replace(/"/g,'&quot;')}" placeholder="Full description — or pick from Item Master above">
+      <div id="poItemMasterTag" style="margin-top:4px;font-size:10px;color:var(--accent-blue);display:${p?.itemMasterId?'flex':'none'};align-items:center;gap:6px">
+        <i class="fas fa-link"></i><span id="poItemMasterLabel">${p?.itemMasterId?`Linked to Item Master: ${p.itemMasterId}`:''}</span>
+        <button type="button" style="background:none;border:none;color:var(--accent-red);cursor:pointer;font-size:11px" onclick="document.getElementById('poItemMasterId').value='';document.getElementById('poItemMasterTag').style.display='none'"><i class="fas fa-times"></i></button>
+      </div>
+      <input type="hidden" id="poItemMasterId" value="${p?.itemMasterId||''}">
     </div>
     <div class="form-group">
       <label class="form-label">Category</label>
@@ -15869,6 +15901,61 @@ function procRemoveAttachment(procId,idx){
   showToast('Attachment removed','warning');
 }
 
+function _procPickFromMaster(){
+  const mats=(AppState.data.materials||[]).filter(m=>!m._deleted);
+  const cons=(AppState.data.consumables||[]).filter(c=>!c._deleted);
+  const all=[...mats.map(m=>({...m,_type:'materials'})),...cons.map(c=>({...c,_type:'consumables'}))];
+  const html=`
+  <div class="modal-overlay active" id="procMasterPickModal" onclick="if(event.target===this)closeModal('procMasterPickModal')">
+    <div class="modal" style="max-width:540px">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fas fa-book-open" style="color:var(--accent-blue);margin-right:8px"></i>Pick from Item Master</div>
+        <button class="modal-close" onclick="closeModal('procMasterPickModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Select an item to pre-fill description, unit, and standard cost. You can still edit the description freely after.</div>
+        <input class="form-control" placeholder="Search…" oninput="
+          const q=this.value.toLowerCase();
+          document.querySelectorAll('#procMasterList .pm-row').forEach(r=>{r.style.display=r.dataset.name.includes(q)?'':'none';});
+        " style="margin-bottom:10px">
+        <div id="procMasterList" style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+          ${all.length?all.map(item=>`
+          <div class="pm-row" data-name="${(item.name||'').toLowerCase()}" style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:10px"
+            onclick="_procApplyMasterItem('${item.id}','${(item.name||'').replace(/'/g,'\\\'').replace(/"/g,'&quot;')}','${item.unit||''}',${item.unitCost||0},'${item.category||'Materials'}')">
+            <div style="flex:1">
+              <div style="font-weight:600;font-size:12px">${item.name}</div>
+              <div style="font-size:10px;color:var(--text-secondary)">${item.id} · ${item.category||'—'} · ${item.unit||'—'} · Std Cost: ₱${fmtNum(item.unitCost||0)}</div>
+            </div>
+            <i class="fas fa-chevron-right" style="color:var(--text-secondary)"></i>
+          </div>`).join(''):`<div class="empty-state" style="padding:24px"><i class="fas fa-book-open"></i><p>No items in Item Master.<br>Add materials/consumables in Asset Masterlist first.</p></div>`}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('procMasterPickModal')">Cancel — keep free text</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+
+function _procApplyMasterItem(itemId, name, unit, stdCost, category){
+  const descEl=$('#poDesc');
+  if(descEl) descEl.value=name+(unit?' ('+unit+')':'');
+  const catEl=$('#poCat');
+  if(catEl) catEl.value=['Materials','Consumables'].includes(category)?category:'Materials';
+  const budgetEl=$('#poBudget');
+  if(budgetEl&&(!budgetEl.value||budgetEl.value==='0'))budgetEl.value=stdCost>0?stdCost:'';
+  // Store link
+  const hiddenEl=$('#poItemMasterId');
+  if(hiddenEl) hiddenEl.value=itemId;
+  const tagEl=$('#poItemMasterTag');
+  if(tagEl) tagEl.style.display='flex';
+  const labelEl=$('#poItemMasterLabel');
+  if(labelEl) labelEl.textContent=`Linked to Item Master: ${itemId} — ${name}`;
+  closeModal('procMasterPickModal');
+  showToast('Item Master item applied — edit description freely','success',3000);
+}
+
 function saveProcurement(id){
   const desc=$('#poDesc')?.value?.trim();
   const budget=parseFloat($('#poBudget')?.value)||0;
@@ -15910,6 +15997,7 @@ function saveProcurement(id){
     paymentTerms:$('#poPayTerms')?.value||'',
     deliveryAddress:$('#poDelAddr')?.value||'',
     notes:$('#poNotes')?.value||'',
+    itemMasterId:$('#poItemMasterId')?.value||null,
   };
 
   if(!AppState.data.procurement)AppState.data.procurement=[];
@@ -19437,6 +19525,7 @@ function _openRecentItem(r) {
 
 // ═══════════════════════════════════════════════════════════
 </script>
+<script src="src/js/views/warehouse.js"></script>
 <script>
 function renderMasterlist(){
   const d=AppState.data;
@@ -19461,7 +19550,7 @@ function renderMasterlist(){
     {id:'equipment',label:'Equipment',icon:'fa-cog',count:equipment.length},
     {id:'tools',label:'Tools',icon:'fa-wrench',count:tools.length},
     {id:'vehicles',label:'Vehicles',icon:'fa-truck',count:vehicles.length},
-    {id:'warehouse',label:'Warehouse Supply',icon:'fa-warehouse',count:consumables.length+materials.length},
+    {id:'warehouse',label:'Item Master',icon:'fa-book-open',count:consumables.length+materials.length},
     {id:'thirdparty',label:'Third Party',icon:'fa-handshake',count:thirdParty.length},
     {id:'history',label:'Asset History',icon:'fa-history',count:(d.assetHistory||[]).length},
   ];
@@ -19487,7 +19576,7 @@ function renderMasterlist(){
 
   <div class="card" style="margin-bottom:14px;padding:12px 16px">
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-      ${[['Personnel',personnel.length,'#388bfd','personnel'],['Equipment',equipment.length,'#f0a450','equipment'],['Tools',tools.length,'#bc8cff','tools'],['Vehicles',vehicles.length,'#39d3f2','vehicles'],['Warehouse Supply',consumables.length+materials.length,'#3fb950','warehouse'],['Third Party',thirdParty.length,'#f85149','thirdparty']].map(([l,n,c,t])=>`
+      ${[['Personnel',personnel.length,'#388bfd','personnel'],['Equipment',equipment.length,'#f0a450','equipment'],['Tools',tools.length,'#bc8cff','tools'],['Vehicles',vehicles.length,'#39d3f2','vehicles'],['Item Master',consumables.length+materials.length,'#3fb950','warehouse'],['Third Party',thirdParty.length,'#f85149','thirdparty']].map(([l,n,c,t])=>`
       <div style="display:flex;align-items:center;gap:6px;cursor:pointer" onclick="mlTab='${t}';renderMasterlist()">
         <div style="width:10px;height:10px;border-radius:50%;background:${c}"></div>
         <span style="font-size:11px;font-weight:600">${l}</span>
@@ -19862,7 +19951,7 @@ function renderMlVehicles(){
 
 // ── CONSUMABLES ───────────────────────────────────────────
 
-// ── WAREHOUSE SUPPLY (Consumables + Materials + PPE combined) ─────────────
+// ── ITEM MASTER (Consumables + Materials + PPE — central catalog) ──────────
 function renderMlWarehouse(){
   const d=AppState.data;
   const allCons=d.consumables||[];
@@ -19886,11 +19975,18 @@ function renderMlWarehouse(){
   const subTabCounts={all:totalItems,consumables:allCons.filter(c=>c.category&&c.category.toLowerCase()!=='ppe').length,ppe:ppeItems,materials:allMats.length};
   let html='';
   // Stats
+  // Item Master banner
+  html+=`<div style="background:rgba(56,139,253,.07);border:1px solid rgba(56,139,253,.2);border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+    <i class="fas fa-book-open" style="color:var(--accent-blue);font-size:16px"></i>
+    <div style="flex:1"><div style="font-weight:700;font-size:12px">Item Master — Central Catalog</div>
+    <div style="font-size:11px;color:var(--text-secondary)">Define items here once. Enroll them into the Warehouse for stock tracking, or reference them in Procurement PRs/POs.</div></div>
+    <button class="btn btn-secondary btn-sm" onclick="navigate('warehouse')"><i class="fas fa-warehouse" style="margin-right:4px"></i>Go to Warehouse</button>
+  </div>`;
   html+=`<div class="grid grid-4" style="margin-bottom:12px">
-    ${sc('fas fa-warehouse','Total Items',totalItems,'All warehouse supply','#3fb950','rgba(63,185,80,.15)')}
-    ${sc('fas fa-exclamation-triangle','Low / Reorder',lowStock,'Action needed','#f85149','rgba(248,81,73,.15)')}
+    ${sc('fas fa-book-open','Catalog Items',totalItems,'Consumables + Materials','#3fb950','rgba(63,185,80,.15)')}
+    ${sc('fas fa-warehouse','In Warehouse',(AppState.data.warehouseItems||[]).filter(w=>!w._deleted).length,'Enrolled & stocked','#388bfd','rgba(56,139,253,.15)')}
     ${sc('fas fa-hard-hat','PPE Items',ppeItems,'Safety equipment','#f0a450','rgba(240,164,80,.15)')}
-    ${sc('fas fa-dollar-sign','Total Value',fmtNum(conVal+matVal),'Stock value','#388bfd','rgba(56,139,253,.15)')}
+    ${sc('fas fa-dollar-sign','Catalog Std Value',fmtNum(conVal+matVal),'Std cost reference','#bc8cff','rgba(188,140,255,.15)')}
   </div>`;
   // Sub-tabs
   html+=`<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
@@ -19933,6 +20029,7 @@ function renderMlWarehouse(){
       +'<td>'+mlInput(c.id,'consumables','supplier',c.supplier||'','min-width:110px')+'</td>'
       +'<td>'+mlSB(low?'low-stock':'in-stock')+'</td>'
       +'<td><div style="display:flex;flex-direction:column;gap:3px">'
+        +_imEnrollBtn(c.id,'consumables')
         +'<button class="btn btn-secondary btn-sm btn-icon" onclick="showEditConsumable(\''+c.id+'\')" title="Edit"><i class="fas fa-edit"></i></button>'
         +'<button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail(\''+c.id+'\',\'consumables\')" title="View attachments" style="position:relative"><i class="fas fa-paperclip"></i>'+(c.attachments&&c.attachments.length?'<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">'+c.attachments.length+'</span>':'')+'</button> '
         +'<button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlConsumable(\''+c.id+'\')"><i class="fas fa-trash"></i></button>'
@@ -19966,7 +20063,8 @@ function renderMlWarehouse(){
       +'<td><input class="form-input" type="date" value="'+(m.deliveryDate||'')+'" style="height:26px;font-size:11px;'+(isOverdue(m.deliveryDate)&&m.status!=='delivered'?'border-color:var(--accent-red);color:var(--accent-red)':'')+'" onchange="mlSaveMaterial(\''+m.id+'\',\'deliveryDate\',this.value)"></td>'
       +'<td><select class="form-select" style="height:30px;font-size:11px;min-width:90px" onchange="mlSaveMaterial(\''+m.id+'\',\'status\',this.value);setTimeout(renderMlWarehouse,700)">'+statOpts(m.status,_getDropdown('material_status'))+'</select></td>'
       +'<td><label class="toggle" style="width:36px;height:18px"><input type="checkbox" '+(m.critical?'checked':'')+' onchange="mlSaveMaterial(\''+m.id+'\',\'critical\',this.checked)"><span class="toggle-slider"></span></label> '+(m.critical?'<span class="badge badge-amber" style="font-size:9px">Critical</span>':'')+'</td>'
-      +'<td><div style="display:flex;gap:3px;position:relative">'
+      +'<td><div style="display:flex;gap:3px;position:relative;flex-wrap:wrap">'
+      +_imEnrollBtn(m.id,'materials')
       +'<button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail(\''+m.id+'\',\'materials\')" title="View attachments"><i class="fas fa-paperclip"></i>'+(m.attachments&&m.attachments.length?'<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">'+m.attachments.length+'</span>':'')+'</button>'
       +'<button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlMaterial(\''+m.id+'\')"><i class="fas fa-trash"></i></button>'
       +'</div></td>'
@@ -20154,8 +20252,43 @@ function saveMlMaterial(){
 }
 
 
+// ── ITEM MASTER → WAREHOUSE ENROLLMENT ────────────────────────
+function _imEnrollBtn(itemId, itemType){
+  const already=(AppState.data.warehouseItems||[]).some(w=>!w._deleted&&w.itemMasterId===itemId);
+  if(already)return`<button class="btn btn-secondary btn-sm btn-icon" title="Already in Warehouse" style="color:var(--accent-green)" onclick="navigate('warehouse')"><i class="fas fa-warehouse"></i></button>`;
+  return`<button class="btn btn-secondary btn-sm btn-icon" title="Enroll in Warehouse" style="color:var(--accent-blue)" onclick="_imEnrollInWarehouse('${itemId}','${itemType}')"><i class="fas fa-plus-circle"></i></button>`;
+}
+
+function _imEnrollInWarehouse(itemId, itemType){
+  const arr=itemType==='consumables'?AppState.data.consumables:AppState.data.materials;
+  const item=(arr||[]).find(i=>i.id===itemId);
+  if(!item){showToast('Item not found','error');return;}
+  if(!AppState.data.warehouseItems)AppState.data.warehouseItems=[];
+  if(AppState.data.warehouseItems.some(w=>!w._deleted&&w.itemMasterId===itemId)){showToast('Already enrolled in Warehouse','warning');return;}
+  const wh={
+    id:'WH-'+String((AppState.data.warehouseItems.length+1)).padStart(4,'0'),
+    itemMasterId:itemId,
+    itemMasterType:itemType,
+    name:item.name,
+    code:item.id,
+    category:item.category||'General',
+    unit:item.unit||'',
+    unitCost:item.unitCost||0,
+    minStock:item.minStock||0,
+    reorderPoint:item.reorderQty||item.minStock||0,
+    location:'',
+    description:item.notes||'',
+    qtyOnHand:0,qtyReserved:0,qtyAvailable:0,netIssued:0,
+    createdAt:new Date().toISOString(),
+  };
+  AppState.data.warehouseItems.push(wh);
+  AppState.save();
+  showToast(`"${item.name}" enrolled in Warehouse — add stock via Receive tab`,'success',4000);
+  renderMlWarehouse();
+}
+
 // ── EXCEL IMPORT ────────────────────────────────────────────
-// Alias used by Warehouse Supply tab buttons
+// Alias used by Item Master tab buttons
 function showMlImport(typeKey){ importExcel(typeKey); }
 
 function importExcel(typeKey){
