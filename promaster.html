@@ -8093,9 +8093,11 @@ function _projectReadiness(pid){
 
   // ── CHECK 6: Manpower Headcount ──────────────────────────
   const mpItems=manpower.map(m=>{
-    const ratio=m.plannedHeadcount>0?(m.actualHeadcount||0)/m.plannedHeadcount:1;
-    const st=ratio>=0.8?'go':ratio>=0.5?'warn':'fail';
-    return{name:`Week ${m.week||'?'} · ${m.trade||'General'}`,detail:`Planned: ${m.plannedHeadcount} · Actual: ${m.actualHeadcount||0} (${Math.round(ratio*100)}%)`,status:st,link:'manpower'};
+    const planned=m.planned||m.plannedHeadcount||0;
+    const actual=m.actual||m.actualHeadcount||0;
+    const ratio=planned>0?actual/planned:actual>0?1:0;
+    const st=planned===0?'warn':ratio>=0.8?'go':ratio>=0.5?'warn':'fail';
+    return{name:`Week ${m.week||'?'} · ${m.trade||'General'}`,detail:`Planned: ${planned} · Actual: ${actual} (${Math.round(ratio*100)}%)`,status:st,link:'manpower'};
   });
   const mpFail=mpItems.filter(i=>i.status==='fail').length;
   const mpWarn=mpItems.filter(i=>i.status==='warn').length;
