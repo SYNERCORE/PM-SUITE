@@ -693,6 +693,10 @@ const SHIC_LIST_CONFIG = {
   // High-volume logs
   'SHIC_UsageLogs':        { dataKey: 'resourceUsageLogs',   idField: 'LogId',     name: 'Usage Logs',        hasProject: true  },
   'SHIC_DailyLogs':        { dataKey: 'dailyMeetingLogs',    idField: 'LogId',     name: 'Daily Logs',        hasProject: true  },
+  // Warehouse
+  'SHIC_WhItems':          { dataKey: 'warehouseItems',      idField: 'ItemId',    name: 'Warehouse Items',   hasProject: false },
+  'SHIC_WhTransactions':   { dataKey: 'stockTransactions',   idField: 'TxId',      name: 'Stock Transactions',hasProject: true  },
+  'SHIC_WhRequests':       { dataKey: 'issuanceRequests',    idField: 'ReqId',     name: 'Issuance Requests', hasProject: true  },
   // Workflows & system
   'SHIC_IdChangeRequests': { dataKey: 'idChangeRequests',    idField: 'ReqId',     name: 'ID Change Requests',hasProject: false },
   'SHIC_DeletionRequests': { dataKey: 'deletionRequests',    idField: 'ReqId',     name: 'Deletion Requests', hasProject: false },
@@ -2842,7 +2846,8 @@ function _captureSyncedSnapshot() {
     'projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
     'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs',
     'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
-    'assetHistory','assetUtilization','idChangeRequests','notifications','projectIdHistory'
+    'assetHistory','assetUtilization','idChangeRequests','notifications','projectIdHistory',
+    'warehouseItems','stockTransactions','issuanceRequests'
   ];
   arrays.forEach(k => {
     const list = AppState.data[k] || [];
@@ -3051,7 +3056,8 @@ function _discardPendingChanges() {
   const arrays = ['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
     'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs',
     'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
-    'assetHistory','assetUtilization','idChangeRequests','notifications','activities','projectIdHistory'];
+    'assetHistory','assetUtilization','idChangeRequests','notifications','activities','projectIdHistory',
+    'warehouseItems','stockTransactions','issuanceRequests'];
   let removed = 0;
   arrays.forEach(k => {
     if (!AppState.data[k]) return;
@@ -5610,7 +5616,8 @@ async function spPushData(silent = false) {
         'consumables','materials','manpower','procurement','procurementLogs',
         'resourceAllocations','resourceUsageLogs','costs','qaqc','risks',
         'actions','documents','progress','kpiData','assetHistory',
-        'thirdParties','thirdParty','projectTeam','calendar','activities','notifications','trades'];
+        'thirdParties','thirdParty','projectTeam','calendar','activities','notifications','trades',
+        'warehouseItems','stockTransactions','issuanceRequests'];
       ARRAY_KEYS.forEach(key => {
         merged[key] = _spMergeArrays(
           AppState.data[key] || [],
