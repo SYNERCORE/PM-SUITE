@@ -593,7 +593,8 @@ async function _encryptAndStore(json) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ct = await crypto.subtle.encrypt({name:'AES-GCM',iv}, _cryptoKey, new TextEncoder().encode(json));
     const ivHex = Array.from(iv).map(b=>b.toString(16).padStart(2,'0')).join('');
-    const ctB64 = btoa(String.fromCharCode(...new Uint8Array(ct)));
+    const u8=new Uint8Array(ct);let bin='';for(let i=0;i<u8.length;i++)bin+=String.fromCharCode(u8[i]);
+    const ctB64 = btoa(bin);
     const enc = JSON.stringify({__enc:1,iv:ivHex,ct:ctB64});
     localStorage.setItem('pm_data', enc);
     localStorage.setItem('shic_data_backup', enc);
@@ -19525,7 +19526,831 @@ function _openRecentItem(r) {
 
 // ═══════════════════════════════════════════════════════════
 </script>
-<script src="src/js/views/warehouse.js"></script>
+<script>
+// ── WAREHOUSE MODULE ──────────────────────────────────────────
+// Items catalog + Stock Transactions + Issuance Requests
+
+// ── helpers ──────────────────────────────────────────────────
+function _whItems(){return(AppState.data.warehouseItems||[]).filter(i=>!i._deleted);}
+function _whTx(){return(AppState.data.stockTransactions||[]).filter(t=>!t._deleted);}
+function _whReq(){return(AppState.data.issuanceRequests||[]).filter(r=>!r._deleted);}
+
+// Recompute live qty fields for an item from its transactions
+function _whCalcQty(itemId){
+  const tx=_whTx().filter(t=>t.itemId===itemId);
+  const qtyOnHand=tx.reduce((s,t)=>{
+    if(t.type==='receive')return s+t.qty;
+    if(t.type==='issue')return s-t.qty;
+    if(t.type==='return')return s+t.qty;
+    if(t.type==='adjust')return s+t.qty; // adjust can be negative
+    return s;
+  },0);
+  const qtyReserved=( AppState.data.resourceAllocations||[]).filter(a=>!a._deleted&&a.resourceId===itemId&&(a.resourceType==='Material'||a.resourceType==='Consumable')).reduce((s,a)=>s+(a.allocatedQty||0),0);
+  const issued=tx.filter(t=>t.type==='issue').reduce((s,t)=>s+t.qty,0);
+  const returned=tx.filter(t=>t.type==='return').reduce((s,t)=>s+t.qty,0);
+  const netIssued=Math.max(0,issued-returned);
+  const qtyAvailable=Math.max(0,qtyOnHand-Math.max(0,qtyReserved-netIssued));
+  return{qtyOnHand:Math.max(0,qtyOnHand),qtyReserved:Math.max(0,qtyReserved),qtyAvailable,netIssued};
+}
+
+// Sync computed qty back to the item record (called on save)
+function _whSyncQty(itemId){
+  const idx=(AppState.data.warehouseItems||[]).findIndex(i=>i.id===itemId);
+  if(idx===-1)return;
+  const q=_whCalcQty(itemId);
+  Object.assign(AppState.data.warehouseItems[idx],q);
+}
+
+// Generate sequential IDs
+function _whNextId(prefix,arr){
+  const nums=(arr||[]).map(i=>{const m=i.id&&i.id.match(/(\d+)$/);return m?parseInt(m[1]):0;});
+  return prefix+String((Math.max(0,...nums)+1)).padStart(4,'0');
+}
+
+let _whTab='items', _whItemSearch='', _whItemCat='all', _whTxItemFilter='all', _whReqStatus='all';
+
+// ── MAIN RENDER ──────────────────────────────────────────────
+function renderWarehouse(){
+  _ensureWarehouseData();
+  const items=_whItems();
+  const tx=_whTx();
+  const reqs=_whReq();
+
+  // KPI strip
+  const totalItems=items.length;
+  const lowStock=items.filter(i=>{const q=_whCalcQty(i.id);return i.minStock>0&&q.qtyOnHand<=i.minStock;}).length;
+  const totalValue=items.reduce((s,i)=>{const q=_whCalcQty(i.id);return s+(q.qtyOnHand*(i.unitCost||0));},0);
+  const pendingReqs=reqs.filter(r=>r.status==='pending').length;
+  const todayTx=tx.filter(t=>t.date&&t.date.slice(0,10)===new Date().toISOString().slice(0,10)).length;
+
+  const tabs=[
+    {id:'items',   label:'Items',             icon:'fa-boxes',          count:totalItems},
+    {id:'receive', label:'Receive Stock',      icon:'fa-truck-loading',  count:null},
+    {id:'issue',   label:'Issue / Return',     icon:'fa-dolly',          count:null},
+    {id:'requests',label:'Issuance Requests',  icon:'fa-clipboard-list', count:pendingReqs||null},
+    {id:'ledger',  label:'Transaction Ledger', icon:'fa-list-alt',       count:null},
+  ];
+
+  $('#warehouse').innerHTML=`
+  <div class="section-header" style="margin-bottom:14px">
+    <div>
+      <div class="section-title"><i class="fas fa-warehouse" style="color:var(--accent-blue);margin-right:8px"></i>Warehouse</div>
+      <div class="section-sub">Stock management — receive, reserve, issue, return, and track all materials &amp; consumables</div>
+    </div>
+    <div style="display:flex;gap:7px">
+      <button class="btn btn-secondary btn-sm" onclick="_whExportItems()"><i class="fas fa-download"></i> Export</button>
+      <button class="btn btn-primary btn-sm" onclick="_whShowAddItem()"><i class="fas fa-plus"></i> Add Item</button>
+    </div>
+  </div>
+
+  <!-- KPI strip -->
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px">
+    ${[
+      ['fa-boxes','Items',totalItems,'var(--accent-blue)'],
+      ['fa-exclamation-circle','Low Stock',lowStock,'var(--accent-red)'],
+      ['fa-peso-sign','Inventory Value','₱'+fmtNum(totalValue),'var(--accent-green)'],
+      ['fa-clock','Pending Requests',pendingReqs,'var(--accent-amber)'],
+      ['fa-exchange-alt',"Today's Transactions",todayTx,'#39d3f2'],
+    ].map(([ic,l,v,c])=>`<div class="stat-card" style="border-left:3px solid ${c}">
+      <div class="stat-icon" style="background:${c}22"><i class="fas ${ic}" style="color:${c}"></i></div>
+      <div class="stat-info"><div class="label">${l}</div><div class="value" style="color:${c}">${v}</div></div>
+    </div>`).join('')}
+  </div>
+
+  <!-- Tabs -->
+  <div class="tab-bar" style="margin-bottom:14px">
+    ${tabs.map(t=>`<button class="tab-btn ${_whTab===t.id?'active':''}" onclick="_whSetTab('${t.id}')">
+      <i class="fas ${t.icon}"></i> ${t.label}
+      ${t.count?`<span class="nav-badge" style="position:static;margin-left:5px">${t.count}</span>`:''}
+    </button>`).join('')}
+  </div>
+  <div id="wh-tab-body"></div>`;
+
+  _whRenderTab();
+}
+
+function _whSetTab(t){_whTab=t;_whRenderTab();}
+
+function _whRenderTab(){
+  const el=$('#wh-tab-body');
+  if(!el)return;
+  if(_whTab==='items')   el.innerHTML=_whItemsHTML();
+  else if(_whTab==='receive') el.innerHTML=_whReceiveHTML();
+  else if(_whTab==='issue')   el.innerHTML=_whIssueHTML();
+  else if(_whTab==='requests')el.innerHTML=_whRequestsHTML();
+  else if(_whTab==='ledger')  el.innerHTML=_whLedgerHTML();
+}
+
+// ── TAB: ITEMS ────────────────────────────────────────────────
+function _whItemsHTML(){
+  const cats=['all',...new Set(_whItems().map(i=>i.category||'Uncategorized'))];
+  let items=_whItems();
+  if(_whItemCat!=='all')items=items.filter(i=>(i.category||'Uncategorized')===_whItemCat);
+  if(_whItemSearch)items=items.filter(i=>(i.name+' '+(i.code||'')+(i.location||'')).toLowerCase().includes(_whItemSearch.toLowerCase()));
+
+  const rows=items.map(item=>{
+    const q=_whCalcQty(item.id);
+    const low=item.minStock>0&&q.qtyOnHand<=item.minStock;
+    const stockColor=q.qtyAvailable<=0?'var(--accent-red)':low?'var(--accent-amber)':'var(--accent-green)';
+    const stockPct=item.minStock>0?Math.min(100,Math.round(q.qtyOnHand/item.minStock*100)):100;
+    return`<tr>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">${item.code||item.id}</td>
+      <td><div style="font-weight:600">${item.name}</div>
+        <div style="font-size:10px;color:var(--text-secondary)">${item.category||'—'} · ${item.location||'—'}</div>
+        ${item.itemMasterId?`<div style="font-size:9px;color:var(--accent-blue)"><i class="fas fa-link"></i> Item Master: ${item.itemMasterId}</div>`:''}
+      </td>
+      <td><span class="badge badge-blue" style="font-size:10px">${item.unit||'ea'}</span></td>
+      <td style="text-align:right;font-family:var(--font-mono)">
+        <div style="color:${stockColor};font-weight:700">${q.qtyOnHand}</div>
+        <div style="font-size:10px;color:var(--text-secondary)">on hand</div>
+      </td>
+      <td style="text-align:right;font-family:var(--font-mono)">
+        <div style="color:var(--accent-amber)">${q.qtyReserved}</div>
+        <div style="font-size:10px;color:var(--text-secondary)">reserved</div>
+      </td>
+      <td style="text-align:right;font-family:var(--font-mono)">
+        <div style="color:${q.qtyAvailable>0?'var(--accent-green)':'var(--accent-red)'};font-weight:700">${q.qtyAvailable}</div>
+        <div style="font-size:10px;color:var(--text-secondary)">available</div>
+      </td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:11px">₱${fmtNum(item.unitCost||0)}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--accent-green)">₱${fmtNum(q.qtyOnHand*(item.unitCost||0))}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="flex:1;height:5px;background:var(--bg-hover);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${stockPct}%;background:${stockColor};border-radius:3px;transition:.3s"></div>
+          </div>
+          ${low?`<i class="fas fa-exclamation-circle" style="color:var(--accent-red);font-size:11px" title="Low stock"></i>`:''}
+        </div>
+      </td>
+      <td>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-secondary btn-sm" style="padding:3px 7px" onclick="_whShowReceive('${item.id}')" title="Receive stock"><i class="fas fa-truck-loading" style="color:var(--accent-green)"></i></button>
+          <button class="btn btn-secondary btn-sm" style="padding:3px 7px" onclick="_whShowIssueItem('${item.id}')" title="Issue/Return"><i class="fas fa-dolly" style="color:var(--accent-amber)"></i></button>
+          <button class="btn btn-secondary btn-sm" style="padding:3px 7px" onclick="_whEditItem('${item.id}')" title="Edit"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-secondary btn-sm" style="padding:3px 7px" onclick="_whDeleteItem('${item.id}')" title="Delete"><i class="fas fa-trash" style="color:var(--accent-red)"></i></button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return`
+  <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+    <input class="form-control" style="flex:1;min-width:180px" placeholder="Search items, code, location…" value="${_whItemSearch}"
+      oninput="_whItemSearch=this.value;_whRenderTab()">
+    <select class="form-control" style="width:160px" onchange="_whItemCat=this.value;_whRenderTab()">
+      ${cats.map(c=>`<option value="${c}" ${_whItemCat===c?'selected':''}>${c==='all'?'All Categories':c}</option>`).join('')}
+    </select>
+  </div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th>Code</th><th>Item</th><th>Unit</th>
+      <th style="text-align:right">On Hand</th>
+      <th style="text-align:right">Reserved</th>
+      <th style="text-align:right">Available</th>
+      <th style="text-align:right">Unit Cost</th>
+      <th style="text-align:right">Total Value</th>
+      <th style="width:110px">Stock Level</th>
+      <th>Actions</th>
+    </tr></thead>
+    <tbody>${rows||`<tr><td colspan="10"><div class="empty-state"><i class="fas fa-boxes"></i><p>No items in warehouse. Click "Add Item" to start.</p></div></td></tr>`}</tbody>
+  </table>
+  </div>`;
+}
+
+// ── TAB: RECEIVE ─────────────────────────────────────────────
+function _whReceiveHTML(){
+  const recent=_whTx().filter(t=>t.type==='receive').sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,20);
+  return`
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px"><i class="fas fa-truck-loading" style="color:var(--accent-green);margin-right:6px"></i>Receive Goods</div>
+      <div class="form-group">
+        <label class="form-label">Item *</label>
+        <select class="form-control" id="wh-rcv-item">
+          <option value="">— Select Item —</option>
+          ${_whItems().map(i=>`<option value="${i.id}">${i.name} (${i.code||i.id})</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="form-group">
+          <label class="form-label">Quantity Received *</label>
+          <input class="form-control" type="number" min="0.01" step="0.01" id="wh-rcv-qty" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Unit Cost (₱)</label>
+          <input class="form-control" type="number" min="0" step="0.01" id="wh-rcv-cost" placeholder="0.00">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="form-group">
+          <label class="form-label">Date Received</label>
+          <input class="form-control" type="date" id="wh-rcv-date" value="${new Date().toISOString().slice(0,10)}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">PO / Delivery Ref</label>
+          <input class="form-control" id="wh-rcv-ref" placeholder="PO-0001 or DR#">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Supplier / Vendor</label>
+        <input class="form-control" id="wh-rcv-vendor" placeholder="Vendor name">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <textarea class="form-control" id="wh-rcv-notes" rows="2" placeholder="Lot number, condition, etc."></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="_whSaveReceive()"><i class="fas fa-save"></i> Post Receipt</button>
+    </div>
+    <div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px"><i class="fas fa-history" style="color:var(--text-secondary);margin-right:6px"></i>Recent Receipts</div>
+      ${recent.length?`<div style="display:flex;flex-direction:column;gap:6px">
+        ${recent.map(t=>{const item=_whItems().find(i=>i.id===t.itemId);return`
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--accent-green);border-radius:6px;padding:8px 12px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="font-weight:600;font-size:12px">${item?.name||t.itemId}</div>
+            <div style="font-family:var(--font-mono);color:var(--accent-green);font-size:13px;font-weight:700">+${t.qty} ${item?.unit||''}</div>
+          </div>
+          <div style="font-size:10px;color:var(--text-secondary)">${t.date||''} · ${t.vendor||'No vendor'} · ${t.ref||''}</div>
+        </div>`;}).join('')}
+      </div>`:`<div class="empty-state" style="padding:30px"><i class="fas fa-truck"></i><p>No receipts yet</p></div>`}
+    </div>
+  </div>`;
+}
+
+// ── TAB: ISSUE / RETURN ──────────────────────────────────────
+function _whIssueHTML(){
+  const recent=_whTx().filter(t=>t.type==='issue'||t.type==='return').sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,20);
+  const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='completed');
+  return`
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px"><i class="fas fa-dolly" style="color:var(--accent-amber);margin-right:6px"></i>Issue / Return Stock</div>
+      <div class="form-group">
+        <label class="form-label">Transaction Type *</label>
+        <select class="form-control" id="wh-iss-type">
+          <option value="issue">Issue (send to site)</option>
+          <option value="return">Return (back to warehouse)</option>
+          <option value="adjust">Adjustment (inventory correction)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Item *</label>
+        <select class="form-control" id="wh-iss-item" onchange="_whFillIssueInfo()">
+          <option value="">— Select Item —</option>
+          ${_whItems().map(i=>{const q=_whCalcQty(i.id);return`<option value="${i.id}">${i.name} (Avail: ${q.qtyAvailable} ${i.unit||''})</option>`;}).join('')}
+        </select>
+      </div>
+      <div id="wh-iss-stock-info" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:11px;display:none">
+        <div style="display:flex;gap:16px">
+          <span>On Hand: <strong id="wh-info-hand">—</strong></span>
+          <span>Reserved: <strong id="wh-info-res">—</strong></span>
+          <span>Available: <strong id="wh-info-avail" style="color:var(--accent-green)">—</strong></span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Project</label>
+        <select class="form-control" id="wh-iss-proj">
+          <option value="">— No project —</option>
+          ${projects.map(p=>`<option value="${p.id}">${p.id} — ${p.name||''}</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="form-group">
+          <label class="form-label">Quantity *</label>
+          <input class="form-control" type="number" min="0.01" step="0.01" id="wh-iss-qty" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Date</label>
+          <input class="form-control" type="date" id="wh-iss-date" value="${new Date().toISOString().slice(0,10)}">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Issued / Received By</label>
+        <input class="form-control" id="wh-iss-by" placeholder="Name" value="${AppState.currentUser?.displayName||''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes / Reference</label>
+        <textarea class="form-control" id="wh-iss-notes" rows="2" placeholder="Work order, location, reason…"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="_whSaveIssue()"><i class="fas fa-check"></i> Post Transaction</button>
+    </div>
+    <div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px"><i class="fas fa-history" style="color:var(--text-secondary);margin-right:6px"></i>Recent Issues / Returns</div>
+      ${recent.length?`<div style="display:flex;flex-direction:column;gap:6px">
+        ${recent.map(t=>{
+          const item=_whItems().find(i=>i.id===t.itemId);
+          const isReturn=t.type==='return';
+          const color=isReturn?'var(--accent-green)':t.type==='adjust'?'#39d3f2':'var(--accent-amber)';
+          const sign=isReturn?'+':t.type==='adjust'?(t.qty>=0?'+':''):'−';
+          return`<div style="background:var(--bg-card);border:1px solid var(--border);border-left:3px solid ${color};border-radius:6px;padding:8px 12px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div><span style="font-weight:600;font-size:12px">${item?.name||t.itemId}</span> <span style="font-size:10px;color:var(--text-secondary)">${t.projectId||''}</span></div>
+              <div style="font-family:var(--font-mono);color:${color};font-size:13px;font-weight:700">${sign}${t.qty} ${item?.unit||''}</div>
+            </div>
+            <div style="font-size:10px;color:var(--text-secondary)">${t.date||''} · ${t.issuedBy||t.by||''} · ${t.type.toUpperCase()}</div>
+          </div>`;}).join('')}
+      </div>`:`<div class="empty-state" style="padding:30px"><i class="fas fa-dolly"></i><p>No issue/return records yet</p></div>`}
+    </div>
+  </div>`;
+}
+
+function _whFillIssueInfo(){
+  const sel=$('#wh-iss-item');
+  const info=$('#wh-iss-stock-info');
+  if(!sel||!info)return;
+  const id=sel.value;
+  if(!id){info.style.display='none';return;}
+  const q=_whCalcQty(id);
+  const item=_whItems().find(i=>i.id===id);
+  $('#wh-info-hand').textContent=`${q.qtyOnHand} ${item?.unit||''}`;
+  $('#wh-info-res').textContent=`${q.qtyReserved} ${item?.unit||''}`;
+  const avEl=$('#wh-info-avail');
+  avEl.textContent=`${q.qtyAvailable} ${item?.unit||''}`;
+  avEl.style.color=q.qtyAvailable<=0?'var(--accent-red)':'var(--accent-green)';
+  info.style.display='block';
+}
+
+// ── TAB: ISSUANCE REQUESTS ───────────────────────────────────
+function _whRequestsHTML(){
+  const statuses=['all','pending','approved','rejected','released'];
+  let reqs=_whReq();
+  if(_whReqStatus!=='all')reqs=reqs.filter(r=>r.status===_whReqStatus);
+  reqs=reqs.sort((a,b)=>new Date(b.requestedAt)-new Date(a.requestedAt));
+
+  const statusColor={pending:'var(--accent-amber)',approved:'var(--accent-blue)',rejected:'var(--accent-red)',released:'var(--accent-green)'};
+  const rows=reqs.map(r=>{
+    const item=_whItems().find(i=>i.id===r.itemId);
+    const q=_whCalcQty(r.itemId);
+    const canApprove=isAdminUser()&&r.status==='pending';
+    const canRelease=isAdminUser()&&r.status==='approved';
+    return`<tr>
+      <td style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)">${r.id}</td>
+      <td><div style="font-weight:600;font-size:12px">${item?.name||r.itemId}</div><div style="font-size:10px;color:var(--text-secondary)">${item?.category||'—'}</div></td>
+      <td style="font-family:var(--font-mono);text-align:right">${r.qty} ${item?.unit||''}</td>
+      <td style="font-size:11px">${r.projectId||'—'}</td>
+      <td style="font-size:11px">${r.requestedBy||'—'}<div style="font-size:10px;color:var(--text-secondary)">${(r.requestedAt||'').slice(0,10)}</div></td>
+      <td style="font-size:11px">${r.reason||'—'}</td>
+      <td><span class="badge" style="background:${statusColor[r.status]||'#555'}22;color:${statusColor[r.status]||'#aaa'};border:1px solid ${statusColor[r.status]||'#555'}44;font-size:10px">${r.status}</span></td>
+      <td>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          ${canApprove?`<button class="btn btn-secondary btn-sm" style="padding:2px 7px;font-size:11px;color:var(--accent-green)" onclick="_whApproveReq('${r.id}',true)"><i class="fas fa-check"></i> Approve</button>
+          <button class="btn btn-secondary btn-sm" style="padding:2px 7px;font-size:11px;color:var(--accent-red)" onclick="_whApproveReq('${r.id}',false)"><i class="fas fa-times"></i> Reject</button>`:''}
+          ${canRelease?`<button class="btn btn-primary btn-sm" style="padding:2px 7px;font-size:11px" onclick="_whReleaseReq('${r.id}')"><i class="fas fa-dolly"></i> Release</button>`:''}
+          ${r.status==='released'?`<span style="font-size:10px;color:var(--text-secondary)">Released ${(r.releasedAt||'').slice(0,10)}</span>`:''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return`
+  <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+    <div style="flex:1;display:flex;gap:6px">
+      ${statuses.map(s=>`<button class="btn btn-sm ${_whReqStatus===s?'btn-primary':'btn-secondary'}" onclick="_whReqStatus='${s}';_whRenderTab()">${s==='all'?'All':s.charAt(0).toUpperCase()+s.slice(1)}</button>`).join('')}
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="_whShowAddRequest()"><i class="fas fa-plus"></i> New Request</button>
+  </div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>ID</th><th>Item</th><th style="text-align:right">Qty</th><th>Project</th><th>Requested By</th><th>Reason</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody>${rows||`<tr><td colspan="8"><div class="empty-state"><i class="fas fa-clipboard-list"></i><p>No issuance requests</p></div></td></tr>`}</tbody>
+  </table>
+  </div>`;
+}
+
+// ── TAB: LEDGER ──────────────────────────────────────────────
+function _whLedgerHTML(){
+  const all=_whTx().sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const items=_whItems();
+  const typeColor={receive:'var(--accent-green)',issue:'var(--accent-amber)',return:'var(--accent-blue)',adjust:'#39d3f2'};
+  const typeSign={receive:'+',issue:'−',return:'+',adjust:'±'};
+
+  let filterItem=_whTxItemFilter;
+  let shown=filterItem==='all'?all:all.filter(t=>t.itemId===filterItem);
+
+  const rows=shown.slice(0,100).map(t=>{
+    const item=items.find(i=>i.id===t.itemId);
+    const col=typeColor[t.type]||'#aaa';
+    const sign=t.type==='issue'?'−':'+';
+    return`<tr>
+      <td style="font-size:10px;color:var(--text-secondary);font-family:var(--font-mono)">${(t.date||'').slice(0,10)}</td>
+      <td><span class="badge" style="background:${col}22;color:${col};border:1px solid ${col}44;font-size:10px;text-transform:uppercase">${t.type}</span></td>
+      <td style="font-size:12px;font-weight:600">${item?.name||t.itemId}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-weight:700;color:${col}">${sign}${Math.abs(t.qty)} ${item?.unit||''}</td>
+      <td style="font-size:11px">${t.projectId||'—'}</td>
+      <td style="font-size:11px">${t.vendor||t.issuedBy||t.by||'—'}</td>
+      <td style="font-size:11px">${t.ref||'—'}</td>
+      <td style="font-size:11px;color:var(--text-secondary)">${t.notes||'—'}</td>
+    </tr>`;
+  }).join('');
+
+  return`
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <select class="form-control" style="width:220px" onchange="_whTxItemFilter=this.value;_whRenderTab()">
+      <option value="all">All Items</option>
+      ${items.map(i=>`<option value="${i.id}" ${filterItem===i.id?'selected':''}>${i.name}</option>`).join('')}
+    </select>
+    <button class="btn btn-secondary btn-sm" onclick="_whExportLedger()"><i class="fas fa-download"></i> Export Ledger</button>
+  </div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Date</th><th>Type</th><th>Item</th><th style="text-align:right">Qty</th><th>Project</th><th>Vendor / By</th><th>Reference</th><th>Notes</th></tr></thead>
+    <tbody>${rows||`<tr><td colspan="8"><div class="empty-state"><i class="fas fa-list-alt"></i><p>No transactions yet</p></div></td></tr>`}</tbody>
+  </table>
+  </div>
+  ${shown.length>100?`<div style="text-align:center;padding:10px;color:var(--text-secondary);font-size:12px">Showing 100 of ${shown.length} records</div>`:''}`;
+}
+
+// ── SAVE HELPERS ─────────────────────────────────────────────
+function _whSaveReceive(){
+  const itemId=$('#wh-rcv-item')?.value;
+  const qty=parseFloat($('#wh-rcv-qty')?.value||0);
+  const cost=parseFloat($('#wh-rcv-cost')?.value||0);
+  const date=$('#wh-rcv-date')?.value||new Date().toISOString().slice(0,10);
+  const ref=$('#wh-rcv-ref')?.value.trim();
+  const vendor=$('#wh-rcv-vendor')?.value.trim();
+  const notes=$('#wh-rcv-notes')?.value.trim();
+  if(!itemId){showToast('Select an item','error');return;}
+  if(!qty||qty<=0){showToast('Quantity must be > 0','error');return;}
+
+  if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
+  const tx={
+    id:_whNextId('TX-',AppState.data.stockTransactions),
+    itemId,type:'receive',qty,date,ref,vendor,notes,
+    by:AppState.currentUser?.displayName||'',
+    postedAt:new Date().toISOString(),
+  };
+  AppState.data.stockTransactions.push(tx);
+
+  // Update unit cost on item if provided
+  if(cost>0){
+    const idx=(AppState.data.warehouseItems||[]).findIndex(i=>i.id===itemId);
+    if(idx!==-1)AppState.data.warehouseItems[idx].unitCost=cost;
+  }
+  _whSyncQty(itemId);
+  AppState.save();
+  showToast('Receipt posted','success');
+  // clear form
+  ['wh-rcv-item','wh-rcv-qty','wh-rcv-cost','wh-rcv-ref','wh-rcv-vendor','wh-rcv-notes'].forEach(id=>{const el=$(`#${id}`);if(el)el.value=el.tagName==='SELECT'?'':'';});
+  _whRenderTab();
+}
+
+function _whSaveIssue(){
+  const type=$('#wh-iss-type')?.value||'issue';
+  const itemId=$('#wh-iss-item')?.value;
+  const projId=$('#wh-iss-proj')?.value;
+  const qty=parseFloat($('#wh-iss-qty')?.value||0);
+  const date=$('#wh-iss-date')?.value||new Date().toISOString().slice(0,10);
+  const by=$('#wh-iss-by')?.value.trim();
+  const notes=$('#wh-iss-notes')?.value.trim();
+  if(!itemId){showToast('Select an item','error');return;}
+  if(!qty||qty===0){showToast('Quantity must be non-zero','error');return;}
+
+  // For issue: check available
+  if(type==='issue'){
+    const q=_whCalcQty(itemId);
+    if(qty>q.qtyOnHand){showToast(`Only ${q.qtyOnHand} on hand — cannot issue ${qty}`,'error',4000);return;}
+  }
+
+  if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
+  const tx={
+    id:_whNextId('TX-',AppState.data.stockTransactions),
+    itemId,type,qty:(type==='adjust'&&$('#wh-iss-qty')?.value?.startsWith('-'))?-Math.abs(qty):qty,
+    projectId:projId||null,date,issuedBy:by,notes,
+    by:by,postedAt:new Date().toISOString(),
+  };
+  AppState.data.stockTransactions.push(tx);
+  _whSyncQty(itemId);
+  AppState.save();
+  showToast(`${type.charAt(0).toUpperCase()+type.slice(1)} posted`,'success');
+  ['wh-iss-item','wh-iss-proj','wh-iss-qty','wh-iss-notes'].forEach(id=>{const el=$(`#${id}`);if(el)el.value=el.tagName==='SELECT'?'':'';});
+  $('#wh-iss-stock-info').style.display='none';
+  _whRenderTab();
+}
+
+// ── ISSUANCE REQUEST ACTIONS ─────────────────────────────────
+function _whApproveReq(id, approved){
+  const req=(AppState.data.issuanceRequests||[]).find(r=>r.id===id);
+  if(!req)return;
+  req.status=approved?'approved':'rejected';
+  req.reviewedBy=AppState.currentUser?.displayName||'Admin';
+  req.reviewedAt=new Date().toISOString();
+  AppState.save();
+  showToast(approved?'Request approved':'Request rejected', approved?'success':'error');
+  _whRenderTab();
+}
+
+function _whReleaseReq(id){
+  const req=(AppState.data.issuanceRequests||[]).find(r=>r.id===id);
+  if(!req)return;
+  const q=_whCalcQty(req.itemId);
+  if(req.qty>q.qtyOnHand){showToast(`Only ${q.qtyOnHand} on hand — cannot release ${req.qty}`,'error',4000);return;}
+  // Post the issue transaction
+  if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
+  const tx={
+    id:_whNextId('TX-',AppState.data.stockTransactions),
+    itemId:req.itemId,type:'issue',qty:req.qty,
+    projectId:req.projectId||null,
+    date:new Date().toISOString().slice(0,10),
+    issuedBy:AppState.currentUser?.displayName||'',
+    by:AppState.currentUser?.displayName||'',
+    ref:'REQ-'+req.id,
+    notes:`Released from request ${req.id}`,
+    postedAt:new Date().toISOString(),
+  };
+  AppState.data.stockTransactions.push(tx);
+  _whSyncQty(req.itemId);
+  req.status='released';
+  req.releasedBy=AppState.currentUser?.displayName||'';
+  req.releasedAt=new Date().toISOString();
+  AppState.save();
+  showToast('Stock released to project','success');
+  _whRenderTab();
+}
+
+// ── ADD ITEM MODAL ───────────────────────────────────────────
+function _whPickFromMaster(){
+  const mats=(AppState.data.materials||[]).filter(m=>!m._deleted);
+  const cons=(AppState.data.consumables||[]).filter(c=>!c._deleted);
+  const enrolled=new Set((AppState.data.warehouseItems||[]).filter(w=>!w._deleted).map(w=>w.itemMasterId).filter(Boolean));
+  const all=[...mats.map(m=>({...m,_type:'materials'})),...cons.map(c=>({...c,_type:'consumables'}))];
+  const html=`
+  <div class="modal-overlay active" id="whMasterPickModal" onclick="if(event.target===this)closeModal('whMasterPickModal')">
+    <div class="modal" style="max-width:540px">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fas fa-book-open" style="color:var(--accent-blue);margin-right:8px"></i>Pick from Item Master</div>
+        <button class="modal-close" onclick="closeModal('whMasterPickModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <input class="form-control" placeholder="Search items…" oninput="
+          const q=this.value.toLowerCase();
+          document.querySelectorAll('#whMasterList .im-row').forEach(r=>{r.style.display=r.dataset.name.includes(q)?'':'none';});
+        " style="margin-bottom:10px">
+        <div id="whMasterList" style="max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+          ${all.length?all.map(item=>{
+            const inWh=enrolled.has(item.id);
+            return`<div class="im-row" data-name="${(item.name||'').toLowerCase()}" style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;${inWh?'opacity:.5':'cursor:pointer'}" ${!inWh?`onclick="_whEnrollFromPicker('${item.id}','${item._type}')"`:'title="Already in Warehouse"'}>
+              <div style="flex:1">
+                <div style="font-weight:600;font-size:12px">${item.name}</div>
+                <div style="font-size:10px;color:var(--text-secondary)">${item.id} · ${item.category||'—'} · ${item.unit||'—'} · Std Cost: ₱${fmtNum(item.unitCost||0)}</div>
+              </div>
+              ${inWh?'<span style="font-size:10px;color:var(--accent-green)"><i class="fas fa-check"></i> In Warehouse</span>':'<span style="font-size:10px;color:var(--accent-blue)"><i class="fas fa-plus"></i> Enroll</span>'}
+            </div>`;
+          }).join(''):`<div class="empty-state" style="padding:24px"><i class="fas fa-book-open"></i><p>No items in Item Master yet.<br>Add materials or consumables in Asset Masterlist first.</p></div>`}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('whMasterPickModal')">Close</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+
+function _whEnrollFromPicker(itemId, itemType){
+  const arr=itemType==='consumables'?AppState.data.consumables:AppState.data.materials;
+  const item=(arr||[]).find(i=>i.id===itemId);
+  if(!item)return;
+  if(!AppState.data.warehouseItems)AppState.data.warehouseItems=[];
+  if(AppState.data.warehouseItems.some(w=>!w._deleted&&w.itemMasterId===itemId)){showToast('Already enrolled','warning');return;}
+  const wh={
+    id:'WH-'+String((AppState.data.warehouseItems.length+1)).padStart(4,'0'),
+    itemMasterId:itemId,itemMasterType:itemType,
+    name:item.name,code:item.id,
+    category:item.category||'General',unit:item.unit||'',
+    unitCost:item.unitCost||0,
+    minStock:item.minStock||0,reorderPoint:item.reorderQty||item.minStock||0,
+    location:'',description:item.notes||'',
+    qtyOnHand:0,qtyReserved:0,qtyAvailable:0,netIssued:0,
+    createdAt:new Date().toISOString(),
+  };
+  AppState.data.warehouseItems.push(wh);
+  AppState.save();
+  closeModal('whMasterPickModal');
+  showToast(`"${item.name}" enrolled — now add opening stock via Receive tab`,'success',4000);
+  _whRenderTab();
+}
+
+function _whShowAddItem(editId){
+  const existing=editId?(_whItems().find(i=>i.id===editId)||null):null;
+  const cats=['Materials','Consumables','Spare Parts','Chemicals','Office Supplies','Safety Equipment','Other'];
+  const linkedMaster=existing?.itemMasterId?(()=>{
+    const arr=existing.itemMasterType==='consumables'?AppState.data.consumables:AppState.data.materials;
+    return (arr||[]).find(i=>i.id===existing.itemMasterId);
+  })():null;
+  const html=`
+  <div class="modal-overlay active" id="whItemModal" onclick="if(event.target===this)closeModal('whItemModal')">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-header">
+        <div class="modal-title">${existing?'Edit Warehouse Item':'Add Warehouse Item'}</div>
+        <button class="modal-close" onclick="closeModal('whItemModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        ${!existing?`<div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;padding:8px 12px;background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.2);border-radius:6px">
+          <i class="fas fa-book-open" style="color:var(--accent-blue)"></i>
+          <span style="font-size:12px;flex:1">Pick from Item Master to link this warehouse record to the catalog.</span>
+          <button class="btn btn-secondary btn-sm" onclick="closeModal('whItemModal');_whPickFromMaster()"><i class="fas fa-search"></i> Pick from Item Master</button>
+        </div>`:''}
+        ${linkedMaster?`<div style="padding:8px 12px;background:rgba(63,185,80,.08);border:1px solid rgba(63,185,80,.2);border-radius:6px;margin-bottom:10px;font-size:11px">
+          <i class="fas fa-link" style="color:var(--accent-green);margin-right:6px"></i>Linked to Item Master: <strong>${linkedMaster.name}</strong> (${existing.itemMasterId})
+        </div>`:''}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="grid-column:1/-1">
+            <label class="form-label">Item Name *</label>
+            <input class="form-control" id="wh-add-name" placeholder="e.g. Portland Cement Type I" value="${existing?.name||''}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Item Code</label>
+            <input class="form-control" id="wh-add-code" placeholder="MAT-001" value="${existing?.code||''}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Category *</label>
+            <select class="form-control" id="wh-add-cat">
+              ${cats.map(c=>`<option ${(existing?.category||'Materials')===c?'selected':''}>${c}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Unit of Measure *</label>
+            <input class="form-control" id="wh-add-unit" placeholder="bag, ltr, pcs, m, kg…" value="${existing?.unit||''}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Unit Cost (₱)</label>
+            <input class="form-control" type="number" min="0" step="0.01" id="wh-add-cost" placeholder="0.00" value="${existing?.unitCost||''}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Min Stock Level</label>
+            <input class="form-control" type="number" min="0" id="wh-add-min" placeholder="0 = no alert" value="${existing?.minStock||''}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Reorder Point</label>
+            <input class="form-control" type="number" min="0" id="wh-add-reorder" placeholder="0" value="${existing?.reorderPoint||''}">
+          </div>
+          <div class="form-group" style="grid-column:1/-1">
+            <label class="form-label">Storage Location</label>
+            <input class="form-control" id="wh-add-loc" placeholder="Bin A-3, Rack 2, Storage Room B…" value="${existing?.location||''}">
+          </div>
+          <div class="form-group" style="grid-column:1/-1">
+            <label class="form-label">Description / Specs</label>
+            <textarea class="form-control" id="wh-add-desc" rows="2" placeholder="Specifications, brand, notes…">${existing?.description||''}</textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('whItemModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="_whSaveItem('${editId||''}')"><i class="fas fa-save"></i> Save Item</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+
+function _whSaveItem(editId){
+  const name=$('#wh-add-name')?.value.trim();
+  if(!name){showToast('Item name required','error');return;}
+  if(!AppState.data.warehouseItems)AppState.data.warehouseItems=[];
+  const now=new Date().toISOString();
+  if(editId){
+    const idx=AppState.data.warehouseItems.findIndex(i=>i.id===editId);
+    if(idx!==-1){
+      Object.assign(AppState.data.warehouseItems[idx],{
+        name,code:$('#wh-add-code')?.value.trim(),
+        category:$('#wh-add-cat')?.value,unit:$('#wh-add-unit')?.value.trim(),
+        unitCost:parseFloat($('#wh-add-cost')?.value||0),
+        minStock:parseFloat($('#wh-add-min')?.value||0),
+        reorderPoint:parseFloat($('#wh-add-reorder')?.value||0),
+        location:$('#wh-add-loc')?.value.trim(),
+        description:$('#wh-add-desc')?.value.trim(),
+        updatedAt:now,
+      });
+    }
+  } else {
+    const id=_whNextId('WH-',AppState.data.warehouseItems);
+    AppState.data.warehouseItems.push({
+      id,name,code:$('#wh-add-code')?.value.trim(),
+      category:$('#wh-add-cat')?.value,unit:$('#wh-add-unit')?.value.trim(),
+      unitCost:parseFloat($('#wh-add-cost')?.value||0),
+      minStock:parseFloat($('#wh-add-min')?.value||0),
+      reorderPoint:parseFloat($('#wh-add-reorder')?.value||0),
+      location:$('#wh-add-loc')?.value.trim(),
+      description:$('#wh-add-desc')?.value.trim(),
+      qtyOnHand:0,qtyReserved:0,qtyAvailable:0,netIssued:0,
+      createdAt:now,updatedAt:now,
+    });
+  }
+  AppState.save();
+  closeModal('whItemModal');
+  showToast(editId?'Item updated':'Item added','success');
+  _whRenderTab();
+}
+
+function _whEditItem(id){_whShowAddItem(id);}
+
+function _whDeleteItem(id){
+  if(!confirm('Delete this warehouse item? This will not delete its transaction history.'))return;
+  const idx=(AppState.data.warehouseItems||[]).findIndex(i=>i.id===id);
+  if(idx!==-1){AppState.data.warehouseItems[idx]._deleted=true;}
+  AppState.save();showToast('Item removed','success');_whRenderTab();
+}
+
+// ── ADD ISSUANCE REQUEST ─────────────────────────────────────
+function _whShowAddRequest(){
+  const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='completed');
+  const html=`
+  <div class="modal-overlay active" id="whReqModal" onclick="if(event.target===this)closeModal('whReqModal')">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <div class="modal-title">New Issuance Request</div>
+        <button class="modal-close" onclick="closeModal('whReqModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Item *</label>
+          <select class="form-control" id="whr-item">
+            <option value="">— Select Item —</option>
+            ${_whItems().map(i=>{const q=_whCalcQty(i.id);return`<option value="${i.id}">${i.name} · Avail: ${q.qtyAvailable} ${i.unit||''}</option>`;}).join('')}
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="form-group">
+            <label class="form-label">Quantity Requested *</label>
+            <input class="form-control" type="number" min="0.01" step="0.01" id="whr-qty" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Date Needed</label>
+            <input class="form-control" type="date" id="whr-date" value="${new Date().toISOString().slice(0,10)}">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Project</label>
+          <select class="form-control" id="whr-proj">
+            <option value="">— No project —</option>
+            ${projects.map(p=>`<option value="${p.id}">${p.id} — ${p.name||''}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Requested By</label>
+          <input class="form-control" id="whr-by" value="${AppState.currentUser?.displayName||''}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Purpose / Reason *</label>
+          <textarea class="form-control" id="whr-reason" rows="2" placeholder="Why is this item needed?"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('whReqModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="_whSaveRequest()"><i class="fas fa-paper-plane"></i> Submit Request</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+
+function _whSaveRequest(){
+  const itemId=$('#whr-item')?.value;
+  const qty=parseFloat($('#whr-qty')?.value||0);
+  const reason=$('#whr-reason')?.value.trim();
+  if(!itemId){showToast('Select an item','error');return;}
+  if(!qty||qty<=0){showToast('Quantity must be > 0','error');return;}
+  if(!reason){showToast('Please state the reason/purpose','error');return;}
+  if(!AppState.data.issuanceRequests)AppState.data.issuanceRequests=[];
+  const req={
+    id:_whNextId('REQ-',AppState.data.issuanceRequests),
+    itemId,qty,
+    projectId:$('#whr-proj')?.value||null,
+    requestedBy:$('#whr-by')?.value.trim(),
+    dateNeeded:$('#whr-date')?.value,
+    reason,status:'pending',
+    requestedAt:new Date().toISOString(),
+  };
+  AppState.data.issuanceRequests.push(req);
+  AppState.save();
+  closeModal('whReqModal');
+  showToast('Request submitted — awaiting approval','success');
+  _whRenderTab();
+}
+
+// ── QUICK ACTIONS (from items tab) ───────────────────────────
+function _whShowReceive(itemId){_whTab='receive';_whRenderTab();setTimeout(()=>{const el=$('#wh-rcv-item');if(el){el.value=itemId;}},50);}
+function _whShowIssueItem(itemId){_whTab='issue';_whRenderTab();setTimeout(()=>{const el=$('#wh-iss-item');if(el){el.value=itemId;_whFillIssueInfo();}},50);}
+
+// ── EXPORT HELPERS ───────────────────────────────────────────
+function _whExportItems(){
+  const rows=_whItems().map(i=>{const q=_whCalcQty(i.id);return[i.id,i.code||'',i.name,i.category||'',i.unit||'',q.qtyOnHand,q.qtyReserved,q.qtyAvailable,i.unitCost||0,q.qtyOnHand*(i.unitCost||0),i.minStock||0,i.location||'',i.description||''];});
+  exportCSV(rows,['ID','Code','Name','Category','Unit','OnHand','Reserved','Available','UnitCost','TotalValue','MinStock','Location','Description'],'warehouse_items.csv');
+}
+function _whExportLedger(){
+  const rows=_whTx().map(t=>{const item=_whItems().find(i=>i.id===t.itemId);return[t.id,t.date||'',t.type,item?.name||t.itemId,t.qty,t.projectId||'',t.vendor||t.issuedBy||'',t.ref||'',t.notes||''];});
+  exportCSV(rows,['TxID','Date','Type','Item','Qty','Project','Vendor/By','Reference','Notes'],'warehouse_ledger.csv');
+}
+
+// ── DATA INITIALISER ─────────────────────────────────────────
+function _ensureWarehouseData(){
+  if(!AppState.data.warehouseItems)AppState.data.warehouseItems=[];
+  if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
+  if(!AppState.data.issuanceRequests)AppState.data.issuanceRequests=[];
+}
+
+</script>
 <script>
 function renderMasterlist(){
   const d=AppState.data;
