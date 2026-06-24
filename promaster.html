@@ -12562,6 +12562,10 @@ function renderGantt(){
         if(!predPos)return;
 
         let sx,sy,ex,ey;
+        // Use bar edges + a small vertical offset so the line exits/enters at the edge of the bar
+        // rather than its center — this prevents crossing through bars
+        const halfH = TASK_H / 2;
+        const gap = 5; // clearance in px past the bar edge before routing vertically
         switch(pr.type){
           case 'SS': sx=predPos.leftX;  sy=predPos.y; ex=succPos.leftX;  ey=succPos.y; break;
           case 'FF': sx=predPos.rightX; sy=predPos.y; ex=succPos.rightX; ey=succPos.y; break;
@@ -12575,10 +12579,26 @@ function renderGantt(){
         const color=isCritArrow?'#f85149':'#8b949e';
         const marker=isCritArrow?'url(#rArr)':'url(#gArr)';
 
-        const mx=(sx+ex)/2;
-        paths+=`<path d="M${sx.toFixed(1)},${sy.toFixed(1)} H${mx.toFixed(1)} V${ey.toFixed(1)} H${ex.toFixed(1)}"
-          stroke="${color}" stroke-width="1.5" fill="none" opacity="0.75" stroke-dasharray="5,3"
-          marker-end="${marker}"/>`;
+        // Proper elbow routing: exit right of predecessor → step right by gap →
+        // travel vertically between rows → step left to successor start
+        // The vertical leg stays at (sx + gap) so it clears the predecessor bar edge
+        // and avoids cutting through any task bars in between rows.
+        const vx = sx + gap; // vertical routing lane X (just past predecessor right edge)
+        const midY = ey > sy
+          ? ey - halfH - 2   // going down: enter row from the top edge
+          : ey + halfH + 2;  // going up: enter row from the bottom edge
+
+        // If source and target are on the same row, fall back to simple horizontal line
+        if(Math.abs(sy - ey) < 2){
+          paths+=`<path d="M${sx.toFixed(1)},${sy.toFixed(1)} H${ex.toFixed(1)}"
+            stroke="${color}" stroke-width="1.5" fill="none" opacity="0.75" stroke-dasharray="5,3"
+            marker-end="${marker}"/>`;
+        } else {
+          // M start → short hop right → vertical lane → approach target row → arrive at target
+          paths+=`<path d="M${sx.toFixed(1)},${sy.toFixed(1)} H${vx.toFixed(1)} V${midY.toFixed(1)} H${ex.toFixed(1)} V${ey.toFixed(1)}"
+            stroke="${color}" stroke-width="1.5" fill="none" opacity="0.75" stroke-dasharray="5,3"
+            marker-end="${marker}"/>`;
+        }
       });
     });
 
