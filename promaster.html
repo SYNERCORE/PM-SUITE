@@ -10079,6 +10079,7 @@ function saveUsageLog(){
   }
 
   if(!AppState.data.resourceUsageLogs)AppState.data.resourceUsageLogs=[];
+  if(txType==='Issue'&&!AppState.data.issuanceRequests)AppState.data.issuanceRequests=[];
   lines.forEach(line=>{
     const qty=parseFloat(line.qty);
     const allocId=line.allocId||'';
@@ -10107,11 +10108,35 @@ function saveUsageLog(){
                -allLogs.filter(l=>l.transactionType==='Return').reduce((s,l)=>s+l.quantity,0);
       a.actualCost=Math.round(net*cpu);
     }
+    // Push issuance request to warehouse for every Issue line
+    if(txType==='Issue'){
+      const resourceId=line.resource.id||'';
+      const whItem=(typeof _whItems==='function')?_whItems().find(w=>w.id===resourceId||(w.itemMasterId&&w.itemMasterId===resourceId)):null;
+      AppState.data.issuanceRequests.push({
+        id:_whNextId('REQ-',AppState.data.issuanceRequests),
+        itemId:whItem?whItem.id:null,
+        description:line.resource.name||'',
+        resourceId,
+        resourceType:line.resource.type||'',
+        unit:log.unit,
+        qty,
+        projectId:pid,
+        requestedBy:issuedTo||AppState.currentUser?.displayName||'',
+        approvedBy,reference,
+        dateNeeded:date,
+        reason:notes||`Issued from project ${pid}`,
+        category:line.category,
+        status:'pending',
+        requestedAt:new Date().toISOString(),
+        sourceLog:log.id,
+      });
+    }
   });
 
   AppState.save();closeModal('genericModal');renderDetailAllocation();
   const varCount=lines.filter(l=>l.category!=='Budgeted').length;
-  showToast(`${lines.length} ${txType} line${lines.length!==1?'s':''} saved`+(varCount?` · ${varCount} variation${varCount!==1?'s':''}`:``),txType==='Return'?'warning':'success');
+  const reqMsg=txType==='Issue'?` · ${lines.length} WH request${lines.length!==1?'s':''} submitted`:'';
+  showToast(`${lines.length} ${txType} line${lines.length!==1?'s':''} saved`+(varCount?` · ${varCount} variation${varCount!==1?'s':''}`:``)+reqMsg,txType==='Return'?'warning':'success');
 }
 
 function deleteUsageLog(id){
@@ -20137,31 +20162,54 @@ function _whFillIssueInfo(){} // kept for backward compat
 
 // ── TAB: ISSUANCE REQUESTS ───────────────────────────────────
 function _whRequestsHTML(){
-  const statuses=['all','pending','approved','rejected','released'];
+  const statuses=['all','pending','approved','rejected','pr_started','released'];
   let reqs=_whReq();
   if(_whReqStatus!=='all')reqs=reqs.filter(r=>r.status===_whReqStatus);
   reqs=reqs.sort((a,b)=>new Date(b.requestedAt)-new Date(a.requestedAt));
 
-  const statusColor={pending:'var(--accent-amber)',approved:'var(--accent-blue)',rejected:'var(--accent-red)',released:'var(--accent-green)'};
+  const statusColor={pending:'var(--accent-amber)',approved:'var(--accent-blue)',rejected:'var(--accent-red)',released:'var(--accent-green)',pr_started:'#bc8cff'};
+  const statusLabel={pending:'Pending',approved:'Approved',rejected:'Rejected',released:'Released',pr_started:'PR Started'};
   const rows=reqs.map(r=>{
     const item=_whItems().find(i=>i.id===r.itemId);
-    const q=_whCalcQty(r.itemId);
+    const isStock=!!item;
+    const displayName=item?.name||r.description||r.itemId||'—';
+    const displayCat=item?.category||r.resourceType||'—';
+    const q=isStock?_whCalcQty(r.itemId):{qtyOnHand:0,qtyAvailable:0};
+    const hasStock=isStock&&q.qtyAvailable>=r.qty;
     const canApprove=isAdminUser()&&r.status==='pending';
-    const canRelease=isAdminUser()&&r.status==='approved';
+    const canRelease=isAdminUser()&&r.status==='approved'&&isStock&&hasStock;
+    const canStartPR=isAdminUser()&&(r.status==='pending'||r.status==='approved')&&!r.prId;
+    const sc=statusColor[r.status]||'#555';
     return`<tr>
-      <td style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)">${r.id}</td>
-      <td><div style="font-weight:600;font-size:12px">${item?.name||r.itemId}</div><div style="font-size:10px;color:var(--text-secondary)">${item?.category||'—'}</div></td>
-      <td style="font-family:var(--font-mono);text-align:right">${r.qty} ${item?.unit||''}</td>
+      <td style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)">
+        ${r.id}
+        ${r.sourceLog?`<div style="font-size:9px;color:var(--accent-blue);margin-top:2px"><i class="fas fa-link" style="margin-right:3px"></i>${r.sourceLog}</div>`:''}
+      </td>
+      <td>
+        <div style="font-weight:600;font-size:12px">${displayName}</div>
+        <div style="font-size:10px;color:var(--text-secondary);display:flex;gap:6px;flex-wrap:wrap;margin-top:1px">
+          <span>${displayCat}</span>
+          ${isStock?`<span style="color:${hasStock?'var(--accent-green)':'var(--accent-red)'}">● ${q.qtyAvailable} avail</span>`:`<span style="color:var(--accent-amber)">● Not in stock</span>`}
+        </div>
+      </td>
+      <td style="font-family:var(--font-mono);text-align:right">${r.qty} ${r.unit||item?.unit||''}</td>
       <td style="font-size:11px">${r.projectId||'—'}</td>
       <td style="font-size:11px">${r.requestedBy||'—'}<div style="font-size:10px;color:var(--text-secondary)">${(r.requestedAt||'').slice(0,10)}</div></td>
-      <td style="font-size:11px">${r.reason||'—'}</td>
-      <td><span class="badge" style="background:${statusColor[r.status]||'#555'}22;color:${statusColor[r.status]||'#aaa'};border:1px solid ${statusColor[r.status]||'#555'}44;font-size:10px">${r.status}</span></td>
+      <td style="font-size:11px;max-width:140px;white-space:normal">${r.reason||'—'}</td>
+      <td>
+        <span class="badge" style="background:${sc}22;color:${sc};border:1px solid ${sc}44;font-size:10px">
+          ${statusLabel[r.status]||r.status}
+        </span>
+        ${r.prId?`<div style="font-size:9px;color:#bc8cff;margin-top:2px"><i class="fas fa-file-alt" style="margin-right:3px"></i>${r.prId}</div>`:''}
+      </td>
       <td>
         <div style="display:flex;gap:4px;flex-wrap:wrap">
-          ${canApprove?`<button class="btn btn-secondary btn-sm" style="padding:2px 7px;font-size:11px;color:var(--accent-green)" onclick="_whApproveReq('${r.id}',true)"><i class="fas fa-check"></i> Approve</button>
+          ${canApprove&&isStock?`<button class="btn btn-secondary btn-sm" style="padding:2px 7px;font-size:11px;color:var(--accent-green)" onclick="_whApproveReq('${r.id}',true)"><i class="fas fa-check"></i> Approve</button>
           <button class="btn btn-secondary btn-sm" style="padding:2px 7px;font-size:11px;color:var(--accent-red)" onclick="_whApproveReq('${r.id}',false)"><i class="fas fa-times"></i> Reject</button>`:''}
           ${canRelease?`<button class="btn btn-primary btn-sm" style="padding:2px 7px;font-size:11px" onclick="_whReleaseReq('${r.id}')"><i class="fas fa-dolly"></i> Release</button>`:''}
+          ${canStartPR?`<button class="btn btn-secondary btn-sm" style="padding:2px 7px;font-size:11px;color:#bc8cff" onclick="_whStartPR('${r.id}')"><i class="fas fa-file-purchase"></i> Start PR</button>`:''}
           ${r.status==='released'?`<span style="font-size:10px;color:var(--text-secondary)">Released ${(r.releasedAt||'').slice(0,10)}</span>`:''}
+          ${r.status==='rejected'?`<span style="font-size:10px;color:var(--accent-red)">${(r.reviewedAt||'').slice(0,10)}</span>`:''}
         </div>
       </td>
     </tr>`;
@@ -20169,14 +20217,14 @@ function _whRequestsHTML(){
 
   return`
   <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
-    <div style="flex:1;display:flex;gap:6px">
-      ${statuses.map(s=>`<button class="btn btn-sm ${_whReqStatus===s?'btn-primary':'btn-secondary'}" onclick="_whReqStatus='${s}';_whRenderTab()">${s==='all'?'All':s.charAt(0).toUpperCase()+s.slice(1)}</button>`).join('')}
+    <div style="flex:1;display:flex;gap:6px;flex-wrap:wrap">
+      ${statuses.map(s=>`<button class="btn btn-sm ${_whReqStatus===s?'btn-primary':'btn-secondary'}" onclick="_whReqStatus='${s}';_whRenderTab()">${s==='all'?'All':(statusLabel[s]||s)}</button>`).join('')}
     </div>
     <button class="btn btn-primary btn-sm" onclick="_whShowAddRequest()"><i class="fas fa-plus"></i> New Request</button>
   </div>
   <div class="table-wrap">
   <table>
-    <thead><tr><th>ID</th><th>Item</th><th style="text-align:right">Qty</th><th>Project</th><th>Requested By</th><th>Reason</th><th>Status</th><th>Actions</th></tr></thead>
+    <thead><tr><th>ID</th><th>Item / Description</th><th style="text-align:right">Qty</th><th>Project</th><th>Requested By</th><th>Reason</th><th>Status</th><th>Actions</th></tr></thead>
     <tbody>${rows||`<tr><td colspan="8"><div class="empty-state"><i class="fas fa-clipboard-list"></i><p>No issuance requests</p></div></td></tr>`}</tbody>
   </table>
   </div>`;
@@ -20359,6 +20407,34 @@ function _whReleaseReq(id){
   AppState.save();
   showToast('Stock released to project','success');
   _whRenderTab();
+}
+
+function _whStartPR(reqId){
+  const req=(AppState.data.issuanceRequests||[]).find(r=>r.id===reqId);
+  if(!req){showToast('Request not found','error');return;}
+  if(req.prId){showToast(`PR ${req.prId} already exists for this request`,'warning',4000);return;}
+  if(!AppState.data.procurement)AppState.data.procurement=[];
+  const prId='PR-'+Date.now().toString().slice(-6);
+  const cat=(req.resourceType==='Material'||req.resourceType==='Materials')?'Materials':(req.resourceType==='Consumable'||req.resourceType==='Consumables')?'Consumables':'Materials';
+  AppState.data.procurement.push({
+    id:prId,
+    description:req.description||req.resourceId||'',
+    category:cat,
+    projectId:req.projectId||'',
+    budgetAmount:0,amount:0,
+    status:'draft',
+    requestedBy:req.requestedBy||AppState.currentUser?.displayName||'',
+    notes:`From Issuance Request ${req.id}${req.reason?': '+req.reason:''}`,
+    itemMasterId:req.itemMasterId||null,
+    issuanceRequestId:req.id,
+    prDate:new Date().toISOString().slice(0,10),
+    attachments:[],
+  });
+  req.status='pr_started';
+  req.prId=prId;
+  AppState.save();
+  showToast(`PR ${prId} created — complete it in Procurement`,'success',5000);
+  navigateTo('procurement');
 }
 
 // ── ADD ITEM MODAL ───────────────────────────────────────────
