@@ -6852,6 +6852,31 @@ ${projects.filter(p=>p.status!=='completed').map(p=>`
 <div class="progress-bar" style="height:6px"><div class="progress-fill" style="width:${p.progress}%;background:${pColor(p.progress)}"></div></div>
 </div>`).join('')}</div></div>
 </div>
+${(()=>{
+  const activeProjs=projects.filter(p=>p.status==='active');
+  if(!activeProjs.length)return'';
+  const rows=activeProjs.map(p=>{
+    const rd=(typeof _projectReadiness==='function')?_projectReadiness(p.id):{overall:'go',fails:0,warns:0};
+    const cfg=rd.overall==='go'?{c:'var(--accent-green)',ic:'fa-check-circle',l:'GO'}:rd.overall==='caution'?{c:'var(--accent-amber)',ic:'fa-exclamation-triangle',l:'CAUTION'}:{c:'var(--accent-red)',ic:'fa-times-circle',l:'NOT READY'};
+    return`<tr style="cursor:pointer" onclick="showProjectDetail('${p.id}');setTimeout(()=>{detailTab='readiness';renderDetailTab();},300)">
+      <td style="padding:7px 10px"><div style="font-size:12px;font-weight:600">${p.id}</div><div style="font-size:10px;color:var(--text-secondary);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name||''}</div></td>
+      <td style="padding:7px 10px;text-align:center"><span style="font-size:10px;padding:2px 8px;border-radius:8px;background:${cfg.c}22;color:${cfg.c};font-weight:700"><i class="fas ${cfg.ic}" style="margin-right:4px;font-size:9px"></i>${cfg.l}</span></td>
+      <td style="padding:7px 10px;font-size:10px;color:var(--accent-red);text-align:center">${rd.fails>0?rd.fails+' blocker'+(rd.fails!==1?'s':''):'-'}</td>
+      <td style="padding:7px 10px;font-size:10px;color:var(--accent-amber);text-align:center">${rd.warns>0?rd.warns+' issue'+(rd.warns!==1?'s':''):'-'}</td>
+    </tr>`;
+  }).join('');
+  const notReady=activeProjs.filter(p=>(typeof _projectReadiness==='function')&&_projectReadiness(p.id).overall==='notready').length;
+  const caution=activeProjs.filter(p=>(typeof _projectReadiness==='function')&&_projectReadiness(p.id).overall==='caution').length;
+  return`<div class="card" style="margin-bottom:14px">
+  <div class="section-header"><div class="section-title"><i class="fas fa-clipboard-check" style="margin-right:7px;color:var(--accent-blue)"></i>Project Readiness</div>
+  <div style="display:flex;gap:8px;align-items:center">
+    ${notReady>0?`<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:rgba(248,81,73,.12);color:var(--accent-red);font-weight:700">${notReady} Not Ready</span>`:''}
+    ${caution>0?`<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:rgba(240,164,80,.12);color:var(--accent-amber);font-weight:700">${caution} Caution</span>`:''}
+    <button class="btn btn-secondary btn-sm" onclick="navigate('projects')">View All</button>
+  </div></div>
+  <div class="table-wrap"><table><thead><tr><th>Project</th><th style="text-align:center">Status</th><th style="text-align:center">Blockers</th><th style="text-align:center">Issues</th></tr></thead>
+  <tbody>${rows}</tbody></table></div></div>`;
+})()}
 <div class="grid grid-2" style="margin-bottom:14px">
 <div class="card"><div class="section-header"><div class="section-title">Active Projects</div><button class="btn btn-secondary btn-sm" onclick="navigate('projects')">View All</button></div>
 <div class="table-wrap"><table><thead><tr><th>Project</th><th>PM</th><th>Progress</th><th>Status</th></tr></thead><tbody>
@@ -7203,6 +7228,7 @@ function _renderProjTable(projects) {
     { k:'startDate', label:'Start', w:'95px' },
     { k:'endDate', label:'End', w:'95px' },
     { k:'_health', label:'Health', w:'60px', nosort:true },
+    { k:'_ready', label:'Ready', w:'65px', nosort:true },
     { k:'_actions', label:'', w:'50px', nosort:true },
   ];
   const today = new Date().toISOString().split('T')[0];
@@ -7240,6 +7266,7 @@ function _renderProjTable(projects) {
               <td style="padding:8px 10px;font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)">${p.startDate||'-'}</td>
               <td style="padding:8px 10px;font-family:var(--font-mono);font-size:10px;color:${overdue?'var(--accent-red);font-weight:700':'var(--text-secondary)'}">${p.endDate||'-'}</td>
               <td style="padding:8px 10px;text-align:center">${health}</td>
+              <td style="padding:8px 10px;text-align:center">${(()=>{const rd=_projectReadiness(p.id);return rd.overall==='go'?'<span style="font-size:9px;padding:2px 7px;border-radius:8px;background:rgba(63,185,80,.15);color:var(--accent-green);font-weight:700">GO</span>':rd.overall==='caution'?'<span style="font-size:9px;padding:2px 7px;border-radius:8px;background:rgba(240,164,80,.15);color:var(--accent-amber);font-weight:700">CAUTION</span>':'<span style="font-size:9px;padding:2px 7px;border-radius:8px;background:rgba(248,81,73,.15);color:var(--accent-red);font-weight:700">NOT READY</span>';})()}</td>
               <td style="padding:8px 10px;text-align:right">
                 <button class="btn btn-secondary btn-sm btn-icon" style="height:24px;width:24px;font-size:10px" onclick="event.stopPropagation();showProjectForm('${p.id}')" title="Edit"><i class="fas fa-pen"></i></button>
               </td>
@@ -7268,7 +7295,8 @@ function _renderProjList(projects) {
           <span style="font-size:10px;color:var(--text-muted)">· ${p.client||'-'}${p.phase?' · '+p.phase:''}</span>
           ${p._flagged?'<i class="fas fa-flag" style="color:var(--accent-red);margin-left:auto"></i>':''}
           ${overdue?'<i class="fas fa-exclamation-triangle" style="color:var(--accent-amber);margin-left:auto"></i>':''}
-          <button class="btn btn-secondary btn-sm btn-icon" style="height:24px;width:24px;font-size:10px;margin-left:${(p._flagged||overdue)?'5px':'auto'}" onclick="event.stopPropagation();showProjectForm('${p.id}')" title="Edit"><i class="fas fa-pen"></i></button>
+          ${(()=>{const rd=_projectReadiness(p.id);return rd.overall==='go'?'<span style="font-size:9px;padding:1px 7px;border-radius:8px;background:rgba(63,185,80,.15);color:var(--accent-green);font-weight:700;margin-left:auto">GO</span>':rd.overall==='caution'?'<span style="font-size:9px;padding:1px 7px;border-radius:8px;background:rgba(240,164,80,.15);color:var(--accent-amber);font-weight:700;margin-left:auto">CAUTION</span>':'<span style="font-size:9px;padding:1px 7px;border-radius:8px;background:rgba(248,81,73,.15);color:var(--accent-red);font-weight:700;margin-left:auto">NOT READY</span>';})()}
+          <button class="btn btn-secondary btn-sm btn-icon" style="height:24px;width:24px;font-size:10px;margin-left:5px" onclick="event.stopPropagation();showProjectForm('${p.id}')" title="Edit"><i class="fas fa-pen"></i></button>
         </div>
         <div style="font-size:13px;font-weight:600;line-height:1.3;margin-bottom:6px">${p.name||'-'}</div>
         <div style="display:flex;align-items:center;gap:10px;font-size:10px;color:var(--text-muted)">
@@ -7313,6 +7341,7 @@ function _renderProjCards(projects) {
         <div style="text-align:center"><div style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:${dl<30&&dl>0?'var(--accent-amber)':dl<=0?'var(--accent-red)':'inherit'}">${dl<0?'OD':dl+'d'}</div><div style="font-size:9px;color:var(--text-secondary)">Left</div></div>
         <div style="text-align:center;margin-left:auto"><div style="font-size:11px;font-weight:700">${(p.pm||'').split(' ')[0]||'-'}</div><div style="font-size:9px;color:var(--text-secondary)">PM</div></div>
       </div>
+      ${(()=>{const rd=_projectReadiness(p.id);const cfg=rd.overall==='go'?{c:'var(--accent-green)',bg:'rgba(63,185,80,.1)',ic:'fa-check-circle',l:'Ready to Execute'}:rd.overall==='caution'?{c:'var(--accent-amber)',bg:'rgba(240,164,80,.1)',ic:'fa-exclamation-triangle',l:`Caution · ${rd.warns} issue${rd.warns!==1?'s':''}`}:{c:'var(--accent-red)',bg:'rgba(248,81,73,.1)',ic:'fa-times-circle',l:`Not Ready · ${rd.fails} blocker${rd.fails!==1?'s':''}`};return`<div style="margin-top:8px;padding:6px 10px;border-radius:6px;background:${cfg.bg};border:1px solid ${cfg.c}33;display:flex;align-items:center;gap:6px;cursor:pointer" onclick="showProjectDetail('${p.id}');setTimeout(()=>{detailTab='readiness';renderDetailTab();},200)" title="View Readiness"><i class="fas ${cfg.ic}" style="color:${cfg.c};font-size:12px"></i><span style="font-size:10px;font-weight:700;color:${cfg.c}">${cfg.l}</span><i class="fas fa-chevron-right" style="color:${cfg.c};font-size:9px;margin-left:auto"></i></div>`;})()}
       <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
         <button class="btn btn-primary btn-sm" onclick="showProjectDetail('${p.id}')"><i class="fas fa-eye"></i> View</button>
         <button class="btn btn-secondary btn-sm" onclick="showProjectForm('${p.id}')"><i class="fas fa-pen"></i> Edit</button>
@@ -7800,8 +7829,12 @@ function renderProjectDetail(){
   const tot=daysBetween(p.startDate,p.endDate);
   const te=Math.round(((tot-Math.max(0,dl))/Math.max(1,tot))*100);
 
+  const _rdScore=_projectReadiness(p.id);
+  const _rdIcon=_rdScore.overall==='go'?'fa-check-circle':_rdScore.overall==='caution'?'fa-exclamation-triangle':'fa-times-circle';
+  const _rdColor=_rdScore.overall==='go'?'var(--accent-green)':_rdScore.overall==='caution'?'var(--accent-amber)':'var(--accent-red)';
   const tabs=[
     {id:'overview',label:'Overview',icon:'fa-info-circle'},
+    {id:'readiness',label:'Readiness',icon:_rdIcon,color:_rdColor},
     {id:'tasks',label:`Tasks (${tasks.length})`,icon:'fa-tasks'},
     {id:'resources',label:'Resources',icon:'fa-users'},
     {id:'costs',label:`Costs (${costs.length})`,icon:'fa-dollar-sign'},
@@ -7884,7 +7917,7 @@ function renderProjectDetail(){
 
   <!-- Tabs -->
   <div class="tabs" style="margin-bottom:16px">
-    ${tabs.map(t=>`<div class="tab ${detailTab===t.id?'active':''}" onclick="detailTab='${t.id}';renderDetailTab()"><i class="fas ${t.icon}" style="margin-right:5px"></i>${t.label}</div>`).join('')}
+    ${tabs.map(t=>`<div class="tab ${detailTab===t.id?'active':''}" onclick="detailTab='${t.id}';renderDetailTab()"><i class="fas ${t.icon}" style="margin-right:5px${t.color?';color:'+t.color:''}"></i>${t.label}</div>`).join('')}
   </div>
   <div id="detailTabContent"></div>`;
 
@@ -7894,6 +7927,7 @@ function renderProjectDetail(){
 function renderDetailTab(){
   const map={
     overview:renderDetailOverview,
+    readiness:renderDetailReadiness,
     tasks:renderDetailTasks,
     resources:renderDetailResources,
     costs:renderDetailCosts,
@@ -7918,6 +7952,189 @@ function renderDetailTab(){
   }
 }
 
+
+// ── PROJECT READINESS SCORING ENGINE ─────────────────────
+function _projectReadiness(pid){
+  const today=new Date().toISOString().split('T')[0];
+  const soon=new Date();soon.setDate(soon.getDate()+30);const soonStr=soon.toISOString().split('T')[0];
+  const allocs=(AppState.data.resourceAllocations||[]).filter(a=>a.projectId===pid&&!a._deleted);
+  const resources=AppState.data.resources||[];
+  const equipment=AppState.data.equipment||[];
+  const tools=AppState.data.tools||[];
+  const vehicles=AppState.data.vehicles||[];
+  const materials=(AppState.data.materials||[]).filter(m=>m.projectId===pid&&!m._deleted);
+  const docs=(AppState.data.documents||[]).filter(d=>d.projectId===pid&&!d._deleted);
+  const manpower=(AppState.data.manpower||[]).filter(m=>m.projectId===pid&&!m._deleted);
+
+  const checks=[];
+
+  // ── CHECK 1: Personnel Availability ──────────────────────
+  const personnelAllocs=allocs.filter(a=>a.resourceType==='Personnel'||a.resourceType==='Resource'||(!a.resourceType&&a.resourceId&&a.resourceId.startsWith('RES')));
+  const personnelItems=[];
+  personnelAllocs.forEach(a=>{
+    const res=resources.find(r=>r.id===a.resourceId);
+    if(!res)return;
+    const avail=res.availability||'available';
+    personnelItems.push({name:res.name,role:res.role,avail,status:avail==='available'?'go':avail==='busy'?'warn':'fail',detail:avail==='available'?'Available':'Currently '+avail,link:`masterlist`});
+  });
+  const pFail=personnelItems.filter(i=>i.status==='fail').length;
+  const pWarn=personnelItems.filter(i=>i.status==='warn').length;
+  checks.push({id:'personnel',icon:'fa-users',label:'Personnel Availability',
+    status:pFail>0?'fail':pWarn>0?'warn':'go',
+    summary:personnelItems.length===0?'No personnel allocated':`${personnelItems.filter(i=>i.status==='go').length}/${personnelItems.length} available`,
+    items:personnelItems,emptyMsg:'No personnel allocations found for this project.'});
+
+  // ── CHECK 2: Certifications & Calibration ────────────────
+  const certItems=[];
+  personnelAllocs.forEach(a=>{
+    const res=resources.find(r=>r.id===a.resourceId);
+    if(!res||!res.certExpiry)return;
+    const exp=res.certExpiry;
+    const st=exp<today?'fail':exp<=soonStr?'warn':'go';
+    certItems.push({name:res.name,detail:`Cert expiry: ${exp}`,status:st,link:'masterlist'});
+  });
+  const eqAllocs=allocs.filter(a=>a.resourceType==='Equipment'||(a.resourceId&&a.resourceId.startsWith('EQP')));
+  eqAllocs.forEach(a=>{
+    const eq=equipment.find(e=>e.id===a.resourceId);
+    if(!eq)return;
+    if(eq.nextCalibration){const st=eq.nextCalibration<today?'fail':eq.nextCalibration<=soonStr?'warn':'go';certItems.push({name:eq.name||eq.description,detail:`Calibration due: ${eq.nextCalibration}`,status:st,link:'masterlist'});}
+    if(eq.nextMaintenance){const st=eq.nextMaintenance<today?'fail':eq.nextMaintenance<=soonStr?'warn':'go';certItems.push({name:eq.name||eq.description,detail:`Maintenance due: ${eq.nextMaintenance}`,status:st,link:'masterlist'});}
+  });
+  const cFail=certItems.filter(i=>i.status==='fail').length;
+  const cWarn=certItems.filter(i=>i.status==='warn').length;
+  checks.push({id:'certs',icon:'fa-certificate',label:'Certifications & Calibration',
+    status:cFail>0?'fail':cWarn>0?'warn':'go',
+    summary:certItems.length===0?'No expiry data':cFail>0?`${cFail} expired`:cWarn>0?`${cWarn} expiring soon`:'All valid',
+    items:certItems,emptyMsg:'No certification or calibration data found for allocated resources.'});
+
+  // ── CHECK 3: Equipment / Tool / Vehicle Condition ─────────
+  const assetItems=[];
+  allocs.forEach(a=>{
+    const id=a.resourceId||'';
+    let asset=null,type='';
+    if(id.startsWith('EQP')||a.resourceType==='Equipment'){asset=equipment.find(e=>e.id===id);type='Equipment';}
+    else if(id.startsWith('TOL')||a.resourceType==='Tool'){asset=tools.find(t=>t.id===id);type='Tool';}
+    else if(id.startsWith('VEH')||a.resourceType==='Vehicle'){asset=vehicles.find(v=>v.id===id);type='Vehicle';}
+    if(!asset)return;
+    const st=asset.status==='available'?'go':asset.status==='standby'?'warn':'fail';
+    assetItems.push({name:asset.name||asset.description||id,detail:`${type} · Status: ${asset.status||'unknown'}`,status:st,link:'masterlist'});
+  });
+  const aFail=assetItems.filter(i=>i.status==='fail').length;
+  const aWarn=assetItems.filter(i=>i.status==='warn').length;
+  checks.push({id:'assets',icon:'fa-tools',label:'Equipment & Tools',
+    status:aFail>0?'fail':aWarn>0?'warn':'go',
+    summary:assetItems.length===0?'No assets allocated':`${assetItems.filter(i=>i.status==='go').length}/${assetItems.length} available`,
+    items:assetItems,emptyMsg:'No equipment, tool, or vehicle allocations found for this project.'});
+
+  // ── CHECK 4: Material Delivery ───────────────────────────
+  const matItems=materials.map(m=>{
+    const st=m.status==='delivered'?'go':m.status==='partial'?'warn':'fail';
+    const overdueFlag=m.deliveryDate&&m.deliveryDate<today&&m.status!=='delivered';
+    return{name:m.description||m.name||m.id,detail:`Status: ${m.status||'pending'}${m.deliveryDate?' · Due: '+m.deliveryDate:''}${overdueFlag?' ⚠ Overdue':''}`,status:overdueFlag?'fail':st,link:'masterlist'};
+  });
+  const mFail=matItems.filter(i=>i.status==='fail').length;
+  const mWarn=matItems.filter(i=>i.status==='warn').length;
+  checks.push({id:'materials',icon:'fa-cubes',label:'Material Delivery',
+    status:mFail>0?'fail':mWarn>0?'warn':matItems.length===0?'warn':'go',
+    summary:matItems.length===0?'No materials linked':mFail>0?`${mFail} not delivered`:mWarn>0?`${mWarn} partially delivered`:'All delivered',
+    items:matItems,emptyMsg:'No materials linked to this project yet.'});
+
+  // ── CHECK 5: Required Documents Approved ─────────────────
+  const reqTypes=['Method Statement','ITP','Safety Plan','Work Permit','Risk Assessment'];
+  const docItems=docs.map(d=>{
+    const isReq=reqTypes.some(rt=>d.name&&d.name.toLowerCase().includes(rt.toLowerCase()));
+    const st=d.status==='approved'?'go':d.status==='review'?'warn':'fail';
+    return{name:d.name,detail:`Status: ${d.status||'draft'}${isReq?' · Required doc':''}`,status:st,isReq,link:'documents'};
+  });
+  const reqDocs=docItems.filter(i=>i.isReq);
+  const dFail=reqDocs.filter(i=>i.status==='fail').length;
+  const dWarn=reqDocs.filter(i=>i.status==='warn').length;
+  const allDocStatus=dFail>0?'fail':dWarn>0?'warn':reqDocs.length===0&&docs.length===0?'warn':'go';
+  checks.push({id:'documents',icon:'fa-file-check',label:'Documents Approved',
+    status:allDocStatus,
+    summary:docs.length===0?'No documents uploaded':dFail>0?`${dFail} required doc(s) not approved`:dWarn>0?`${dWarn} under review`:'All key docs approved',
+    items:docItems,emptyMsg:'No documents found for this project.'});
+
+  // ── CHECK 6: Manpower Headcount ──────────────────────────
+  const mpItems=manpower.map(m=>{
+    const ratio=m.plannedHeadcount>0?(m.actualHeadcount||0)/m.plannedHeadcount:1;
+    const st=ratio>=0.8?'go':ratio>=0.5?'warn':'fail';
+    return{name:`Week ${m.week||'?'} · ${m.trade||'General'}`,detail:`Planned: ${m.plannedHeadcount} · Actual: ${m.actualHeadcount||0} (${Math.round(ratio*100)}%)`,status:st,link:'manpower'};
+  });
+  const mpFail=mpItems.filter(i=>i.status==='fail').length;
+  const mpWarn=mpItems.filter(i=>i.status==='warn').length;
+  checks.push({id:'manpower',icon:'fa-hard-hat',label:'Manpower Headcount',
+    status:mpFail>0?'fail':mpWarn>0?'warn':mpItems.length===0?'warn':'go',
+    summary:mpItems.length===0?'No manpower records':mpFail>0?`${mpFail} week(s) critically short`:mpWarn>0?`${mpWarn} week(s) below target`:'Headcount on target',
+    items:mpItems,emptyMsg:'No manpower records for this project.'});
+
+  // ── Overall Score ────────────────────────────────────────
+  const fails=checks.filter(c=>c.status==='fail').length;
+  const warns=checks.filter(c=>c.status==='warn').length;
+  const overall=fails>0?'notready':warns>0?'caution':'go';
+  return{checks,overall,fails,warns};
+}
+
+// ── PROJECT DETAIL: READINESS TAB ────────────────────────
+function renderDetailReadiness(){
+  const pid=detailProjectId;
+  const rd=_projectReadiness(pid);
+  const overallCfg={
+    go:{color:'var(--accent-green)',bg:'rgba(63,185,80,.12)',icon:'fa-check-circle',label:'GO — Ready to Execute'},
+    caution:{color:'var(--accent-amber)',bg:'rgba(240,164,80,.12)',icon:'fa-exclamation-triangle',label:'Caution — Minor Issues'},
+    notready:{color:'var(--accent-red)',bg:'rgba(248,81,73,.12)',icon:'fa-times-circle',label:'Not Ready — Blockers Present'},
+  }[rd.overall];
+
+  const statusIcon=s=>s==='go'?'<i class="fas fa-check-circle" style="color:var(--accent-green)"></i>':s==='warn'?'<i class="fas fa-exclamation-triangle" style="color:var(--accent-amber)"></i>':'<i class="fas fa-times-circle" style="color:var(--accent-red)"></i>';
+  const statusColor=s=>s==='go'?'var(--accent-green)':s==='warn'?'var(--accent-amber)':'var(--accent-red)';
+  const statusBg=s=>s==='go'?'rgba(63,185,80,.08)':s==='warn'?'rgba(240,164,80,.08)':'rgba(248,81,73,.08)';
+  const statusBorder=s=>s==='go'?'rgba(63,185,80,.3)':s==='warn'?'rgba(240,164,80,.3)':'rgba(248,81,73,.3)';
+
+  let html=`
+  <div style="padding:16px 20px;border-radius:10px;background:${overallCfg.bg};border:1px solid ${overallCfg.color}44;margin-bottom:16px;display:flex;align-items:center;gap:14px">
+    <i class="fas ${overallCfg.icon}" style="font-size:28px;color:${overallCfg.color};flex-shrink:0"></i>
+    <div>
+      <div style="font-size:16px;font-weight:700;color:${overallCfg.color}">${overallCfg.label}</div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-top:2px">${rd.fails} blocker${rd.fails!==1?'s':''} · ${rd.warns} caution${rd.warns!==1?'s':''} · ${rd.checks.filter(c=>c.status==='go').length} checks passed</div>
+    </div>
+    <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="renderDetailReadiness()"><i class="fas fa-sync-alt"></i> Refresh</button>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">`;
+
+  rd.checks.forEach(ch=>{
+    const expanded=`_rdExpanded_${ch.id}`;
+    const isOpen=window[expanded]||false;
+    html+=`
+    <div style="background:var(--bg-card);border:1px solid ${statusBorder(ch.status)};border-radius:10px;overflow:hidden">
+      <div style="padding:12px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;background:${statusBg(ch.status)}" onclick="window._rdExpanded_${ch.id}=!window._rdExpanded_${ch.id};renderDetailReadiness()">
+        <i class="fas ${ch.icon}" style="color:${statusColor(ch.status)};font-size:15px;width:18px;flex-shrink:0"></i>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:700;color:var(--text-primary)">${ch.label}</div>
+          <div style="font-size:10px;color:${statusColor(ch.status)};margin-top:1px">${ch.summary}</div>
+        </div>
+        ${statusIcon(ch.status)}
+        <i class="fas fa-chevron-${isOpen?'up':'down'}" style="color:var(--text-muted);font-size:10px;margin-left:4px"></i>
+      </div>
+      ${isOpen?`<div style="padding:10px 14px;border-top:1px solid var(--border)">
+        ${ch.items.length===0?`<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:8px 0">${ch.emptyMsg}</div>`:`
+        <div style="display:flex;flex-direction:column;gap:5px">
+          ${ch.items.map(item=>`
+          <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-radius:6px;background:${statusBg(item.status)};border:1px solid ${statusBorder(item.status)}">
+            ${statusIcon(item.status)}
+            <div style="flex:1;min-width:0">
+              <div style="font-size:11px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.name}</div>
+              <div style="font-size:10px;color:var(--text-secondary);margin-top:1px">${item.detail}</div>
+            </div>
+            ${item.status!=='go'?`<button class="btn btn-secondary btn-sm" style="height:22px;font-size:9px;padding:0 7px;flex-shrink:0" onclick="navigate('${item.link||'masterlist'}')">Fix</button>`:''}
+          </div>`).join('')}
+        </div>`}
+      </div>`:''}
+    </div>`;
+  });
+
+  html+=`</div>`;
+  $('#detailTabContent').innerHTML=html;
+}
 
 // ── PROJECT DETAIL: OVERVIEW ──────────────────────────────
 function renderDetailOverview(){
