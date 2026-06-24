@@ -20385,47 +20385,89 @@ function _whDeleteItem(id){
 }
 
 // ── ADD ISSUANCE REQUEST ─────────────────────────────────────
+let _whReqLines=[{itemId:'',qty:''}];
+
+function _whReqLinesHTML(){
+  const items=_whItems();
+  return _whReqLines.map((ln,idx)=>{
+    const q=ln.itemId?_whCalcQty(ln.itemId):null;
+    const item=ln.itemId?items.find(i=>i.id===ln.itemId):null;
+    const avail=q?q.qtyAvailable:null;
+    const availColor=avail===null?'var(--text-secondary)':avail<=0?'var(--accent-red)':'var(--accent-green)';
+    const itemOpts=items.map(i=>`<option value="${i.id}"${i.id===ln.itemId?' selected':''}>${i.name}</option>`).join('');
+    return`<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:6px 6px">
+        <select class="form-control" style="font-size:12px" onchange="_whReqLines[${idx}].itemId=this.value;_whRefreshReqLines()">
+          <option value="">— Select —</option>${itemOpts}
+        </select>
+      </td>
+      <td style="padding:6px 6px;text-align:center;font-size:11px;width:80px">
+        ${q?`<span style="color:${availColor};font-weight:700">${avail}</span> <span style="color:var(--text-secondary)">${item?.unit||''}</span>`:'—'}
+      </td>
+      <td style="padding:6px 6px;width:90px">
+        <input class="form-control" type="number" min="0.01" step="0.01" style="font-size:12px" placeholder="0" value="${ln.qty||''}"
+          oninput="_whReqLines[${idx}].qty=this.value">
+      </td>
+      <td style="padding:6px 4px;width:32px;text-align:center">
+        ${_whReqLines.length>1?`<button class="btn btn-secondary btn-sm" style="padding:2px 5px;color:var(--accent-red)" onclick="_whReqLines.splice(${idx},1);_whRefreshReqLines()"><i class="fas fa-times"></i></button>`:''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function _whRefreshReqLines(){
+  const el=$('#whr-lines');
+  if(el)el.innerHTML=_whReqLinesHTML();
+}
+
 function _whShowAddRequest(){
+  _whReqLines=[{itemId:'',qty:''}];
   const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='completed');
   const html=`
   <div class="modal-overlay open" data-dynamic="1" id="whReqModal" onclick="if(event.target===this)closeModal('whReqModal')">
-    <div class="modal" style="max-width:480px">
+    <div class="modal" style="max-width:560px">
       <div class="modal-header">
-        <div class="modal-title">New Issuance Request</div>
+        <div class="modal-title"><i class="fas fa-clipboard-list" style="color:var(--accent-blue);margin-right:8px"></i>New Issuance Request</div>
         <button class="modal-close" onclick="closeModal('whReqModal')"><i class="fas fa-times"></i></button>
       </div>
       <div class="modal-body">
-        <div class="form-group">
-          <label class="form-label">Item *</label>
-          <select class="form-control" id="whr-item">
-            <option value="">— Select Item —</option>
-            ${_whItems().map(i=>{const q=_whCalcQty(i.id);return`<option value="${i.id}">${i.name} · Avail: ${q.qtyAvailable} ${i.unit||''}</option>`;}).join('')}
-          </select>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div class="form-group">
-            <label class="form-label">Quantity Requested *</label>
-            <input class="form-control" type="number" min="0.01" step="0.01" id="whr-qty" placeholder="0">
+        <!-- Header fields -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+          <div class="form-group" style="margin:0;grid-column:1/-1">
+            <label class="form-label">Project</label>
+            <select class="form-control" id="whr-proj">
+              <option value="">— No project —</option>
+              ${projects.map(p=>{const label=`${p.id} — ${p.name||''}`;return`<option value="${p.id}">${label.length>60?label.slice(0,60)+'…':label}</option>`;}).join('')}
+            </select>
           </div>
-          <div class="form-group">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Requested By</label>
+            <input class="form-control" id="whr-by" value="${AppState.currentUser?.displayName||''}" placeholder="Your name">
+          </div>
+          <div class="form-group" style="margin:0">
             <label class="form-label">Date Needed</label>
             <input class="form-control" type="date" id="whr-date" value="${new Date().toISOString().slice(0,10)}">
           </div>
+          <div class="form-group" style="margin:0;grid-column:1/-1">
+            <label class="form-label">Purpose / Reason *</label>
+            <textarea class="form-control" id="whr-reason" rows="2" placeholder="Why are these items needed?"></textarea>
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Project</label>
-          <select class="form-control" id="whr-proj">
-            <option value="">— No project —</option>
-            ${projects.map(p=>`<option value="${p.id}">${p.id} — ${p.name||''}</option>`).join('')}
-          </select>
+        <!-- Line items -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-secondary)"><i class="fas fa-list" style="margin-right:6px"></i>Items Requested</div>
+          <button class="btn btn-secondary btn-sm" onclick="_whReqLines.push({itemId:'',qty:''});_whRefreshReqLines()"><i class="fas fa-plus"></i> Add Item</button>
         </div>
-        <div class="form-group">
-          <label class="form-label">Requested By</label>
-          <input class="form-control" id="whr-by" value="${AppState.currentUser?.displayName||''}">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Purpose / Reason *</label>
-          <textarea class="form-control" id="whr-reason" rows="2" placeholder="Why is this item needed?"></textarea>
+        <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:4px">
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:var(--bg-tertiary)">
+              <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left">Item</th>
+              <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:center;width:80px">Available</th>
+              <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:90px">Qty</th>
+              <th style="width:32px"></th>
+            </tr></thead>
+            <tbody id="whr-lines">${_whReqLinesHTML()}</tbody>
+          </table>
         </div>
       </div>
       <div class="modal-footer">
@@ -20438,26 +20480,26 @@ function _whShowAddRequest(){
 }
 
 function _whSaveRequest(){
-  const itemId=$('#whr-item')?.value;
-  const qty=parseFloat($('#whr-qty')?.value||0);
   const reason=$('#whr-reason')?.value.trim();
-  if(!itemId){showToast('Select an item','error');return;}
-  if(!qty||qty<=0){showToast('Quantity must be > 0','error');return;}
   if(!reason){showToast('Please state the reason/purpose','error');return;}
+  const valid=_whReqLines.filter(ln=>ln.itemId&&parseFloat(ln.qty)>0);
+  if(!valid.length){showToast('Add at least one item with qty > 0','error');return;}
   if(!AppState.data.issuanceRequests)AppState.data.issuanceRequests=[];
-  const req={
-    id:_whNextId('REQ-',AppState.data.issuanceRequests),
-    itemId,qty,
-    projectId:$('#whr-proj')?.value||null,
-    requestedBy:$('#whr-by')?.value.trim(),
-    dateNeeded:$('#whr-date')?.value,
-    reason,status:'pending',
-    requestedAt:new Date().toISOString(),
-  };
-  AppState.data.issuanceRequests.push(req);
+  const projectId=$('#whr-proj')?.value||null;
+  const requestedBy=$('#whr-by')?.value.trim();
+  const dateNeeded=$('#whr-date')?.value;
+  const requestedAt=new Date().toISOString();
+  valid.forEach(ln=>{
+    AppState.data.issuanceRequests.push({
+      id:_whNextId('REQ-',AppState.data.issuanceRequests),
+      itemId:ln.itemId,qty:parseFloat(ln.qty),
+      projectId,requestedBy,dateNeeded,reason,
+      status:'pending',requestedAt,
+    });
+  });
   AppState.save();
   closeModal('whReqModal');
-  showToast('Request submitted — awaiting approval','success');
+  showToast(`${valid.length} item${valid.length>1?'s':''} requested — awaiting approval`,'success',3500);
   _whRenderTab();
 }
 
