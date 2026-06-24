@@ -8705,7 +8705,10 @@ function renderDetailResources(){
         const supplier=m?.supplier||'—';
         const stockStatus=onHand<=minStock?'low-stock':'in-stock';
         const stockPct=Math.min(100,Math.round(onHand/Math.max(minStock*2,1)*100));
-        const totalVal=net*unitCost;
+        const planned=a.plannedCost||0;
+        const whActual=(typeof _whActualIssueCost==='function')?_whActualIssueCost(pid,a.resourceId):0;
+        const variance=planned-whActual;
+        const varColor=variance<0?'var(--accent-red)':variance===0?'var(--text-secondary)':'var(--accent-green)';
         return`<tr>
           <td><div style="font-weight:600;font-size:12px">${a.resourceName}</div>
             <div style="font-size:9px;color:var(--text-muted)">${a.resourceId}</div></td>
@@ -8722,7 +8725,9 @@ function renderDetailResources(){
           <td style="font-family:var(--font-mono);font-size:11px">${supplier}</td>
           <td style="font-family:var(--font-mono);font-size:11px;text-align:center">${a.allocatedQty} ${a.unit}</td>
           ${usageCells(u,net,rem,pct,a)}
-          <td style="font-family:var(--font-mono);font-weight:600;color:var(--accent-green)">₱${totalVal.toLocaleString()}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">₱${planned.toLocaleString()}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;font-weight:600">₱${whActual.toLocaleString()}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:${varColor}">${variance>=0?'+':''}₱${variance.toLocaleString()}</td>
           <td>${sb(a.status)}</td>
         </tr>`;
       }
@@ -8735,7 +8740,10 @@ function renderDetailResources(){
         const matStatus=m?.status||'—';
         const supplier=m?.supplier||'—';
         const critical=m?.critical||false;
-        const totalVal=net*unitCost;
+        const planned=a.plannedCost||0;
+        const whActual=(typeof _whActualIssueCost==='function')?_whActualIssueCost(pid,a.resourceId):0;
+        const variance=planned-whActual;
+        const varColor=variance<0?'var(--accent-red)':variance===0?'var(--text-secondary)':'var(--accent-green)';
         return`<tr style="${critical?'border-left:3px solid var(--accent-amber)':''}">
           <td><div style="display:flex;align-items:center;gap:6px">
             ${critical?'<i class="fas fa-exclamation-triangle" style="color:var(--accent-amber);font-size:10px"></i>':''}
@@ -8751,7 +8759,9 @@ function renderDetailResources(){
           <td><span class="badge ${critical?'badge-amber':'badge-gray'}" style="font-size:9px">${critical?'Critical':'Normal'}</span></td>
           <td style="font-family:var(--font-mono);font-size:11px;text-align:center">${a.allocatedQty} ${a.unit}</td>
           ${usageCells(u,net,rem,pct,a)}
-          <td style="font-family:var(--font-mono);font-weight:600;color:var(--accent-green)">₱${totalVal.toLocaleString()}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">₱${planned.toLocaleString()}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;font-weight:600">₱${whActual.toLocaleString()}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:${varColor}">${variance>=0?'+':''}₱${variance.toLocaleString()}</td>
           <td>${sb(a.status)}</td>
         </tr>`;
       }
@@ -8789,8 +8799,8 @@ function renderDetailResources(){
       Equipment:['Name','Category','Make/Model','Serial No.','Asset Status','Location','Next Maint.','Next Cal.','Cert Expiry','Daily Rate','Alloc. Qty','Issued','Returned','Net Used','Remaining','Alloc. Status'],
       Tool:     ['Name','Category','Make/Model','Serial No.','Asset Status','Location','Next Maint.','Next Cal.','Cert Expiry','Daily Rate','Alloc. Qty','Issued','Returned','Net Used','Remaining','Alloc. Status'],
       Vehicle:  ['Name','Category','Make/Model','Reg. No.','Asset Status','Location','Next Maint.','Next Cal.','Cert Expiry','Daily Rate','Alloc. Qty','Issued','Returned','Net Used','Remaining','Alloc. Status'],
-      Consumable:['Name','Category','Unit','Stock Status','On Hand','Min Stock','Stock Level','Unit Cost (₱)','Supplier','Alloc. Qty','Issued','Returned','Net Used','Remaining','Est. Value','Alloc. Status'],
-      Material: ['Name','Unit','Delivery Status','Total Qty','Unit Cost (₱)','Supplier','Delivery Date','Priority','Alloc. Qty','Issued','Returned','Net Used','Remaining','Est. Value','Alloc. Status'],
+      Consumable:['Name','Category','Unit','Stock Status','On Hand','Min Stock','Stock Level','Unit Cost (₱)','Supplier','Alloc. Qty','Issued','Returned','Net Used','Remaining','Planned (₱)','Actual WH (₱)','Variance (₱)','Alloc. Status'],
+      Material: ['Name','Unit','Delivery Status','Total Qty','Unit Cost (₱)','Supplier','Delivery Date','Priority','Alloc. Qty','Issued','Returned','Net Used','Remaining','Planned (₱)','Actual WH (₱)','Variance (₱)','Alloc. Status'],
       Manpower: ['Trade','Role','Shift','Planned HC','Actual HC','Variance','OT Hours','Weekly Cost','Alloc. Qty','Issued','Returned','Net Used','Remaining','Alloc. Status'],
     };
     const hdrs=headers[type]||['Name','Alloc. Qty','Issued','Returned','Net Used','Remaining','Status'];
@@ -8799,8 +8809,16 @@ function renderDetailResources(){
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div style="font-size:14px;font-weight:600"><i class="fas ${ti}" style="color:${tc};margin-right:7px"></i>${type} <span style="font-size:12px;font-weight:400;color:var(--text-secondary)">(${arr.length})</span></div>
         <div style="display:flex;gap:7px">
-          <span style="font-size:10px;color:var(--text-secondary);align-self:center">Planned: <strong style="font-family:var(--font-mono)">₱${arr.reduce((s,a)=>s+a.plannedCost,0).toLocaleString()}</strong></span>
-          <span style="font-size:10px;color:var(--text-secondary);align-self:center">Actual: <strong style="font-family:var(--font-mono);color:${arr.reduce((s,a)=>s+a.actualCost,0)>arr.reduce((s,a)=>s+a.plannedCost,0)?'var(--accent-red)':'inherit'}">₱${arr.reduce((s,a)=>s+a.actualCost,0).toLocaleString()}</strong></span>
+          ${(()=>{
+            const totPlanned=arr.reduce((s,a)=>s+a.plannedCost,0);
+            const useWH=(type==='Material'||type==='Consumable')&&typeof _whActualIssueCost==='function';
+            const totActual=useWH?arr.reduce((s,a)=>s+_whActualIssueCost(pid,a.resourceId),0):arr.reduce((s,a)=>s+a.actualCost,0);
+            const variance=totPlanned-totActual;
+            const varColor=variance<0?'var(--accent-red)':variance===0?'var(--text-secondary)':'var(--accent-green)';
+            return`<span style="font-size:10px;color:var(--text-secondary);align-self:center">Planned: <strong style="font-family:var(--font-mono)">₱${totPlanned.toLocaleString()}</strong></span>
+            <span style="font-size:10px;color:var(--text-secondary);align-self:center">Actual${useWH?' (WH)':''}: <strong style="font-family:var(--font-mono);color:${totActual>totPlanned?'var(--accent-red)':'inherit'}">₱${totActual.toLocaleString()}</strong></span>
+            <span style="font-size:10px;align-self:center;font-weight:700;color:${varColor}">${variance>=0?'▲ Under':'▼ Over'} ₱${Math.abs(variance).toLocaleString()}</span>`;
+          })()}
           <button class="btn btn-success btn-sm" style="font-size:9px;padding:3px 8px" onclick="showLogUsage('${pid}','Issue')"><i class="fas fa-sign-out-alt"></i> Issue</button>
           <button class="btn btn-warning btn-sm" style="font-size:9px;padding:3px 8px" onclick="showLogUsage('${pid}','Return')"><i class="fas fa-undo"></i> Return</button>
         </div>
@@ -19535,6 +19553,24 @@ function _whItems(){return(AppState.data.warehouseItems||[]).filter(i=>!i._delet
 function _whTx(){return(AppState.data.stockTransactions||[]).filter(t=>!t._deleted);}
 function _whReq(){return(AppState.data.issuanceRequests||[]).filter(r=>!r._deleted);}
 
+// Weighted Average Cost — recalculated from all receipts; falls back to item stored cost
+function _whCalcWAC(itemId){
+  const receipts=_whTx().filter(t=>t.type==='receive'&&t.itemId===itemId&&(t.unitCost||0)>0);
+  const totalQty=receipts.reduce((s,t)=>s+t.qty,0);
+  if(!totalQty){const item=_whItems().find(i=>i.id===itemId);return item?.unitCost||0;}
+  return receipts.reduce((s,t)=>s+(t.qty*(t.unitCost||0)),0)/totalQty;
+}
+
+// Actual cost issued to a project for a resource (supports direct WH id or itemMasterId linkage)
+function _whActualIssueCost(projectId, resourceId){
+  if(!projectId||!resourceId)return 0;
+  const whItem=_whItems().find(w=>w.id===resourceId||w.itemMasterId===resourceId);
+  const itemId=whItem?whItem.id:resourceId;
+  return _whTx()
+    .filter(t=>t.type==='issue'&&t.projectId===projectId&&t.itemId===itemId)
+    .reduce((s,t)=>s+(t.qty*(t.unitCost||whItem?.unitCost||0)),0);
+}
+
 // Recompute live qty fields for an item from its transactions
 function _whCalcQty(itemId){
   const tx=_whTx().filter(t=>t.itemId===itemId);
@@ -20150,6 +20186,7 @@ function _whSaveIssue(){
       id:_whNextId('TX-',AppState.data.stockTransactions),
       itemId:ln.itemId,type,
       qty:type==='adjust'&&String(ln.qty).startsWith('-')?-Math.abs(qty):qty,
+      unitCost:type==='issue'?_whCalcWAC(ln.itemId):undefined,
       projectId:projId||null,date,issuedBy:by,by,notes,postedAt,
     });
     _whSyncQty(ln.itemId);
@@ -20182,6 +20219,7 @@ function _whReleaseReq(id){
   const tx={
     id:_whNextId('TX-',AppState.data.stockTransactions),
     itemId:req.itemId,type:'issue',qty:req.qty,
+    unitCost:_whCalcWAC(req.itemId),
     projectId:req.projectId||null,
     date:new Date().toISOString().slice(0,10),
     issuedBy:AppState.currentUser?.displayName||'',
