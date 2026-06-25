@@ -668,41 +668,146 @@ const SHIC_USERS_LIST = 'SHIC_Users'; // SharePoint list for user profiles
 // Keeps SHIC_AppData small + scalable for high-volume data.
 const SHIC_LIST_CONFIG = {
   // Core project data
-  'SHIC_Projects':         { dataKey: 'projects',            idField: 'ProjectId', name: 'Projects',          hasProject: false },
-  'SHIC_Tasks':            { dataKey: 'tasks',               idField: 'TaskId',    name: 'Tasks',             hasProject: true  },
-  'SHIC_Costs':            { dataKey: 'costs',               idField: 'CostId',    name: 'Costs',             hasProject: true  },
-  'SHIC_QAQC':             { dataKey: 'qaqc',                idField: 'QAQCId',    name: 'QA/QC',             hasProject: true  },
-  'SHIC_Risks':            { dataKey: 'risks',               idField: 'RiskId',    name: 'Risks',             hasProject: true  },
-  'SHIC_Actions':          { dataKey: 'actions',             idField: 'ActionId',  name: 'Actions',           hasProject: true  },
-  'SHIC_DocsMeta':         { dataKey: 'documents',           idField: 'DocId',     name: 'Documents Metadata',hasProject: true  },
-  'SHIC_LibraryDocs':      { dataKey: 'libraryDocs',         idField: 'LibId',     name: 'Library Docs',      hasProject: false },
-  'SHIC_Allocations':      { dataKey: 'resourceAllocations', idField: 'AllocId',   name: 'Allocations',       hasProject: true  },
+  'SHIC_Projects': {
+    dataKey: 'projects', idField: 'ProjectId', name: 'Projects', hasProject: false,
+    indexCols: [
+      { field: 'name',   spCol: 'Name',   spType: 'Text' },
+      { field: 'status', spCol: 'Status', spType: 'Text' },
+    ],
+  },
+  'SHIC_Tasks': {
+    dataKey: 'tasks', idField: 'TaskId', name: 'Tasks', hasProject: true,
+    indexCols: [
+      { field: 'status',    spCol: 'Status',    spType: 'Text'     },
+      { field: 'startDate', spCol: 'StartDate', spType: 'DateTime' },
+      { field: 'milestone', spCol: 'Milestone', spType: 'Boolean'  },
+    ],
+    // predecessors intentionally excluded — resolved in JS memory, never filtered server-side
+  },
+  'SHIC_Costs': {
+    dataKey: 'costs', idField: 'CostId', name: 'Costs', hasProject: true,
+    indexCols: [
+      { field: 'category', spCol: 'Category', spType: 'Text' },
+    ],
+  },
+  'SHIC_QAQC': {
+    dataKey: 'qaqc', idField: 'QAQCId', name: 'QA/QC', hasProject: true,
+    indexCols: [
+      { field: 'type',   spCol: 'Type',   spType: 'Text' },
+      { field: 'status', spCol: 'Status', spType: 'Text' },
+    ],
+  },
+  'SHIC_Risks': {
+    dataKey: 'risks', idField: 'RiskId', name: 'Risks', hasProject: true,
+    indexCols: [
+      { field: 'status',   spCol: 'Status',   spType: 'Text' },
+      { field: 'category', spCol: 'Category', spType: 'Text' },
+    ],
+  },
+  'SHIC_Actions': {
+    dataKey: 'actions', idField: 'ActionId', name: 'Actions', hasProject: true,
+    indexCols: [
+      { field: 'status',  spCol: 'Status',  spType: 'Text'     },
+      { field: 'dueDate', spCol: 'DueDate', spType: 'DateTime' },
+    ],
+  },
+  'SHIC_DocsMeta': {
+    dataKey: 'documents', idField: 'DocId', name: 'Documents Metadata', hasProject: true,
+    indexCols: [
+      { field: 'status',   spCol: 'Status',   spType: 'Text' },
+      { field: 'category', spCol: 'Category', spType: 'Text' },
+    ],
+  },
+  'SHIC_LibraryDocs': {
+    dataKey: 'libraryDocs', idField: 'LibId', name: 'Library Docs', hasProject: false,
+    indexCols: [
+      { field: 'category', spCol: 'Category', spType: 'Text' },
+      { field: 'status',   spCol: 'Status',   spType: 'Text' },
+    ],
+  },
+  'SHIC_Allocations': {
+    dataKey: 'resourceAllocations', idField: 'AllocId', name: 'Allocations', hasProject: true,
+    indexCols: [
+      { field: 'resourceType', spCol: 'ResourceType', spType: 'Text' },
+    ],
+  },
   // Procurement & supply
-  'SHIC_Procurement':      { dataKey: 'procurement',         idField: 'ProcId',    name: 'Procurement',       hasProject: true  },
-  'SHIC_ProcurementLogs':  { dataKey: 'procurementLogs',     idField: 'LogId',     name: 'Procurement Logs',  hasProject: true  },
-  'SHIC_Materials':        { dataKey: 'materials',           idField: 'MatId',     name: 'Materials',         hasProject: true  },
-  'SHIC_Manpower':         { dataKey: 'manpower',            idField: 'MpId',      name: 'Manpower',          hasProject: true  },
-  // Assets
-  'SHIC_Equipment':        { dataKey: 'equipment',           idField: 'EqpId',     name: 'Equipment',         hasProject: false },
-  'SHIC_Tools':            { dataKey: 'tools',               idField: 'ToolId',    name: 'Tools',             hasProject: false },
-  'SHIC_Vehicles':         { dataKey: 'vehicles',            idField: 'VehId',     name: 'Vehicles',          hasProject: false },
-  'SHIC_Consumables':      { dataKey: 'consumables',         idField: 'ConId',     name: 'Consumables',       hasProject: false },
-  'SHIC_ThirdParty':       { dataKey: 'thirdParty',          idField: 'TpId',      name: 'Third Party',       hasProject: false },
-  'SHIC_AssetHistory':     { dataKey: 'assetHistory',        idField: 'EventId',   name: 'Asset History',     hasProject: false },
-  'SHIC_AssetUtilization': { dataKey: 'assetUtilization',    idField: 'UtilId',    name: 'Asset Utilization', hasProject: false },
+  'SHIC_Procurement': {
+    dataKey: 'procurement', idField: 'ProcId', name: 'Procurement', hasProject: true,
+    indexCols: [
+      { field: 'status',   spCol: 'Status',   spType: 'Text' },
+      { field: 'category', spCol: 'Category', spType: 'Text' },
+    ],
+  },
+  'SHIC_ProcurementLogs': {
+    dataKey: 'procurementLogs', idField: 'LogId', name: 'Procurement Logs', hasProject: true,
+    indexCols: [
+      { field: 'procId', spCol: 'ProcId', spType: 'Text'     },
+      { field: 'date',   spCol: 'LogDate', spType: 'DateTime' },
+    ],
+  },
+  'SHIC_Materials': {
+    dataKey: 'materials', idField: 'MatId', name: 'Materials', hasProject: true,
+    indexCols: [
+      { field: 'status', spCol: 'Status', spType: 'Text' },
+    ],
+  },
+  'SHIC_Manpower': {
+    dataKey: 'manpower', idField: 'MpId', name: 'Manpower', hasProject: true,
+    indexCols: [
+      { field: 'trade', spCol: 'Trade', spType: 'Text' },
+    ],
+  },
+  // Assets (small master lists — minimal indexing)
+  'SHIC_Equipment':        { dataKey: 'equipment',        idField: 'EqpId',   name: 'Equipment',         hasProject: false },
+  'SHIC_Tools':            { dataKey: 'tools',            idField: 'ToolId',  name: 'Tools',             hasProject: false },
+  'SHIC_Vehicles':         { dataKey: 'vehicles',         idField: 'VehId',   name: 'Vehicles',          hasProject: false },
+  'SHIC_Consumables':      { dataKey: 'consumables',      idField: 'ConId',   name: 'Consumables',       hasProject: false },
+  'SHIC_ThirdParty':       { dataKey: 'thirdParty',       idField: 'TpId',    name: 'Third Party',       hasProject: false },
+  'SHIC_AssetHistory':     { dataKey: 'assetHistory',     idField: 'EventId', name: 'Asset History',     hasProject: false },
+  'SHIC_AssetUtilization': { dataKey: 'assetUtilization', idField: 'UtilId',  name: 'Asset Utilization', hasProject: false },
   // High-volume logs
-  'SHIC_UsageLogs':        { dataKey: 'resourceUsageLogs',   idField: 'LogId',     name: 'Usage Logs',        hasProject: true  },
-  'SHIC_DailyLogs':        { dataKey: 'dailyMeetingLogs',    idField: 'LogId',     name: 'Daily Logs',        hasProject: true  },
+  'SHIC_UsageLogs': {
+    dataKey: 'resourceUsageLogs', idField: 'LogId', name: 'Usage Logs', hasProject: true,
+    indexCols: [
+      { field: 'date',       spCol: 'LogDate',    spType: 'DateTime' },
+      { field: 'resourceId', spCol: 'ResourceId', spType: 'Text'     },
+    ],
+  },
+  'SHIC_DailyLogs': {
+    dataKey: 'dailyMeetingLogs', idField: 'LogId', name: 'Daily Logs', hasProject: true,
+    indexCols: [
+      { field: 'date',   spCol: 'LogDate', spType: 'DateTime' },
+      { field: 'status', spCol: 'Status',  spType: 'Text'     },
+    ],
+  },
   // Warehouse
-  'SHIC_WhItems':          { dataKey: 'warehouseItems',      idField: 'ItemId',    name: 'Warehouse Items',   hasProject: false },
-  'SHIC_WhTransactions':   { dataKey: 'stockTransactions',   idField: 'TxId',      name: 'Stock Transactions',hasProject: true  },
-  'SHIC_WhRequests':       { dataKey: 'issuanceRequests',    idField: 'ReqId',     name: 'Issuance Requests', hasProject: true  },
-  // Workflows & system
-  'SHIC_IdChangeRequests': { dataKey: 'idChangeRequests',    idField: 'ReqId',     name: 'ID Change Requests',hasProject: false },
-  'SHIC_DeletionRequests': { dataKey: 'deletionRequests',    idField: 'ReqId',     name: 'Deletion Requests', hasProject: false },
-  'SHIC_Notifications':    { dataKey: 'notifications',       idField: 'NotifId',   name: 'Notifications',     hasProject: false },
-  'SHIC_Activities':       { dataKey: 'activities',          idField: 'ActId',     name: 'Activities',        hasProject: false },
-  'SHIC_ProjectIdHistory': { dataKey: 'projectIdHistory',    idField: 'HistId',    name: 'Project ID History',hasProject: false },
+  'SHIC_WhItems': {
+    dataKey: 'warehouseItems', idField: 'ItemId', name: 'Warehouse Items', hasProject: false,
+    indexCols: [
+      { field: 'category', spCol: 'Category', spType: 'Text' },
+    ],
+  },
+  'SHIC_WhTransactions': {
+    dataKey: 'stockTransactions', idField: 'TxId', name: 'Stock Transactions', hasProject: true,
+    indexCols: [
+      { field: 'type',   spCol: 'TxType', spType: 'Text'     },
+      { field: 'itemId', spCol: 'ItemId', spType: 'Text'     },
+      { field: 'date',   spCol: 'TxDate', spType: 'DateTime' },
+    ],
+  },
+  'SHIC_WhRequests': {
+    dataKey: 'issuanceRequests', idField: 'ReqId', name: 'Issuance Requests', hasProject: true,
+    indexCols: [
+      { field: 'status', spCol: 'Status', spType: 'Text' },
+    ],
+  },
+  // Workflows & system (low volume — no index cols needed)
+  'SHIC_IdChangeRequests': { dataKey: 'idChangeRequests', idField: 'ReqId',   name: 'ID Change Requests', hasProject: false },
+  'SHIC_DeletionRequests': { dataKey: 'deletionRequests', idField: 'ReqId',   name: 'Deletion Requests',  hasProject: false },
+  'SHIC_Notifications':    { dataKey: 'notifications',    idField: 'NotifId', name: 'Notifications',       hasProject: false },
+  'SHIC_Activities':       { dataKey: 'activities',       idField: 'ActId',   name: 'Activities',          hasProject: false },
+  'SHIC_ProjectIdHistory': { dataKey: 'projectIdHistory', idField: 'HistId',  name: 'Project ID History',  hasProject: false },
 };
 const SHIC_OFFLOADED_KEYS = Object.values(SHIC_LIST_CONFIG).map(c => c.dataKey);
 // Cache for list IDs to avoid re-resolving
@@ -5004,6 +5109,8 @@ async function _spPushListData(token, listName, records, prevIdMap) {
   const config = Object.entries(SHIC_LIST_CONFIG).find(([n]) => n === listName);
   if (!config) throw new Error('Unknown list: ' + listName);
   const [, cfg] = config;
+  // Ensure index columns exist (no-op after first call per list per session)
+  await _spEnsureIndexColumns(token, listName).catch(() => {});
   const listId = await _spResolveListId(token, listName);
   const idField = cfg.idField;
   const localIds = new Set(records.map(r => r.id));
@@ -5030,19 +5137,23 @@ async function _spPushListData(token, listName, records, prevIdMap) {
         UpdatedAt: new Date().toISOString(),
       }
     };
-    // For sub-lists that reference a project, populate ProjectId (only if list has that column)
-    const cfgEntry = SHIC_LIST_CONFIG[listName];
-    if (cfgEntry && cfgEntry.hasProject) {
+    // ProjectId index column for all project-scoped lists
+    if (cfg.hasProject) {
       body.fields.ProjectId = String(record.projectId || '').slice(0, 250);
     }
-    // Projects list: add Name + Status columns for SP filtering/views
-    if (listName === 'SHIC_Projects') {
-      body.fields.Name = String(record.name || '').slice(0, 250);
-      body.fields.Status = String(record.status || '').slice(0, 100);
-    }
-    // LogDate column for daily logs
-    if (listName === 'SHIC_DailyLogs' && record.date) {
-      body.fields.LogDate = record.date;
+    // Write all declared indexCols from SHIC_LIST_CONFIG
+    if (cfg.indexCols) {
+      for (const col of cfg.indexCols) {
+        const val = record[col.field];
+        if (val === undefined || val === null) continue;
+        if (col.spType === 'Boolean') {
+          body.fields[col.spCol] = Boolean(val);
+        } else if (col.spType === 'DateTime') {
+          body.fields[col.spCol] = val ? String(val).slice(0, 50) : null;
+        } else {
+          body.fields[col.spCol] = String(val).slice(0, 250);
+        }
+      }
     }
 
     try {
@@ -5118,6 +5229,55 @@ function _quickHash(s) {
   let h = 0;
   for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
   return h.toString(36);
+}
+
+// ── Ensure index columns exist on a SP list (creates missing ones) ──
+// Called once per list on first push. Silently skips columns that already exist.
+const _spEnsuredCols = new Set(); // tracks which lists have been ensured this session
+async function _spEnsureIndexColumns(token, listName) {
+  if (_spEnsuredCols.has(listName)) return;
+  const cfg = SHIC_LIST_CONFIG[listName];
+  if (!cfg) return;
+
+  // Build the full column set this list needs
+  const needed = [];
+  if (cfg.hasProject) needed.push({ spCol: 'ProjectId', spType: 'Text' });
+  if (cfg.indexCols) needed.push(...cfg.indexCols);
+  if (!needed.length) { _spEnsuredCols.add(listName); return; }
+
+  const listId = await _spResolveListId(token, listName);
+  const baseUrl = `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/columns`;
+
+  // Fetch existing columns
+  let existingNames = new Set();
+  try {
+    const res = await fetch(baseUrl, { headers: { Authorization: 'Bearer ' + token } });
+    if (res.ok) {
+      const data = await res.json();
+      (data.value || []).forEach(c => existingNames.add(c.name));
+    }
+  } catch(e) { return; } // non-fatal
+
+  // Create any missing columns
+  for (const col of needed) {
+    if (existingNames.has(col.spCol)) continue;
+    const colDef = { name: col.spCol, enforceUniqueValues: false, hidden: false };
+    if (col.spType === 'DateTime') {
+      colDef.dateTime = { format: 'dateTime' };
+    } else if (col.spType === 'Boolean') {
+      colDef.boolean = {};
+    } else {
+      colDef.text = { allowMultipleLines: false, maxLength: 255 };
+    }
+    try {
+      await fetch(baseUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(colDef),
+      });
+    } catch(e) { /* non-fatal — push will still work via DataBlob */ }
+  }
+  _spEnsuredCols.add(listName);
 }
 
 // ── Hash cache for sub-lists (avoids re-pushing unchanged records) ──
