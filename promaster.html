@@ -20515,7 +20515,9 @@ function _whRcvLinesHTML(){
   const items=_whItems();
   const itemOpts=items.map(i=>`<option value="${i.id}">${i.name} (${i.code||i.id})</option>`).join('');
   if(!_whRcvLines.length)_whRcvLines=[{itemId:'',qty:'',unitCost:''}];
-  return _whRcvLines.map((ln,idx)=>`
+  const rows=_whRcvLines.map((ln,idx)=>{
+    const rowTotal=parseFloat(ln.qty||0)*parseFloat(ln.unitCost||0);
+    return`
   <tr>
     <td style="padding:5px 4px">
       <select class="form-control" style="font-size:12px;width:100%" onchange="_whRcvLines[${idx}].itemId=this.value;_whRcvAutoFillCost(${idx})">
@@ -20524,16 +20526,38 @@ function _whRcvLinesHTML(){
     </td>
     <td style="padding:5px 4px;width:80px">
       <input class="form-control" type="number" min="0.01" step="0.01" style="font-size:12px;width:100%" placeholder="0" value="${ln.qty||''}"
-        oninput="_whRcvLines[${idx}].qty=this.value">
+        oninput="_whRcvLines[${idx}].qty=this.value;_whUpdateRcvTotals()">
     </td>
     <td style="padding:5px 4px;width:100px">
       <input class="form-control" type="number" min="0" step="0.01" style="font-size:12px;width:100%" placeholder="0.00" value="${ln.unitCost||''}"
-        oninput="_whRcvLines[${idx}].unitCost=this.value">
+        oninput="_whRcvLines[${idx}].unitCost=this.value;_whUpdateRcvTotals()">
     </td>
-    <td style="padding:5px 4px;width:36px;text-align:center">
+    <td id="wh-rcv-rt-${idx}" style="padding:5px 8px;width:90px;text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--accent-green);white-space:nowrap">
+      ${rowTotal>0?'₱'+fmtNum(rowTotal):'—'}
+    </td>
+    <td style="padding:5px 4px;width:32px;text-align:center">
       ${_whRcvLines.length>1?`<button class="btn btn-secondary btn-sm" style="padding:2px 6px;color:var(--accent-red)" onclick="_whRcvLines.splice(${idx},1);_whRefreshRcv()"><i class="fas fa-times"></i></button>`:''}
     </td>
-  </tr>`).join('');
+  </tr>`;}).join('');
+  const grand=_whRcvLines.reduce((s,ln)=>s+parseFloat(ln.qty||0)*parseFloat(ln.unitCost||0),0);
+  return rows+`
+  <tr style="background:var(--bg-tertiary);border-top:2px solid var(--border)">
+    <td colspan="3" style="padding:6px 8px;font-size:12px;font-weight:600;text-align:right;color:var(--text-secondary)">TRANSACTION TOTAL</td>
+    <td id="wh-rcv-grand" style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-size:13px;font-weight:700;color:var(--accent-green);white-space:nowrap">${grand>0?'₱'+fmtNum(grand):'—'}</td>
+    <td></td>
+  </tr>`;
+}
+
+function _whUpdateRcvTotals(){
+  let grand=0;
+  _whRcvLines.forEach((ln,idx)=>{
+    const t=parseFloat(ln.qty||0)*parseFloat(ln.unitCost||0);
+    grand+=t;
+    const el=$(`#wh-rcv-rt-${idx}`);
+    if(el)el.textContent=t>0?'₱'+fmtNum(t):'—';
+  });
+  const el=$('#wh-rcv-grand');
+  if(el)el.textContent=grand>0?'₱'+fmtNum(grand):'—';
 }
 
 function _whRcvAutoFillCost(idx){
@@ -20552,11 +20576,13 @@ function _whRefreshRcv(){
 function _whIssLinesHTML(){
   const items=_whItems();
   if(!_whIssLines.length)_whIssLines=[{itemId:'',qty:''}];
-  return _whIssLines.map((ln,idx)=>{
+  const rows=_whIssLines.map((ln,idx)=>{
     const q=ln.itemId?_whCalcQty(ln.itemId):null;
     const item=ln.itemId?items.find(i=>i.id===ln.itemId):null;
     const avail=q?q.qtyAvailable:null;
     const availColor=avail===null?'var(--text-secondary)':avail<=0?'var(--accent-red)':'var(--accent-green)';
+    const wac=ln.itemId?_whCalcWAC(ln.itemId):0;
+    const rowTotal=parseFloat(ln.qty||0)*wac;
     const itemOpts=items.map(i=>`<option value="${i.id}"${i.id===ln.itemId?' selected':''}>${i.name} (${i.code||i.id})</option>`).join('');
     return`<tr>
       <td style="padding:5px 4px">
@@ -20564,18 +20590,44 @@ function _whIssLinesHTML(){
           <option value="">— Select Item —</option>${itemOpts}
         </select>
       </td>
-      <td style="padding:5px 4px;font-size:11px;text-align:center">
-        ${q?`<span style="color:${availColor};font-weight:700">${avail}</span><span style="color:var(--text-secondary)"> ${item?.unit||''}</span>`:'—'}
+      <td style="padding:5px 4px;font-size:11px;text-align:center;width:70px">
+        ${q?`<span style="color:${availColor};font-weight:700">${avail}</span><br><span style="color:var(--text-secondary);font-size:10px">${item?.unit||''}</span>`:'—'}
       </td>
-      <td style="padding:5px 4px;width:80px">
+      <td style="padding:5px 4px;width:75px">
         <input class="form-control" type="number" min="0.01" step="0.01" style="font-size:12px;width:100%" placeholder="0" value="${ln.qty||''}"
-          oninput="_whIssLines[${idx}].qty=this.value">
+          oninput="_whIssLines[${idx}].qty=this.value;_whUpdateIssTotals()">
       </td>
-      <td style="padding:5px 4px;width:36px;text-align:center">
+      <td style="padding:5px 8px;width:85px;text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);white-space:nowrap">
+        ${wac>0?'₱'+fmtNum(wac):'—'}
+      </td>
+      <td id="wh-iss-rt-${idx}" style="padding:5px 8px;width:90px;text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--accent-amber);white-space:nowrap">
+        ${rowTotal>0?'₱'+fmtNum(rowTotal):'—'}
+      </td>
+      <td style="padding:5px 4px;width:32px;text-align:center">
         ${_whIssLines.length>1?`<button class="btn btn-secondary btn-sm" style="padding:2px 6px;color:var(--accent-red)" onclick="_whIssLines.splice(${idx},1);_whRefreshIss()"><i class="fas fa-times"></i></button>`:''}
       </td>
     </tr>`;
   }).join('');
+  const grand=_whIssLines.reduce((s,ln)=>s+parseFloat(ln.qty||0)*( ln.itemId?_whCalcWAC(ln.itemId):0),0);
+  return rows+`
+  <tr style="background:var(--bg-tertiary);border-top:2px solid var(--border)">
+    <td colspan="4" style="padding:6px 8px;font-size:12px;font-weight:600;text-align:right;color:var(--text-secondary)">TRANSACTION TOTAL</td>
+    <td id="wh-iss-grand" style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-size:13px;font-weight:700;color:var(--accent-amber);white-space:nowrap">${grand>0?'₱'+fmtNum(grand):'—'}</td>
+    <td></td>
+  </tr>`;
+}
+
+function _whUpdateIssTotals(){
+  let grand=0;
+  _whIssLines.forEach((ln,idx)=>{
+    const wac=ln.itemId?_whCalcWAC(ln.itemId):0;
+    const t=parseFloat(ln.qty||0)*wac;
+    grand+=t;
+    const el=$(`#wh-iss-rt-${idx}`);
+    if(el)el.textContent=t>0?'₱'+fmtNum(t):'—';
+  });
+  const el=$('#wh-iss-grand');
+  if(el)el.textContent=grand>0?'₱'+fmtNum(grand):'—';
 }
 
 function _whRefreshIss(){
@@ -20629,7 +20681,8 @@ function _whReceiveHTML(){
                 <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left">Item</th>
                 <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:80px">Qty</th>
                 <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:100px">Unit Cost (₱)</th>
-                <th style="width:36px"></th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:right;width:90px">Line Total</th>
+                <th style="width:32px"></th>
               </tr>
             </thead>
             <tbody id="wh-rcv-lines">${_whRcvLinesHTML()}</tbody>
@@ -20724,9 +20777,11 @@ function _whIssueHTML(){
             <thead>
               <tr style="background:var(--bg-tertiary)">
                 <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left">Item</th>
-                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:center;width:80px">Available</th>
-                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:80px">Qty</th>
-                <th style="width:36px"></th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:center;width:70px">Available</th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:75px">Qty</th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:right;width:85px">WAC/Unit</th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:right;width:90px">Line Total</th>
+                <th style="width:32px"></th>
               </tr>
             </thead>
             <tbody id="wh-iss-lines">${_whIssLinesHTML()}</tbody>
