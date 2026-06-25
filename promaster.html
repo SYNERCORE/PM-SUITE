@@ -20329,7 +20329,7 @@ function _whImportPreview(){
       <td style="font-size:11px">${name}</td>
       <td style="font-size:11px">${row[headers.indexOf('category')]||'—'}</td>
       <td style="font-size:11px">${row[headers.indexOf('unit')]||'—'}</td>
-      <td style="font-size:11px;text-align:right">${row[headers.indexOf('openingqty')]||'0'}</td>
+      <td style="font-size:11px;text-align:right">${(()=>{const qi=['openingqty','onhand','on hand','qty','quantity'].map(a=>headers.findIndex(h=>h.replace(/[\s_\-]/g,'')===a.replace(/[\s_\-]/g,''))).find(i=>i!==-1);return qi!==-1&&qi!==undefined?row[qi]||'0':'0';})()}</td>
       <td style="font-size:10px">${skip?'<span style="color:var(--accent-amber)">Skip (exists)</span>':'<span style="color:var(--accent-green)">New</span>'}</td>
     </tr>`;
   }).join('');
@@ -20348,19 +20348,28 @@ function _whImportExecute(){
   const text=$('#wh-import-csv')?.value||'';
   if(!text.trim()){showToast('Paste or select a CSV file first','error');return;}
   const {headers,rows}=_whImportParseCsv(text);
-  const idx=k=>headers.findIndex(h=>h===k);
-  const nameIdx=idx('name');
+  // Fuzzy column finder — strips spaces, lowercases, checks multiple aliases
+  const idx=(...aliases)=>{
+    for(const alias of aliases){
+      const norm=alias.toLowerCase().replace(/[\s_\-]/g,'');
+      const i=headers.findIndex(h=>h.replace(/[\s_\-]/g,'')===norm);
+      if(i!==-1)return i;
+    }
+    return -1;
+  };
+  const nameIdx=idx('name','itemname','description');
   if(nameIdx===-1){showToast('No "Name" column found in CSV','error');return;}
-  const codeIdx=idx('code');
-  const catIdx=idx('category');
-  const unitIdx=idx('unit');
-  const costIdx=idx('unitcost');
-  const minIdx=idx('minstock');
-  const reorderIdx=idx('reorderpoint');
+  const codeIdx=idx('code','itemcode','sku','id');
+  const catIdx=idx('category','cat','type');
+  const unitIdx=idx('unit','uom','unitofmeasure');
+  const costIdx=idx('unitcost','cost','price','unitprice');
+  const minIdx=idx('minstock','minimumstock','minqty','minimum');
+  const reorderIdx=idx('reorderpoint','reorder','reorderqty');
   const rackIdx=idx('rack');
   const rowIdx=idx('row');
-  const locIdx=idx('location');
-  const qtyIdx=idx('openingqty');
+  const locIdx=idx('location','storagelocation','bin','area');
+  // Accept OnHand / OpeningQty / Qty / Quantity as the opening stock column
+  const qtyIdx=idx('openingqty','openingstock','onhand','on hand','qty','quantity','initialqty','beginningqty');
 
   if(!AppState.data.warehouseItems)AppState.data.warehouseItems=[];
   if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
