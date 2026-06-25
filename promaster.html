@@ -885,6 +885,13 @@ const SHIC_LIST_CONFIG = {
       { field: 'changedAt', spCol: 'ChangedAt', spType: 'DateTime' },
     ],
   },
+  'SHIC_BusinessUnits': {
+    dataKey: 'businessUnits', idField: 'BuId', name: 'Business Units', hasProject: false,
+    indexCols: [
+      { field: 'name',   spCol: 'Name',   spType: 'Text' },
+      { field: 'active', spCol: 'Active', spType: 'Boolean' },
+    ],
+  },
 };
 const SHIC_OFFLOADED_KEYS = Object.values(SHIC_LIST_CONFIG).map(c => c.dataKey);
 // Cache for list IDs to avoid re-resolving
