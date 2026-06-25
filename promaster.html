@@ -20189,7 +20189,7 @@ function _whImportItems(){
 
         <!-- Template download -->
         <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
-          <button class="btn btn-secondary btn-sm" onclick="exportCSV([[`MAT-001`,`Portland Cement Type I`,`Materials`,`bag`,`320.00`,`50`,`30`,`Bin A-1`,`100`],[`CON-001`,`Welding Rod E6013`,`Consumables`,`pcs`,`18.50`,`200`,`100`,`Rack B-2`,`500`]],[`Code`,`Name`,`Category`,`Unit`,`UnitCost`,`MinStock`,`ReorderPoint`,`Location`,`OpeningQty`],`warehouse_import_template.csv`)">
+          <button class="btn btn-secondary btn-sm" onclick="_whDownloadTemplate()">
             <i class="fas fa-download"></i> Download Template
           </button>
           <span style="font-size:11px;color:var(--text-secondary)">Required columns: Code, Name, Category, Unit · Optional: UnitCost, MinStock, ReorderPoint, Location, OpeningQty</span>
@@ -21206,6 +21206,14 @@ function _whShowReceive(itemId){_whTab='receive';_whRenderTab();setTimeout(()=>{
 function _whShowIssueItem(itemId){_whTab='issue';_whRenderTab();setTimeout(()=>{const el=$('#wh-iss-item');if(el){el.value=itemId;_whFillIssueInfo();}},50);}
 
 // ── EXPORT HELPERS ───────────────────────────────────────────
+function _whDownloadTemplate(){
+  exportCSV(
+    [['MAT-001','Portland Cement Type I','Materials','bag','320.00','50','30','Bin A-1','100'],
+     ['CON-001','Welding Rod E6013','Consumables','pcs','18.50','200','100','Rack B-2','500']],
+    ['Code','Name','Category','Unit','UnitCost','MinStock','ReorderPoint','Location','OpeningQty'],
+    'warehouse_import_template.csv'
+  );
+}
 function _whExportItems(){
   const rows=_whItems().map(i=>{const q=_whCalcQty(i.id);return[i.id,i.code||'',i.name,i.category||'',i.unit||'',q.qtyOnHand,q.qtyReserved,q.qtyAvailable,i.unitCost||0,q.qtyOnHand*(i.unitCost||0),i.minStock||0,i.location||'',i.description||''];});
   exportCSV(rows,['ID','Code','Name','Category','Unit','OnHand','Reserved','Available','UnitCost','TotalValue','MinStock','Location','Description'],'warehouse_items.csv');
