@@ -20946,6 +20946,7 @@ function _whLedgerHTML(){
     const item=items.find(i=>i.id===t.itemId);
     const col=typeColor[t.type]||'#aaa';
     const sign=t.type==='issue'?'−':'+';
+    const canPrint=(t.type==='issue'||t.type==='return'||t.type==='adjust');
     return`<tr>
       <td style="font-size:10px;color:var(--text-secondary);font-family:var(--font-mono)">${(t.date||'').slice(0,10)}</td>
       <td><span class="badge" style="background:${col}22;color:${col};border:1px solid ${col}44;font-size:10px;text-transform:uppercase">${t.type}</span></td>
@@ -20955,6 +20956,7 @@ function _whLedgerHTML(){
       <td style="font-size:11px">${t.vendor||t.issuedBy||t.by||'—'}</td>
       <td style="font-size:11px">${t.ref||'—'}</td>
       <td style="font-size:11px;color:var(--text-secondary)">${t.notes||'—'}</td>
+      <td style="padding:4px 6px">${canPrint?`<button class="btn btn-secondary btn-sm" style="padding:2px 7px" title="Print slip" onclick="_whReprintTx('${t.id}')"><i class="fas fa-print"></i></button>`:''}</td>
     </tr>`;
   }).join('');
 
@@ -20968,11 +20970,30 @@ function _whLedgerHTML(){
   </div>
   <div class="table-wrap">
   <table>
-    <thead><tr><th>DATE</th><th>TYPE</th><th>ITEM</th><th style="text-align:right">QTY</th><th>PROJECT</th><th>VENDOR / BY</th><th>REFERENCE</th><th>NOTES</th></tr></thead>
-    <tbody>${rows||`<tr><td colspan="8"><div class="empty-state"><i class="fas fa-list-alt"></i><p>No transactions yet</p></div></td></tr>`}</tbody>
+    <thead><tr><th>DATE</th><th>TYPE</th><th>ITEM</th><th style="text-align:right">QTY</th><th>PROJECT</th><th>VENDOR / BY</th><th>REFERENCE</th><th>NOTES</th><th></th></tr></thead>
+    <tbody>${rows||`<tr><td colspan="9"><div class="empty-state"><i class="fas fa-list-alt"></i><p>No transactions yet</p></div></td></tr>`}</tbody>
   </table>
   </div>
   ${shown.length>100?`<div style="text-align:center;padding:10px;color:var(--text-secondary);font-size:12px">Showing 100 of ${shown.length} records</div>`:''}`;
+}
+
+function _whReprintTx(txId){
+  const tx=_whTx().find(t=>t.id===txId);
+  if(!tx)return;
+  const item=_whItems().find(i=>i.id===tx.itemId);
+  const wac=tx.unitCost||_whCalcWAC(tx.itemId)||0;
+  const qty=Math.abs(tx.qty);
+  const slipData={
+    type:tx.type,
+    projId:tx.projectId,
+    date:tx.date,
+    by:tx.issuedBy||tx.by||tx.vendor||'',
+    notes:tx.notes||tx.ref||'',
+    items:[{name:item?.name||tx.itemId,code:item?.code||tx.itemId,unit:item?.unit||'',qty,wac,total:qty*wac}],
+    grand:qty*wac,
+    postedAt:tx.postedAt?new Date(tx.postedAt).toLocaleString('en-PH'):tx.date,
+  };
+  _whPrintSlip(slipData);
 }
 
 // ── SAVE HELPERS ─────────────────────────────────────────────
@@ -21063,9 +21084,100 @@ function _whSaveIssue(){
     _whSyncQty(ln.itemId);
   });
   AppState.save();
+  // Capture slip data before clearing
+  const slipItems=valid.map(ln=>{
+    const item=_whItems().find(i=>i.id===ln.itemId);
+    const wac=_whCalcWAC(ln.itemId);
+    const qty=parseFloat(ln.qty);
+    return{name:item?.name||ln.itemId,code:item?.code||ln.itemId,unit:item?.unit||'',qty,wac,total:qty*wac};
+  });
+  const slipData={type,projId,date,by,notes,items:slipItems,
+    grand:slipItems.reduce((s,r)=>s+r.total,0),
+    postedAt:new Date().toLocaleString('en-PH')};
   showToast(`${valid.length} item${valid.length>1?'s':''} — ${type} posted`,'success',3500);
   _whIssLines=[{itemId:'',qty:''}];
   _whRenderTab();
+  // Ask to print
+  setTimeout(()=>_whPrintSlip(slipData),400);
+}
+
+function _whPrintSlip(d){
+  const typeLabel={issue:'MATERIALS ISSUANCE SLIP',return:'STOCK RETURN SLIP',adjust:'INVENTORY ADJUSTMENT SLIP'};
+  const accentColor={issue:'#f59e0b',return:'#3b82f6',adjust:'#8b5cf6'};
+  const color=accentColor[d.type]||'#f59e0b';
+  const proj=d.projId?(AppState.data.projects||[]).find(p=>p.id===d.projId):null;
+  const rows=d.items.map((r,i)=>`
+    <tr style="border-bottom:1px solid #e5e7eb">
+      <td style="padding:8px 10px;font-size:13px">${i+1}</td>
+      <td style="padding:8px 10px;font-size:12px;color:#6b7280">${r.code}</td>
+      <td style="padding:8px 10px;font-size:13px;font-weight:600">${r.name}</td>
+      <td style="padding:8px 10px;text-align:center;font-size:13px">${r.qty}</td>
+      <td style="padding:8px 10px;text-align:center;font-size:13px">${r.unit}</td>
+      <td style="padding:8px 10px;text-align:right;font-family:monospace;font-size:13px">₱${_whFmt(r.wac)}</td>
+      <td style="padding:8px 10px;text-align:right;font-family:monospace;font-size:13px;font-weight:700;color:${color}">₱${_whFmt(r.total)}</td>
+    </tr>`).join('');
+  const company=(AppState.data.settings?.companyName)||'SY3 Energy Maintenance Services Corporation';
+  const html=`<!DOCTYPE html><html><head><title>${typeLabel[d.type]||'Transaction Slip'}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:Arial,sans-serif;color:#111;background:#fff;padding:28px 36px;font-size:13px}
+    .header{border-bottom:3px solid ${color};padding-bottom:14px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end}
+    .title{font-size:20px;font-weight:700;color:${color};letter-spacing:.5px}
+    .company{font-size:11px;color:#6b7280;margin-top:3px}
+    .meta{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;margin-bottom:18px;background:#f9fafb;padding:12px 16px;border-radius:6px;border:1px solid #e5e7eb}
+    .meta-row{display:flex;gap:8px;font-size:12px}<br>
+    .meta-label{color:#6b7280;min-width:90px;flex-shrink:0}
+    .meta-value{font-weight:600}
+    table{width:100%;border-collapse:collapse;margin-bottom:18px}
+    thead tr{background:${color};color:#fff}
+    th{padding:9px 10px;text-align:left;font-size:12px;font-weight:600}
+    th:nth-child(4),th:nth-child(5){text-align:center}
+    th:nth-child(6),th:nth-child(7){text-align:right}
+    .total-row td{padding:10px;font-weight:700;font-size:14px;border-top:2px solid ${color}}
+    .footer{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:30px;padding-top:16px;border-top:1px solid #e5e7eb}
+    .sig-box{text-align:center}
+    .sig-line{border-bottom:1px solid #374151;margin-bottom:6px;height:40px}
+    .sig-label{font-size:11px;color:#6b7280}
+    @media print{body{padding:16px 20px}button{display:none}}
+  </style></head><body>
+  <div class="header">
+    <div>
+      <div class="title">${typeLabel[d.type]||'TRANSACTION SLIP'}</div>
+      <div class="company">${company}</div>
+    </div>
+    <div style="text-align:right;font-size:12px;color:#6b7280">
+      <div style="font-size:15px;font-weight:700;color:#111">Date: ${d.date}</div>
+      <div>Printed: ${d.postedAt}</div>
+    </div>
+  </div>
+  <div class="meta">
+    ${proj?`<div class="meta-row"><span class="meta-label">Project:</span><span class="meta-value">${proj.id} — ${proj.name||''}</span></div>`:''}
+    <div class="meta-row"><span class="meta-label">Issued / By:</span><span class="meta-value">${d.by||'—'}</span></div>
+    <div class="meta-row"><span class="meta-label">Transaction:</span><span class="meta-value" style="color:${color};text-transform:capitalize">${d.type}</span></div>
+    ${d.notes?`<div class="meta-row"><span class="meta-label">Notes / WO Ref:</span><span class="meta-value">${d.notes}</span></div>`:''}
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>Code</th><th>Description</th><th>Qty</th><th>Unit</th><th>Unit Cost</th><th>Total</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="6" style="text-align:right;padding:10px">TOTAL TRANSACTION VALUE</td>
+      <td style="text-align:right;font-family:monospace;color:${color};padding:10px">₱${_whFmt(d.grand)}</td>
+    </tr></tfoot>
+  </table>
+  <div class="footer">
+    <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Prepared / Issued By</div></div>
+    <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Received By</div></div>
+    <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorized By</div></div>
+  </div>
+  <div style="text-align:center;margin-top:28px">
+    <button onclick="window.print()" style="padding:10px 28px;background:${color};color:#fff;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer">🖨 Print</button>
+    <button onclick="window.close()" style="padding:10px 20px;margin-left:10px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;font-size:14px;cursor:pointer">Close</button>
+  </div>
+  <script>window.onload=()=>window.print();<\/script>
+  </body></html>`;
+  const w=window.open('','_blank','width=900,height=700,scrollbars=yes');
+  if(w){w.document.write(html);w.document.close();}
+  else showToast('Allow popups to print the slip','error',4000);
 }
 
 // ── ISSUANCE REQUEST ACTIONS ─────────────────────────────────
