@@ -20128,7 +20128,7 @@ function _whItemsHTML(){
   const cats=['all',...new Set(_whItems().map(i=>i.category||'Uncategorized'))];
   let items=_whItems();
   if(_whItemCat!=='all')items=items.filter(i=>(i.category||'Uncategorized')===_whItemCat);
-  if(_whItemSearch)items=items.filter(i=>(i.name+' '+(i.code||'')+(i.location||'')).toLowerCase().includes(_whItemSearch.toLowerCase()));
+  if(_whItemSearch)items=items.filter(i=>(i.name+' '+(i.code||'')+' '+(i.location||'')+' '+(i.rack||'')+' '+(i.row||'')).toLowerCase().includes(_whItemSearch.toLowerCase()));
 
   const rows=items.map(item=>{
     const q=_whCalcQty(item.id);
@@ -20138,8 +20138,15 @@ function _whItemsHTML(){
     return`<tr>
       <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">${item.code||item.id}</td>
       <td><div style="font-weight:600">${item.name}</div>
-        <div style="font-size:10px;color:var(--text-secondary)">${item.category||'—'} · ${item.location||'—'}</div>
+        <div style="font-size:10px;color:var(--text-secondary)">${item.category||'—'}</div>
         ${item.itemMasterId?`<div style="font-size:9px;color:var(--accent-blue)"><i class="fas fa-link"></i> ${item.itemMasterId}</div>`:''}
+      </td>
+      <td style="white-space:nowrap">
+        ${(item.rack||item.row)?`
+        <div style="display:flex;flex-direction:column;gap:3px">
+          ${item.rack?`<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-family:var(--font-mono);background:rgba(56,139,253,.12);color:var(--accent-blue);border:1px solid rgba(56,139,253,.25);padding:1px 6px;border-radius:4px;font-weight:600"><i class="fas fa-th-large" style="font-size:8px"></i>Rack ${item.rack}</span>`:''}
+          ${item.row?`<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-family:var(--font-mono);background:rgba(63,185,80,.10);color:var(--accent-green);border:1px solid rgba(63,185,80,.22);padding:1px 6px;border-radius:4px;font-weight:600"><i class="fas fa-stream" style="font-size:8px"></i>Row ${item.row}</span>`:''}
+        </div>`:`<span style="color:var(--text-secondary);font-size:11px">—</span>`}
       </td>
       <td><span class="badge badge-blue" style="font-size:10px">${item.unit||'ea'}</span></td>
       <td style="text-align:right;font-family:var(--font-mono)">
@@ -20199,7 +20206,7 @@ function _whItemsHTML(){
   <div class="table-wrap">
   <table>
     <thead><tr>
-      <th>CODE</th><th>ITEM</th><th>UNIT</th>
+      <th>CODE</th><th>ITEM</th><th>LOCATION</th><th>UNIT</th>
       <th style="text-align:right">ON HAND</th>
       <th style="text-align:right">RESERVED</th>
       <th style="text-align:right">AVAILABLE</th>
@@ -20208,7 +20215,7 @@ function _whItemsHTML(){
       <th style="width:110px">STOCK LEVEL</th>
       <th>ACTIONS</th>
     </tr></thead>
-    <tbody>${rows||`<tr><td colspan="10"><div class="empty-state"><i class="fas fa-boxes"></i><p>No items in warehouse yet.</p><p style="font-size:12px;margin-top:4px">Click <strong>Add</strong> to add a single item, or <strong>Import</strong> to load stock in bulk from a CSV/Excel file.</p></div></td></tr>`}</tbody>
+    <tbody>${rows||`<tr><td colspan="11"><div class="empty-state"><i class="fas fa-boxes"></i><p>No items in warehouse yet.</p><p style="font-size:12px;margin-top:4px">Click <strong>Add</strong> to add a single item, or <strong>Import</strong> to load stock in bulk from a CSV/Excel file.</p></div></td></tr>`}</tbody>
   </table>
   </div>
   ${items.length?`<div style="padding:8px 4px;font-size:11px;color:var(--text-secondary)">SHOWING ${items.length} of ${_whItems().length} items · Total inventory value: <strong style="color:var(--accent-green)">₱${fmtNum(_whItems().reduce((s,i)=>{const q=_whCalcQty(i.id);return s+(q.qtyOnHand*(i.unitCost||0));},0))}</strong></div>`:''}`;
@@ -20350,6 +20357,8 @@ function _whImportExecute(){
   const costIdx=idx('unitcost');
   const minIdx=idx('minstock');
   const reorderIdx=idx('reorderpoint');
+  const rackIdx=idx('rack');
+  const rowIdx=idx('row');
   const locIdx=idx('location');
   const qtyIdx=idx('openingqty');
 
@@ -20379,6 +20388,8 @@ function _whImportExecute(){
       unitCost,
       minStock:minIdx>=0?parseFloat(row[minIdx])||0:0,
       reorderPoint:reorderIdx>=0?parseFloat(row[reorderIdx])||0:0,
+      rack:rackIdx>=0?(row[rackIdx]||'').toUpperCase():'',
+      row:rowIdx>=0?(parseInt(row[rowIdx])||''):'',
       location:locIdx>=0?row[locIdx]||'':'',
       description:'',
       qtyOnHand:0,qtyReserved:0,qtyAvailable:0,netIssued:0,
@@ -21062,9 +21073,17 @@ function _whShowAddItem(editId){
             <label class="form-label">Reorder Point</label>
             <input class="form-control" type="number" min="0" id="wh-add-reorder" placeholder="0" value="${existing?.reorderPoint||''}">
           </div>
+          <div class="form-group">
+            <label class="form-label">Rack <span style="font-size:10px;color:var(--text-secondary)">(letter, number, or combo)</span></label>
+            <input class="form-control" id="wh-add-rack" placeholder="e.g. A, B2, C12" value="${existing?.rack||''}" oninput="this.value=this.value.toUpperCase()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Row <span style="font-size:10px;color:var(--text-secondary)">(number only)</span></label>
+            <input class="form-control" id="wh-add-row" type="number" min="1" step="1" placeholder="e.g. 1, 2, 3" value="${existing?.row||''}">
+          </div>
           <div class="form-group" style="grid-column:1/-1">
-            <label class="form-label">Storage Location</label>
-            <input class="form-control" id="wh-add-loc" placeholder="Bin A-3, Rack 2, Storage Room B…" value="${existing?.location||''}">
+            <label class="form-label">Additional Location Notes</label>
+            <input class="form-control" id="wh-add-loc" placeholder="Bin A-3, Storage Room B, Near entrance…" value="${existing?.location||''}">
           </div>
           <div class="form-group" style="grid-column:1/-1">
             <label class="form-label">Description / Specs</label>
@@ -21095,6 +21114,8 @@ function _whSaveItem(editId){
         unitCost:parseFloat($('#wh-add-cost')?.value||0),
         minStock:parseFloat($('#wh-add-min')?.value||0),
         reorderPoint:parseFloat($('#wh-add-reorder')?.value||0),
+        rack:($('#wh-add-rack')?.value.trim()||'').toUpperCase(),
+        row:$('#wh-add-row')?.value?parseInt($('#wh-add-row').value)||'':'',
         location:$('#wh-add-loc')?.value.trim(),
         description:$('#wh-add-desc')?.value.trim(),
         updatedAt:now,
@@ -21108,6 +21129,8 @@ function _whSaveItem(editId){
       unitCost:parseFloat($('#wh-add-cost')?.value||0),
       minStock:parseFloat($('#wh-add-min')?.value||0),
       reorderPoint:parseFloat($('#wh-add-reorder')?.value||0),
+      rack:($('#wh-add-rack')?.value.trim()||'').toUpperCase(),
+      row:$('#wh-add-row')?.value?parseInt($('#wh-add-row').value)||'':'',
       location:$('#wh-add-loc')?.value.trim(),
       description:$('#wh-add-desc')?.value.trim(),
       qtyOnHand:0,qtyReserved:0,qtyAvailable:0,netIssued:0,
@@ -21259,15 +21282,15 @@ function _whShowIssueItem(itemId){_whTab='issue';_whRenderTab();setTimeout(()=>{
 // ── EXPORT HELPERS ───────────────────────────────────────────
 function _whDownloadTemplate(){
   exportCSV(
-    [['MAT-001','Portland Cement Type I','Materials','bag','320.00','50','30','Bin A-1','100'],
-     ['CON-001','Welding Rod E6013','Consumables','pcs','18.50','200','100','Rack B-2','500']],
-    ['Code','Name','Category','Unit','UnitCost','MinStock','ReorderPoint','Location','OpeningQty'],
+    [['MAT-001','Portland Cement Type I','Materials','bag','320.00','50','30','A','1','Bin A-1','100'],
+     ['CON-001','Welding Rod E6013','Consumables','pcs','18.50','200','100','B2','3','Near entrance','500']],
+    ['Code','Name','Category','Unit','UnitCost','MinStock','ReorderPoint','Rack','Row','Location','OpeningQty'],
     'warehouse_import_template.csv'
   );
 }
 function _whExportItems(){
-  const rows=_whItems().map(i=>{const q=_whCalcQty(i.id);return[i.id,i.code||'',i.name,i.category||'',i.unit||'',q.qtyOnHand,q.qtyReserved,q.qtyAvailable,i.unitCost||0,q.qtyOnHand*(i.unitCost||0),i.minStock||0,i.location||'',i.description||''];});
-  exportCSV(rows,['ID','Code','Name','Category','Unit','OnHand','Reserved','Available','UnitCost','TotalValue','MinStock','Location','Description'],'warehouse_items.csv');
+  const rows=_whItems().map(i=>{const q=_whCalcQty(i.id);return[i.id,i.code||'',i.name,i.category||'',i.unit||'',i.rack||'',i.row||'',q.qtyOnHand,q.qtyReserved,q.qtyAvailable,i.unitCost||0,q.qtyOnHand*(i.unitCost||0),i.minStock||0,i.location||'',i.description||''];});
+  exportCSV(rows,['ID','Code','Name','Category','Unit','Rack','Row','OnHand','Reserved','Available','UnitCost','TotalValue','MinStock','Location','Description'],'warehouse_items.csv');
 }
 function _whExportLedger(){
   const rows=_whTx().map(t=>{const item=_whItems().find(i=>i.id===t.itemId);return[t.id,t.date||'',t.type,item?.name||t.itemId,t.qty,t.projectId||'',t.vendor||t.issuedBy||'',t.ref||'',t.notes||''];});
