@@ -20259,8 +20259,19 @@ function _whImportItems(){
             <li>Save as <strong>CSV</strong> (File → Save As → CSV).</li>
             <li>Paste the CSV content in the box below (or select a file).</li>
             <li>Items will be added as new warehouse records with opening stock posted as a "receive" transaction.</li>
-            <li><strong>Existing items with the same Code are skipped</strong> — reimport is safe.</li>
           </ol>
+        </div>
+        <!-- Import mode -->
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:7px 12px;border:1px solid var(--border);border-radius:6px;flex:1">
+            <input type="radio" name="wh-import-mode" value="skip" checked> <div><strong>Skip existing</strong><div style="font-size:10px;color:var(--text-secondary)">Only add new items — safe for first-time load</div></div>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:7px 12px;border:1px solid var(--border);border-radius:6px;flex:1">
+            <input type="radio" name="wh-import-mode" value="update"> <div><strong>Update existing</strong><div style="font-size:10px;color:var(--text-secondary)">Update item details + post OnHand as receive transaction</div></div>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:7px 12px;border:1px solid var(--border);border-radius:6px;flex:1">
+            <input type="radio" name="wh-import-mode" value="replace"> <div><strong>Replace all</strong><div style="font-size:10px;color:var(--text-secondary);color:var(--accent-red)">Clear warehouse then reimport everything</div></div>
+          </label>
         </div>
 
         <!-- Template download -->
@@ -20341,14 +20352,16 @@ function _whImportPreview(){
   const tableRows=rows.slice(0,10).map(row=>{
     const code=codeIdx>=0?row[codeIdx]:'';
     const name=row[nameIdx]||'';
-    const skip=code&&existingCodes.has(code);
-    return`<tr style="${skip?'opacity:.45':''}">
+    const exists=code&&existingCodes.has(code);
+    const mode=(document.querySelector('input[name="wh-import-mode"]:checked')||{}).value||'skip';
+    const statusLabel=exists?(mode==='skip'?'<span style="color:var(--accent-amber)">Skip</span>':'<span style="color:var(--accent-blue)">Update</span>'):'<span style="color:var(--accent-green)">New</span>';
+    return`<tr style="${exists&&mode==='skip'?'opacity:.45':''}">
       <td style="font-size:11px;font-family:var(--font-mono)">${code||'auto'}</td>
       <td style="font-size:11px">${name}</td>
       <td style="font-size:11px">${row[headers.indexOf('category')]||'—'}</td>
       <td style="font-size:11px">${row[headers.indexOf('unit')]||'—'}</td>
       <td style="font-size:11px;text-align:right">${(()=>{const qi=['openingqty','onhand','on hand','qty','quantity'].map(a=>headers.findIndex(h=>h.replace(/[\s_\-]/g,'')===a.replace(/[\s_\-]/g,''))).find(i=>i!==-1);return qi!==-1&&qi!==undefined?row[qi]||'0':'0';})()}</td>
-      <td style="font-size:10px">${skip?'<span style="color:var(--accent-amber)">Skip (exists)</span>':'<span style="color:var(--accent-green)">New</span>'}</td>
+      <td style="font-size:10px">${statusLabel}</td>
     </tr>`;
   }).join('');
   preview.innerHTML=`
@@ -20389,24 +20402,70 @@ function _whImportExecute(){
   // Accept OnHand / OpeningQty / Qty / Quantity as the opening stock column
   const qtyIdx=idx('openingqty','openingstock','onhand','on hand','qty','quantity','initialqty','beginningqty');
 
+  const mode=(document.querySelector('input[name="wh-import-mode"]:checked')||{}).value||'skip';
+
   if(!AppState.data.warehouseItems)AppState.data.warehouseItems=[];
   if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
 
-  const existingCodes=new Set(_whItems().map(i=>i.code||i.id));
+  // Replace mode: soft-delete all existing items first
+  if(mode==='replace'){
+    if(!confirm(`Replace ALL warehouse items with this CSV?\n\nThis will remove all ${_whItems().length} existing items and reimport from the file. Transaction history is preserved.\n\nProceed?`))return;
+    AppState.data.warehouseItems.forEach(i=>i._deleted=true);
+  }
+
+  const existingByCode=new Map(_whItems().map(i=>[i.code||i.id,i]));
   const now=new Date().toISOString();
   const today=now.slice(0,10);
-  let added=0,skipped=0;
+  let added=0,updated=0,skipped=0;
 
   rows.forEach(row=>{
     const name=(row[nameIdx]||'').trim();
     if(!name)return;
     const code=(codeIdx>=0?row[codeIdx]:'').trim();
-    if(code&&existingCodes.has(code)){skipped++;return;}
-
-    const id=_whNextId('WH-',AppState.data.warehouseItems);
     const unitCost=costIdx>=0?parseFloat(row[costIdx])||0:0;
     const openingQty=qtyIdx>=0?parseFloat(row[qtyIdx])||0:0;
 
+    const existing=code?existingByCode.get(code):null;
+
+    if(existing&&mode==='skip'){skipped++;return;}
+
+    if(existing&&(mode==='update'||mode==='replace')){
+      // Update item fields (but don't change qty directly — post a receive tx instead)
+      Object.assign(existing,{
+        name,
+        category:catIdx>=0?row[catIdx]||existing.category:existing.category,
+        unit:unitIdx>=0?row[unitIdx]||existing.unit:existing.unit,
+        unitCost:unitCost||existing.unitCost,
+        minStock:minIdx>=0?parseFloat(row[minIdx])||existing.minStock:existing.minStock,
+        reorderPoint:reorderIdx>=0?parseFloat(row[reorderIdx])||existing.reorderPoint:existing.reorderPoint,
+        rack:rackIdx>=0?(row[rackIdx]||'').toUpperCase()||existing.rack:existing.rack,
+        row:rowIdx>=0?parseInt(row[rowIdx])||existing.row:existing.row,
+        location:locIdx>=0?row[locIdx]||existing.location:existing.location,
+        updatedAt:now,
+      });
+      // Post stock adjustment to reconcile OnHand if provided
+      if(openingQty>0){
+        const currentQty=_whCalcQty(existing.id).qtyOnHand;
+        const diff=openingQty-currentQty;
+        if(Math.abs(diff)>0){
+          AppState.data.stockTransactions.push({
+            id:_whNextId('TX-',AppState.data.stockTransactions),
+            itemId:existing.id,type:'adjust',qty:diff,date:today,
+            vendor:'',ref:'REIMPORT',
+            notes:`Reimport reconciliation (prev: ${currentQty}, imported: ${openingQty})`,
+            unitCost:unitCost||undefined,
+            by:AppState.currentUser?.displayName||'import',
+            postedAt:now,
+          });
+          _whSyncQty(existing.id);
+        }
+      }
+      updated++;
+      return;
+    }
+
+    // New item
+    const id=_whNextId('WH-',AppState.data.warehouseItems);
     AppState.data.warehouseItems.push({
       id,name,
       code:code||id,
@@ -20422,8 +20481,6 @@ function _whImportExecute(){
       qtyOnHand:0,qtyReserved:0,qtyAvailable:0,netIssued:0,
       createdAt:now,updatedAt:now,
     });
-
-    // Post opening stock as a receive transaction
     if(openingQty>0){
       AppState.data.stockTransactions.push({
         id:_whNextId('TX-',AppState.data.stockTransactions),
@@ -20436,13 +20493,17 @@ function _whImportExecute(){
       });
       _whSyncQty(id);
     }
-    existingCodes.add(code||id);
+    if(code)existingByCode.set(code,AppState.data.warehouseItems[AppState.data.warehouseItems.length-1]);
     added++;
   });
 
   AppState.save();
   closeModal('whImportModal');
-  showToast(`Imported ${added} item${added!==1?'s':''}${skipped?` · ${skipped} skipped (already exist)`:''}`,'success',5000);
+  const parts=[];
+  if(added)parts.push(`${added} added`);
+  if(updated)parts.push(`${updated} updated`);
+  if(skipped)parts.push(`${skipped} skipped`);
+  showToast(`Import complete — ${parts.join(' · ')}`,'success',5000);
   _whRenderTab();
 }
 
