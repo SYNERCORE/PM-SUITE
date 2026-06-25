@@ -20511,12 +20511,18 @@ function _whImportExecute(){
 let _whRcvLines=[];
 let _whIssLines=[];
 
+// Exact currency formatter (no K/M rounding) for warehouse money fields
+const _whFmt=v=>Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
+
 function _whRcvLinesHTML(){
   const items=_whItems();
   const itemOpts=items.map(i=>`<option value="${i.id}">${i.name} (${i.code||i.id})</option>`).join('');
-  if(!_whRcvLines.length)_whRcvLines=[{itemId:'',qty:'',unitCost:''}];
+  if(!_whRcvLines.length)_whRcvLines=[{itemId:'',qty:'',unitCost:'',lineTotal:''}];
   const rows=_whRcvLines.map((ln,idx)=>{
-    const rowTotal=parseFloat(ln.qty||0)*parseFloat(ln.unitCost||0);
+    const qty=parseFloat(ln.qty||0);
+    const uc=parseFloat(ln.unitCost||0);
+    const lt=parseFloat(ln.lineTotal||0);
+    const rowTotal=lt>0?lt:(qty*uc);
     return`
   <tr>
     <td style="padding:5px 4px">
@@ -20524,40 +20530,70 @@ function _whRcvLinesHTML(){
         <option value="">— Select Item —</option>${itemOpts.replace(`value="${ln.itemId}"`,`value="${ln.itemId}" selected`)}
       </select>
     </td>
-    <td style="padding:5px 4px;width:80px">
+    <td style="padding:5px 4px;width:75px">
       <input class="form-control" type="number" min="0.01" step="0.01" style="font-size:12px;width:100%" placeholder="0" value="${ln.qty||''}"
-        oninput="_whRcvLines[${idx}].qty=this.value;_whUpdateRcvTotals()">
+        oninput="_whRcvLines[${idx}].qty=this.value;_whRcvCalcFromQtyOrCost(${idx})">
     </td>
     <td style="padding:5px 4px;width:100px">
-      <input class="form-control" type="number" min="0" step="0.01" style="font-size:12px;width:100%" placeholder="0.00" value="${ln.unitCost||''}"
-        oninput="_whRcvLines[${idx}].unitCost=this.value;_whUpdateRcvTotals()">
+      <input id="wh-rcv-uc-${idx}" class="form-control" type="number" min="0" step="0.01" style="font-size:12px;width:100%" placeholder="0.00" value="${ln.unitCost||''}"
+        oninput="_whRcvLines[${idx}].unitCost=this.value;_whRcvLines[${idx}].lineTotal='';_whUpdateRcvTotals()">
     </td>
-    <td id="wh-rcv-rt-${idx}" style="padding:5px 8px;width:90px;text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--accent-green);white-space:nowrap">
-      ${rowTotal>0?'₱'+fmtNum(rowTotal):'—'}
+    <td style="padding:5px 4px;width:105px">
+      <input id="wh-rcv-lt-${idx}" class="form-control" type="number" min="0" step="0.01" style="font-size:12px;width:100%;color:var(--accent-green)" placeholder="0.00" value="${ln.lineTotal||rowTotal||''}"
+        oninput="_whRcvLines[${idx}].lineTotal=this.value;_whRcvCalcUnitCost(${idx})">
+    </td>
+    <td id="wh-rcv-rt-${idx}" style="padding:5px 8px;width:110px;text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--accent-green);white-space:nowrap">
+      ${rowTotal>0?'₱'+_whFmt(rowTotal):'—'}
     </td>
     <td style="padding:5px 4px;width:32px;text-align:center">
       ${_whRcvLines.length>1?`<button class="btn btn-secondary btn-sm" style="padding:2px 6px;color:var(--accent-red)" onclick="_whRcvLines.splice(${idx},1);_whRefreshRcv()"><i class="fas fa-times"></i></button>`:''}
     </td>
   </tr>`;}).join('');
-  const grand=_whRcvLines.reduce((s,ln)=>s+parseFloat(ln.qty||0)*parseFloat(ln.unitCost||0),0);
+  const grand=_whRcvLines.reduce((s,ln)=>{
+    const lt=parseFloat(ln.lineTotal||0);
+    const t=lt>0?lt:parseFloat(ln.qty||0)*parseFloat(ln.unitCost||0);
+    return s+t;
+  },0);
   return rows+`
   <tr style="background:var(--bg-tertiary);border-top:2px solid var(--border)">
-    <td colspan="3" style="padding:6px 8px;font-size:12px;font-weight:600;text-align:right;color:var(--text-secondary)">TRANSACTION TOTAL</td>
-    <td id="wh-rcv-grand" style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-size:13px;font-weight:700;color:var(--accent-green);white-space:nowrap">${grand>0?'₱'+fmtNum(grand):'—'}</td>
+    <td colspan="5" style="padding:6px 8px;font-size:12px;font-weight:600;text-align:right;color:var(--text-secondary)">TRANSACTION TOTAL</td>
+    <td id="wh-rcv-grand" style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-size:13px;font-weight:700;color:var(--accent-green);white-space:nowrap">${grand>0?'₱'+_whFmt(grand):'—'}</td>
     <td></td>
   </tr>`;
+}
+
+// Called when qty or unit cost changes — clears lineTotal override, recalculates display
+function _whRcvCalcFromQtyOrCost(idx){
+  _whRcvLines[idx].lineTotal='';
+  const ltEl=$(`#wh-rcv-lt-${idx}`);
+  if(ltEl)ltEl.value='';
+  _whUpdateRcvTotals();
+}
+
+// Called when Line Total is typed — back-calculates unit cost from qty
+function _whRcvCalcUnitCost(idx){
+  const lt=parseFloat(_whRcvLines[idx].lineTotal||0);
+  const qty=parseFloat(_whRcvLines[idx].qty||0);
+  if(lt>0&&qty>0){
+    const uc=(lt/qty);
+    _whRcvLines[idx].unitCost=uc.toFixed(4);
+    const ucEl=$(`#wh-rcv-uc-${idx}`);
+    if(ucEl)ucEl.value=uc.toFixed(4);
+  }
+  _whUpdateRcvTotals();
 }
 
 function _whUpdateRcvTotals(){
   let grand=0;
   _whRcvLines.forEach((ln,idx)=>{
-    const t=parseFloat(ln.qty||0)*parseFloat(ln.unitCost||0);
+    const lt=parseFloat(ln.lineTotal||0);
+    const t=lt>0?lt:parseFloat(ln.qty||0)*parseFloat(ln.unitCost||0);
     grand+=t;
     const el=$(`#wh-rcv-rt-${idx}`);
-    if(el)el.textContent=t>0?'₱'+fmtNum(t):'—';
+    if(el)el.textContent=t>0?'₱'+_whFmt(t):'—';
   });
   const el=$('#wh-rcv-grand');
-  if(el)el.textContent=grand>0?'₱'+fmtNum(grand):'—';
+  if(el)el.textContent=grand>0?'₱'+_whFmt(grand):'—';
 }
 
 function _whRcvAutoFillCost(idx){
@@ -20598,10 +20634,10 @@ function _whIssLinesHTML(){
           oninput="_whIssLines[${idx}].qty=this.value;_whUpdateIssTotals()">
       </td>
       <td style="padding:5px 8px;width:85px;text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);white-space:nowrap">
-        ${wac>0?'₱'+fmtNum(wac):'—'}
+        ${wac>0?'₱'+_whFmt(wac):'—'}
       </td>
-      <td id="wh-iss-rt-${idx}" style="padding:5px 8px;width:90px;text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--accent-amber);white-space:nowrap">
-        ${rowTotal>0?'₱'+fmtNum(rowTotal):'—'}
+      <td id="wh-iss-rt-${idx}" style="padding:5px 8px;width:100px;text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--accent-amber);white-space:nowrap">
+        ${rowTotal>0?'₱'+_whFmt(rowTotal):'—'}
       </td>
       <td style="padding:5px 4px;width:32px;text-align:center">
         ${_whIssLines.length>1?`<button class="btn btn-secondary btn-sm" style="padding:2px 6px;color:var(--accent-red)" onclick="_whIssLines.splice(${idx},1);_whRefreshIss()"><i class="fas fa-times"></i></button>`:''}
@@ -20612,7 +20648,7 @@ function _whIssLinesHTML(){
   return rows+`
   <tr style="background:var(--bg-tertiary);border-top:2px solid var(--border)">
     <td colspan="4" style="padding:6px 8px;font-size:12px;font-weight:600;text-align:right;color:var(--text-secondary)">TRANSACTION TOTAL</td>
-    <td id="wh-iss-grand" style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-size:13px;font-weight:700;color:var(--accent-amber);white-space:nowrap">${grand>0?'₱'+fmtNum(grand):'—'}</td>
+    <td id="wh-iss-grand" style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-size:13px;font-weight:700;color:var(--accent-amber);white-space:nowrap">${grand>0?'₱'+_whFmt(grand):'—'}</td>
     <td></td>
   </tr>`;
 }
@@ -20679,9 +20715,10 @@ function _whReceiveHTML(){
             <thead>
               <tr style="background:var(--bg-tertiary)">
                 <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left">Item</th>
-                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:80px">Qty</th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:75px">Qty</th>
                 <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:100px">Unit Cost (₱)</th>
-                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:right;width:90px">Line Total</th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--accent-green);text-align:left;width:105px">Line Total (₱) <i class="fas fa-pencil-alt" style="font-size:9px;opacity:.7" title="Enter total — unit cost auto-calculates"></i></th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:right;width:110px">Computed</th>
                 <th style="width:32px"></th>
               </tr>
             </thead>
