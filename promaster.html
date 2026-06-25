@@ -19971,10 +19971,10 @@ function _whCalcQty(itemId){
     if(t.type==='receive')return s+t.qty;
     if(t.type==='issue')return s-t.qty;
     if(t.type==='return')return s+t.qty;
-    if(t.type==='adjust')return s+t.qty; // adjust can be negative
+    if(t.type==='adjust')return s+t.qty;
     return s;
   },0);
-  const qtyReserved=( AppState.data.resourceAllocations||[]).filter(a=>!a._deleted&&a.resourceId===itemId&&(a.resourceType==='Material'||a.resourceType==='Consumable')).reduce((s,a)=>s+(a.allocatedQty||0),0);
+  const qtyReserved=(AppState.data.resourceAllocations||[]).filter(a=>!a._deleted&&a.resourceId===itemId&&(a.resourceType==='Material'||a.resourceType==='Consumable')).reduce((s,a)=>s+(a.allocatedQty||0),0);
   const issued=tx.filter(t=>t.type==='issue').reduce((s,t)=>s+t.qty,0);
   const returned=tx.filter(t=>t.type==='return').reduce((s,t)=>s+t.qty,0);
   const netIssued=Math.max(0,issued-returned);
@@ -20005,7 +20005,6 @@ function renderWarehouse(){
   const tx=_whTx();
   const reqs=_whReq();
 
-  // KPI strip
   const totalItems=items.length;
   const lowStock=items.filter(i=>{const q=_whCalcQty(i.id);return i.minStock>0&&q.qtyOnHand<=i.minStock;}).length;
   const totalValue=items.reduce((s,i)=>{const q=_whCalcQty(i.id);return s+(q.qtyOnHand*(i.unitCost||0));},0);
@@ -20025,10 +20024,6 @@ function renderWarehouse(){
     <div>
       <div class="section-title"><i class="fas fa-warehouse" style="color:var(--accent-blue);margin-right:9px"></i>Warehouse</div>
       <div class="section-sub">Stock management — receive, reserve, issue, return, and track all materials &amp; consumables</div>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <button class="btn btn-secondary btn-sm" onclick="_whExportItems()"><i class="fas fa-download"></i> Export</button>
-      <button class="btn btn-primary btn-sm" onclick="_whShowAddItem()"><i class="fas fa-plus"></i> Add Item</button>
     </div>
   </div>
 
@@ -20093,7 +20088,7 @@ function _whItemsHTML(){
       <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">${item.code||item.id}</td>
       <td><div style="font-weight:600">${item.name}</div>
         <div style="font-size:10px;color:var(--text-secondary)">${item.category||'—'} · ${item.location||'—'}</div>
-        ${item.itemMasterId?`<div style="font-size:9px;color:var(--accent-blue)"><i class="fas fa-link"></i> Item Master: ${item.itemMasterId}</div>`:''}
+        ${item.itemMasterId?`<div style="font-size:9px;color:var(--accent-blue)"><i class="fas fa-link"></i> ${item.itemMasterId}</div>`:''}
       </td>
       <td><span class="badge badge-blue" style="font-size:10px">${item.unit||'ea'}</span></td>
       <td style="text-align:right;font-family:var(--font-mono)">
@@ -20130,33 +20125,241 @@ function _whItemsHTML(){
   }).join('');
 
   return`
+  <!-- Toolbar -->
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+    <div style="font-size:13px;font-weight:700;color:var(--text-secondary)">
+      Warehouse Items — <span style="color:var(--text-primary)">${items.length}</span> items
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-danger btn-sm" onclick="_whClearAll()" title="Clear all items"><i class="fas fa-trash"></i></button>
+      <button class="btn btn-secondary btn-sm" onclick="_whImportItems()"><i class="fas fa-file-import"></i> Import</button>
+      <button class="btn btn-secondary btn-sm" onclick="_whExportItems()"><i class="fas fa-download"></i> Export</button>
+      <button class="btn btn-primary btn-sm" onclick="_whShowAddItem()"><i class="fas fa-plus"></i> Add</button>
+    </div>
+  </div>
+  <!-- Search & filter -->
   <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-    <input class="form-control" style="flex:1;min-width:180px" placeholder="Search items, code, location…" value="${_whItemSearch}"
+    <input class="form-control" style="flex:1;min-width:200px" placeholder="Search items, code, location…" value="${_whItemSearch}"
       oninput="_whItemSearch=this.value;_whRenderTab()">
-    <select class="form-control" style="width:160px" onchange="_whItemCat=this.value;_whRenderTab()">
+    <select class="form-control" style="width:180px" onchange="_whItemCat=this.value;_whRenderTab()">
       ${cats.map(c=>`<option value="${c}" ${_whItemCat===c?'selected':''}>${c==='all'?'All Categories':c}</option>`).join('')}
     </select>
   </div>
   <div class="table-wrap">
   <table>
     <thead><tr>
-      <th>Code</th><th>Item</th><th>Unit</th>
-      <th style="text-align:right">On Hand</th>
-      <th style="text-align:right">Reserved</th>
-      <th style="text-align:right">Available</th>
-      <th style="text-align:right">Unit Cost</th>
-      <th style="text-align:right">Total Value</th>
-      <th style="width:110px">Stock Level</th>
-      <th>Actions</th>
+      <th>CODE</th><th>ITEM</th><th>UNIT</th>
+      <th style="text-align:right">ON HAND</th>
+      <th style="text-align:right">RESERVED</th>
+      <th style="text-align:right">AVAILABLE</th>
+      <th style="text-align:right">UNIT COST</th>
+      <th style="text-align:right">TOTAL VALUE</th>
+      <th style="width:110px">STOCK LEVEL</th>
+      <th>ACTIONS</th>
     </tr></thead>
-    <tbody>${rows||`<tr><td colspan="10"><div class="empty-state"><i class="fas fa-boxes"></i><p>No items in warehouse. Click "Add Item" to start.</p></div></td></tr>`}</tbody>
+    <tbody>${rows||`<tr><td colspan="10"><div class="empty-state"><i class="fas fa-boxes"></i><p>No items in warehouse yet.</p><p style="font-size:12px;margin-top:4px">Click <strong>Add</strong> to add a single item, or <strong>Import</strong> to load stock in bulk from a CSV/Excel file.</p></div></td></tr>`}</tbody>
   </table>
+  </div>
+  ${items.length?`<div style="padding:8px 4px;font-size:11px;color:var(--text-secondary)">SHOWING ${items.length} of ${_whItems().length} items · Total inventory value: <strong style="color:var(--accent-green)">₱${fmtNum(_whItems().reduce((s,i)=>{const q=_whCalcQty(i.id);return s+(q.qtyOnHand*(i.unitCost||0));},0))}</strong></div>`:''}`;
+}
+
+// ── IMPORT ITEMS ─────────────────────────────────────────────
+function _whImportItems(){
+  const tmpl=`Code,Name,Category,Unit,UnitCost,MinStock,ReorderPoint,Location,OpeningQty\nMAT-001,Portland Cement Type I,Materials,bag,320.00,50,30,Bin A-1,100\nCON-001,Welding Rod E6013,Consumables,pcs,18.50,200,100,Rack B-2,500`;
+  const html=`
+  <div class="modal-overlay open" data-dynamic="1" id="whImportModal">
+    <div class="modal" style="max-width:680px">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fas fa-file-import" style="color:var(--accent-blue);margin-right:8px"></i>Import Warehouse Items</div>
+        <button class="modal-close" onclick="closeModal('whImportModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Instructions -->
+        <div style="padding:10px 14px;background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.2);border-radius:6px;margin-bottom:14px;font-size:12px">
+          <div style="font-weight:600;margin-bottom:6px"><i class="fas fa-info-circle" style="color:var(--accent-blue);margin-right:6px"></i>How to import</div>
+          <ol style="margin:0;padding-left:18px;line-height:1.8;color:var(--text-secondary)">
+            <li>Download the template below and fill it in Excel or Google Sheets.</li>
+            <li>Save as <strong>CSV</strong> (File → Save As → CSV).</li>
+            <li>Paste the CSV content in the box below (or select a file).</li>
+            <li>Items will be added as new warehouse records with opening stock posted as a "receive" transaction.</li>
+            <li><strong>Existing items with the same Code are skipped</strong> — reimport is safe.</li>
+          </ol>
+        </div>
+
+        <!-- Template download -->
+        <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
+          <button class="btn btn-secondary btn-sm" onclick="exportCSV([[`MAT-001`,`Portland Cement Type I`,`Materials`,`bag`,`320.00`,`50`,`30`,`Bin A-1`,`100`],[`CON-001`,`Welding Rod E6013`,`Consumables`,`pcs`,`18.50`,`200`,`100`,`Rack B-2`,`500`]],[`Code`,`Name`,`Category`,`Unit`,`UnitCost`,`MinStock`,`ReorderPoint`,`Location`,`OpeningQty`],`warehouse_import_template.csv`)">
+            <i class="fas fa-download"></i> Download Template
+          </button>
+          <span style="font-size:11px;color:var(--text-secondary)">Required columns: Code, Name, Category, Unit · Optional: UnitCost, MinStock, ReorderPoint, Location, OpeningQty</span>
+        </div>
+
+        <!-- File picker -->
+        <div style="margin-bottom:10px">
+          <label class="form-label">Select CSV file</label>
+          <input type="file" accept=".csv,.txt" class="form-control" onchange="_whImportReadFile(this)">
+        </div>
+
+        <!-- Or paste -->
+        <div style="margin-bottom:10px">
+          <label class="form-label">— or paste CSV content directly —</label>
+          <textarea class="form-control" id="wh-import-csv" rows="8" placeholder="${tmpl.replace(/</g,'&lt;')}" style="font-family:var(--font-mono);font-size:11px"></textarea>
+        </div>
+
+        <!-- Preview -->
+        <div id="wh-import-preview"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('whImportModal')">Cancel</button>
+        <button class="btn btn-secondary btn-sm" onclick="_whImportPreview()"><i class="fas fa-eye"></i> Preview</button>
+        <button class="btn btn-primary" onclick="_whImportExecute()"><i class="fas fa-file-import"></i> Import Items</button>
+      </div>
+    </div>
   </div>`;
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+
+function _whImportReadFile(input){
+  const file=input.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const el=$('#wh-import-csv');
+    if(el)el.value=e.target.result;
+    _whImportPreview();
+  };
+  reader.readAsText(file);
+}
+
+function _whImportParseCsv(text){
+  const lines=text.trim().split(/\r?\n/).filter(l=>l.trim());
+  if(lines.length<2)return{headers:[],rows:[]};
+  const parseRow=line=>{
+    const cols=[];let cur='';let inQ=false;
+    for(let i=0;i<line.length;i++){
+      const ch=line[i];
+      if(ch==='"'&&!inQ){inQ=true;}
+      else if(ch==='"'&&inQ){inQ=false;}
+      else if(ch===','&&!inQ){cols.push(cur.trim());cur='';}
+      else cur+=ch;
+    }
+    cols.push(cur.trim());
+    return cols;
+  };
+  const headers=parseRow(lines[0]).map(h=>h.toLowerCase().replace(/\s+/g,''));
+  const rows=lines.slice(1).map(l=>parseRow(l));
+  return{headers,rows};
+}
+
+function _whImportPreview(){
+  const text=$('#wh-import-csv')?.value||'';
+  const preview=$('#wh-import-preview');
+  if(!preview)return;
+  if(!text.trim()){preview.innerHTML='';return;}
+  const {headers,rows}=_whImportParseCsv(text);
+  const nameIdx=headers.findIndex(h=>h==='name');
+  const codeIdx=headers.findIndex(h=>h==='code');
+  if(nameIdx===-1){preview.innerHTML=`<div style="color:var(--accent-red);font-size:12px;padding:8px"><i class="fas fa-exclamation-circle"></i> Could not find "Name" column. Check your CSV header row.</div>`;return;}
+  const existingCodes=new Set(_whItems().map(i=>i.code||i.id));
+  const tableRows=rows.slice(0,10).map(row=>{
+    const code=codeIdx>=0?row[codeIdx]:'';
+    const name=row[nameIdx]||'';
+    const skip=code&&existingCodes.has(code);
+    return`<tr style="${skip?'opacity:.45':''}">
+      <td style="font-size:11px;font-family:var(--font-mono)">${code||'auto'}</td>
+      <td style="font-size:11px">${name}</td>
+      <td style="font-size:11px">${row[headers.indexOf('category')]||'—'}</td>
+      <td style="font-size:11px">${row[headers.indexOf('unit')]||'—'}</td>
+      <td style="font-size:11px;text-align:right">${row[headers.indexOf('openingqty')]||'0'}</td>
+      <td style="font-size:10px">${skip?'<span style="color:var(--accent-amber)">Skip (exists)</span>':'<span style="color:var(--accent-green)">New</span>'}</td>
+    </tr>`;
+  }).join('');
+  preview.innerHTML=`
+  <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-secondary)"><i class="fas fa-eye" style="margin-right:6px"></i>Preview (first 10 rows)</div>
+  <div class="table-wrap" style="max-height:200px;overflow-y:auto">
+    <table>
+      <thead><tr><th>Code</th><th>Name</th><th>Category</th><th>Unit</th><th style="text-align:right">Opening Qty</th><th>Status</th></tr></thead>
+      <tbody>${tableRows}</tbody>
+    </table>
+  </div>
+  <div style="font-size:11px;color:var(--text-secondary);margin-top:6px">${rows.length} rows detected${rows.length>10?' (showing first 10)':''}</div>`;
+}
+
+function _whImportExecute(){
+  const text=$('#wh-import-csv')?.value||'';
+  if(!text.trim()){showToast('Paste or select a CSV file first','error');return;}
+  const {headers,rows}=_whImportParseCsv(text);
+  const idx=k=>headers.findIndex(h=>h===k);
+  const nameIdx=idx('name');
+  if(nameIdx===-1){showToast('No "Name" column found in CSV','error');return;}
+  const codeIdx=idx('code');
+  const catIdx=idx('category');
+  const unitIdx=idx('unit');
+  const costIdx=idx('unitcost');
+  const minIdx=idx('minstock');
+  const reorderIdx=idx('reorderpoint');
+  const locIdx=idx('location');
+  const qtyIdx=idx('openingqty');
+
+  if(!AppState.data.warehouseItems)AppState.data.warehouseItems=[];
+  if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
+
+  const existingCodes=new Set(_whItems().map(i=>i.code||i.id));
+  const now=new Date().toISOString();
+  const today=now.slice(0,10);
+  let added=0,skipped=0;
+
+  rows.forEach(row=>{
+    const name=(row[nameIdx]||'').trim();
+    if(!name)return;
+    const code=(codeIdx>=0?row[codeIdx]:'').trim();
+    if(code&&existingCodes.has(code)){skipped++;return;}
+
+    const id=_whNextId('WH-',AppState.data.warehouseItems);
+    const unitCost=costIdx>=0?parseFloat(row[costIdx])||0:0;
+    const openingQty=qtyIdx>=0?parseFloat(row[qtyIdx])||0:0;
+
+    AppState.data.warehouseItems.push({
+      id,name,
+      code:code||id,
+      category:catIdx>=0?row[catIdx]||'General':'General',
+      unit:unitIdx>=0?row[unitIdx]||'ea':'ea',
+      unitCost,
+      minStock:minIdx>=0?parseFloat(row[minIdx])||0:0,
+      reorderPoint:reorderIdx>=0?parseFloat(row[reorderIdx])||0:0,
+      location:locIdx>=0?row[locIdx]||'':'',
+      description:'',
+      qtyOnHand:0,qtyReserved:0,qtyAvailable:0,netIssued:0,
+      createdAt:now,updatedAt:now,
+    });
+
+    // Post opening stock as a receive transaction
+    if(openingQty>0){
+      AppState.data.stockTransactions.push({
+        id:_whNextId('TX-',AppState.data.stockTransactions),
+        itemId:id,type:'receive',qty:openingQty,date:today,
+        vendor:'Opening Stock',ref:'IMPORT',
+        notes:'Imported opening balance',
+        unitCost:unitCost||undefined,
+        by:AppState.currentUser?.displayName||'import',
+        postedAt:now,
+      });
+      _whSyncQty(id);
+    }
+    existingCodes.add(code||id);
+    added++;
+  });
+
+  AppState.save();
+  closeModal('whImportModal');
+  showToast(`Imported ${added} item${added!==1?'s':''}${skipped?` · ${skipped} skipped (already exist)`:''}`,'success',5000);
+  _whRenderTab();
 }
 
 // ── MULTI-LINE TRANSACTION STATE ────────────────────────────
-let _whRcvLines=[];  // [{itemId,qty,unitCost}]
-let _whIssLines=[];  // [{itemId,qty}]
+let _whRcvLines=[];
+let _whIssLines=[];
 
 function _whRcvLinesHTML(){
   const items=_whItems();
@@ -20236,7 +20439,6 @@ function _whReceiveHTML(){
   const recent=_whTx().filter(t=>t.type==='receive').sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,15);
   return`
   <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:14px;align-items:start">
-
     <!-- LEFT: form -->
     <div class="card" style="padding:18px 20px;min-width:0;overflow:hidden">
       <div class="section-header" style="margin-bottom:14px">
@@ -20245,8 +20447,6 @@ function _whReceiveHTML(){
           <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Post incoming stock — supports multiple items per delivery</div>
         </div>
       </div>
-
-      <!-- Transaction header fields -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
         <div class="form-group" style="margin:0">
           <label class="form-label">Date Received *</label>
@@ -20265,8 +20465,6 @@ function _whReceiveHTML(){
           <input class="form-control" id="wh-rcv-notes" placeholder="Lot number, condition…">
         </div>
       </div>
-
-      <!-- Line items -->
       <div style="margin-bottom:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <div style="font-size:12px;font-weight:600;color:var(--text-secondary)"><i class="fas fa-list" style="margin-right:6px"></i>Line Items</div>
@@ -20288,12 +20486,10 @@ function _whReceiveHTML(){
           </table>
         </div>
       </div>
-
       <button class="btn btn-primary" style="width:100%" onclick="_whSaveReceive()">
         <i class="fas fa-save"></i> Post Receipt
       </button>
     </div>
-
     <!-- RIGHT: recent receipts -->
     <div>
       <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">
@@ -20329,7 +20525,6 @@ function _whIssueHTML(){
   const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='completed');
   return`
   <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:14px;align-items:start">
-
     <!-- LEFT: form -->
     <div class="card" style="padding:18px 20px;min-width:0;overflow:hidden">
       <div class="section-header" style="margin-bottom:14px">
@@ -20338,8 +20533,6 @@ function _whIssueHTML(){
           <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Post multiple items in a single transaction batch</div>
         </div>
       </div>
-
-      <!-- Transaction header fields -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
         <div class="form-group" style="margin:0">
           <label class="form-label">Transaction Type *</label>
@@ -20351,7 +20544,7 @@ function _whIssueHTML(){
         </div>
         <div class="form-group" style="margin:0;grid-column:1/-1">
           <label class="form-label">Project</label>
-          <select class="form-control" id="wh-iss-proj" style="max-width:100%;overflow:hidden;text-overflow:ellipsis">
+          <select class="form-control" id="wh-iss-proj">
             <option value="">— No project —</option>
             ${projects.map(p=>{const label=`${p.id} — ${p.name||''}`;return`<option value="${p.id}">${label.length>60?label.slice(0,60)+'…':label}</option>`;}).join('')}
           </select>
@@ -20369,8 +20562,6 @@ function _whIssueHTML(){
           <input class="form-control" id="wh-iss-notes" placeholder="Work order, location, reason…">
         </div>
       </div>
-
-      <!-- Line items -->
       <div style="margin-bottom:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <div style="font-size:12px;font-weight:600;color:var(--text-secondary)"><i class="fas fa-list" style="margin-right:6px"></i>Line Items</div>
@@ -20392,12 +20583,10 @@ function _whIssueHTML(){
           </table>
         </div>
       </div>
-
       <button class="btn btn-primary" style="width:100%" onclick="_whSaveIssue()">
         <i class="fas fa-check"></i> Post Transaction
       </button>
     </div>
-
     <!-- RIGHT: recent -->
     <div>
       <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">
@@ -20430,7 +20619,7 @@ function _whIssueHTML(){
   </div>`;
 }
 
-function _whFillIssueInfo(){} // kept for backward compat
+function _whFillIssueInfo(){}
 
 // ── TAB: ISSUANCE REQUESTS ───────────────────────────────────
 function _whRequestsHTML(){
@@ -20479,7 +20668,7 @@ function _whRequestsHTML(){
           ${canApprove&&isStock?`<button class="btn btn-secondary btn-sm" style="padding:2px 7px;font-size:11px;color:var(--accent-green)" onclick="_whApproveReq('${r.id}',true)"><i class="fas fa-check"></i> Approve</button>
           <button class="btn btn-secondary btn-sm" style="padding:2px 7px;font-size:11px;color:var(--accent-red)" onclick="_whApproveReq('${r.id}',false)"><i class="fas fa-times"></i> Reject</button>`:''}
           ${canRelease?`<button class="btn btn-primary btn-sm" style="padding:2px 7px;font-size:11px" onclick="_whReleaseReq('${r.id}')"><i class="fas fa-dolly"></i> Release</button>`:''}
-          ${canStartPR?`<button class="btn btn-secondary btn-sm" style="padding:2px 7px;font-size:11px;color:#bc8cff" onclick="_whStartPR('${r.id}')"><i class="fas fa-file-purchase"></i> Start PR</button>`:''}
+          ${canStartPR?`<button class="btn btn-secondary btn-sm" style="padding:2px 7px;font-size:11px;color:#bc8cff" onclick="_whStartPR('${r.id}')"><i class="fas fa-file-alt"></i> Start PR</button>`:''}
           ${r.status==='released'?`<span style="font-size:10px;color:var(--text-secondary)">Released ${(r.releasedAt||'').slice(0,10)}</span>`:''}
           ${r.status==='rejected'?`<span style="font-size:10px;color:var(--accent-red)">${(r.reviewedAt||'').slice(0,10)}</span>`:''}
         </div>
@@ -20488,15 +20677,15 @@ function _whRequestsHTML(){
   }).join('');
 
   return`
-  <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
-    <div style="flex:1;display:flex;gap:6px;flex-wrap:wrap">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
       ${statuses.map(s=>`<button class="btn btn-sm ${_whReqStatus===s?'btn-primary':'btn-secondary'}" onclick="_whReqStatus='${s}';_whRenderTab()">${s==='all'?'All':(statusLabel[s]||s)}</button>`).join('')}
     </div>
     <button class="btn btn-primary btn-sm" onclick="_whShowAddRequest()"><i class="fas fa-plus"></i> New Request</button>
   </div>
   <div class="table-wrap">
   <table>
-    <thead><tr><th>ID</th><th>Item / Description</th><th style="text-align:right">Qty</th><th>Project</th><th>Requested By</th><th>Reason</th><th>Status</th><th>Actions</th></tr></thead>
+    <thead><tr><th>ID</th><th>ITEM / DESCRIPTION</th><th style="text-align:right">QTY</th><th>PROJECT</th><th>REQUESTED BY</th><th>REASON</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
     <tbody>${rows||`<tr><td colspan="8"><div class="empty-state"><i class="fas fa-clipboard-list"></i><p>No issuance requests</p></div></td></tr>`}</tbody>
   </table>
   </div>`;
@@ -20507,7 +20696,6 @@ function _whLedgerHTML(){
   const all=_whTx().sort((a,b)=>new Date(b.date)-new Date(a.date));
   const items=_whItems();
   const typeColor={receive:'var(--accent-green)',issue:'var(--accent-amber)',return:'var(--accent-blue)',adjust:'#39d3f2'};
-  const typeSign={receive:'+',issue:'−',return:'+',adjust:'±'};
 
   let filterItem=_whTxItemFilter;
   let shown=filterItem==='all'?all:all.filter(t=>t.itemId===filterItem);
@@ -20529,7 +20717,7 @@ function _whLedgerHTML(){
   }).join('');
 
   return`
-  <div style="display:flex;gap:8px;margin-bottom:10px">
+  <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
     <select class="form-control" style="width:220px" onchange="_whTxItemFilter=this.value;_whRenderTab()">
       <option value="all">All Items</option>
       ${items.map(i=>`<option value="${i.id}" ${filterItem===i.id?'selected':''}>${i.name}</option>`).join('')}
@@ -20538,7 +20726,7 @@ function _whLedgerHTML(){
   </div>
   <div class="table-wrap">
   <table>
-    <thead><tr><th>Date</th><th>Type</th><th>Item</th><th style="text-align:right">Qty</th><th>Project</th><th>Vendor / By</th><th>Reference</th><th>Notes</th></tr></thead>
+    <thead><tr><th>DATE</th><th>TYPE</th><th>ITEM</th><th style="text-align:right">QTY</th><th>PROJECT</th><th>VENDOR / BY</th><th>REFERENCE</th><th>NOTES</th></tr></thead>
     <tbody>${rows||`<tr><td colspan="8"><div class="empty-state"><i class="fas fa-list-alt"></i><p>No transactions yet</p></div></td></tr>`}</tbody>
   </table>
   </div>
@@ -20588,7 +20776,6 @@ function _whSaveIssue(){
   const valid=_whIssLines.filter(ln=>ln.itemId&&parseFloat(ln.qty)!==0&&ln.qty!=='');
   if(!valid.length){showToast('Add at least one item with a quantity','error');return;}
 
-  // Validate available qty for issues
   if(type==='issue'){
     for(const ln of valid){
       const q=_whCalcQty(ln.itemId);
@@ -20601,7 +20788,6 @@ function _whSaveIssue(){
     }
   }
 
-  // Budget check — warn if issuing would exceed allocation planned cost
   if(type==='issue'&&projId){
     const overBudget=[];
     for(const ln of valid){
@@ -20657,7 +20843,6 @@ function _whReleaseReq(id){
   if(!req)return;
   const q=_whCalcQty(req.itemId);
   if(req.qty>q.qtyOnHand){showToast(`Only ${q.qtyOnHand} on hand — cannot release ${req.qty}`,'error',4000);return;}
-  // Post the issue transaction
   if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
   const tx={
     id:_whNextId('TX-',AppState.data.stockTransactions),
@@ -20893,6 +21078,12 @@ function _whDeleteItem(id){
   AppState.save();showToast('Item removed','success');_whRenderTab();
 }
 
+function _whClearAll(){
+  if(!confirm('Clear ALL warehouse items? This cannot be undone.\n\nTransaction history will be preserved but items will be removed.'))return;
+  (AppState.data.warehouseItems||[]).forEach(i=>i._deleted=true);
+  AppState.save();showToast('All warehouse items cleared','success');_whRenderTab();
+}
+
 // ── ADD ISSUANCE REQUEST ─────────────────────────────────────
 let _whReqLines=[{itemId:'',qty:''}];
 
@@ -20940,7 +21131,6 @@ function _whShowAddRequest(){
         <button class="modal-close" onclick="closeModal('whReqModal')"><i class="fas fa-times"></i></button>
       </div>
       <div class="modal-body">
-        <!-- Header fields -->
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
           <div class="form-group" style="margin:0;grid-column:1/-1">
             <label class="form-label">Project</label>
@@ -20962,7 +21152,6 @@ function _whShowAddRequest(){
             <textarea class="form-control" id="whr-reason" rows="2" placeholder="Why are these items needed?"></textarea>
           </div>
         </div>
-        <!-- Line items -->
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <div style="font-size:12px;font-weight:600;color:var(--text-secondary)"><i class="fas fa-list" style="margin-right:6px"></i>Items Requested</div>
           <button class="btn btn-secondary btn-sm" onclick="_whReqLines.push({itemId:'',qty:''});_whRefreshReqLines()"><i class="fas fa-plus"></i> Add Item</button>
@@ -21012,7 +21201,7 @@ function _whSaveRequest(){
   _whRenderTab();
 }
 
-// ── QUICK ACTIONS (from items tab) ───────────────────────────
+// ── QUICK ACTIONS ────────────────────────────────────────────
 function _whShowReceive(itemId){_whTab='receive';_whRenderTab();setTimeout(()=>{const el=$('#wh-rcv-item');if(el){el.value=itemId;}},50);}
 function _whShowIssueItem(itemId){_whTab='issue';_whRenderTab();setTimeout(()=>{const el=$('#wh-iss-item');if(el){el.value=itemId;_whFillIssueInfo();}},50);}
 
