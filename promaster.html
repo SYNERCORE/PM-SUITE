@@ -758,14 +758,60 @@ const SHIC_LIST_CONFIG = {
       { field: 'trade', spCol: 'Trade', spType: 'Text' },
     ],
   },
-  // Assets (small master lists — minimal indexing)
-  'SHIC_Equipment':        { dataKey: 'equipment',        idField: 'EqpId',   name: 'Equipment',         hasProject: false },
-  'SHIC_Tools':            { dataKey: 'tools',            idField: 'ToolId',  name: 'Tools',             hasProject: false },
-  'SHIC_Vehicles':         { dataKey: 'vehicles',         idField: 'VehId',   name: 'Vehicles',          hasProject: false },
-  'SHIC_Consumables':      { dataKey: 'consumables',      idField: 'ConId',   name: 'Consumables',       hasProject: false },
-  'SHIC_ThirdParty':       { dataKey: 'thirdParty',       idField: 'TpId',    name: 'Third Party',       hasProject: false },
-  'SHIC_AssetHistory':     { dataKey: 'assetHistory',     idField: 'EventId', name: 'Asset History',     hasProject: false },
-  'SHIC_AssetUtilization': { dataKey: 'assetUtilization', idField: 'UtilId',  name: 'Asset Utilization', hasProject: false },
+  // Assets
+  'SHIC_Equipment': {
+    dataKey: 'equipment', idField: 'EqpId', name: 'Equipment', hasProject: false,
+    indexCols: [
+      { field: 'status',    spCol: 'Status',    spType: 'Text' },
+      { field: 'projectId', spCol: 'ProjectId', spType: 'Text' },
+    ],
+  },
+  'SHIC_Tools': {
+    dataKey: 'tools', idField: 'ToolId', name: 'Tools', hasProject: false,
+    indexCols: [
+      { field: 'status',    spCol: 'Status',    spType: 'Text' },
+      { field: 'projectId', spCol: 'ProjectId', spType: 'Text' },
+    ],
+  },
+  'SHIC_Vehicles': {
+    dataKey: 'vehicles', idField: 'VehId', name: 'Vehicles', hasProject: false,
+    indexCols: [
+      { field: 'status',    spCol: 'Status',    spType: 'Text' },
+      { field: 'projectId', spCol: 'ProjectId', spType: 'Text' },
+    ],
+  },
+  'SHIC_Consumables': {
+    dataKey: 'consumables', idField: 'ConId', name: 'Consumables', hasProject: false,
+    indexCols: [
+      { field: 'category', spCol: 'Category', spType: 'Text' },
+    ],
+  },
+  'SHIC_ThirdParty': {
+    dataKey: 'thirdParty', idField: 'TpId', name: 'Third Party', hasProject: false,
+    indexCols: [
+      { field: 'status',   spCol: 'Status',   spType: 'Text'     },
+      { field: 'category', spCol: 'Category', spType: 'Text'     },
+      { field: 'contractEnd', spCol: 'ContractEnd', spType: 'DateTime' },
+    ],
+  },
+  'SHIC_AssetHistory': {
+    dataKey: 'assetHistory', idField: 'EventId', name: 'Asset History', hasProject: false,
+    indexCols: [
+      { field: 'assetId',   spCol: 'AssetId',   spType: 'Text'     },
+      { field: 'assetType', spCol: 'AssetType', spType: 'Text'     },
+      { field: 'projectId', spCol: 'ProjectId', spType: 'Text'     },
+      { field: 'date',      spCol: 'EventDate', spType: 'DateTime' },
+    ],
+  },
+  'SHIC_AssetUtilization': {
+    dataKey: 'assetUtilization', idField: 'UtilId', name: 'Asset Utilization', hasProject: false,
+    indexCols: [
+      { field: 'resourceId',   spCol: 'ResourceId',   spType: 'Text'     },
+      { field: 'resourceType', spCol: 'ResourceType', spType: 'Text'     },
+      { field: 'projectId',    spCol: 'ProjectId',    spType: 'Text'     },
+      { field: 'date',         spCol: 'UtilDate',     spType: 'DateTime' },
+    ],
+  },
   // High-volume logs
   'SHIC_UsageLogs': {
     dataKey: 'resourceUsageLogs', idField: 'LogId', name: 'Usage Logs', hasProject: true,
@@ -802,12 +848,43 @@ const SHIC_LIST_CONFIG = {
       { field: 'status', spCol: 'Status', spType: 'Text' },
     ],
   },
-  // Workflows & system (low volume — no index cols needed)
-  'SHIC_IdChangeRequests': { dataKey: 'idChangeRequests', idField: 'ReqId',   name: 'ID Change Requests', hasProject: false },
-  'SHIC_DeletionRequests': { dataKey: 'deletionRequests', idField: 'ReqId',   name: 'Deletion Requests',  hasProject: false },
-  'SHIC_Notifications':    { dataKey: 'notifications',    idField: 'NotifId', name: 'Notifications',       hasProject: false },
-  'SHIC_Activities':       { dataKey: 'activities',       idField: 'ActId',   name: 'Activities',          hasProject: false },
-  'SHIC_ProjectIdHistory': { dataKey: 'projectIdHistory', idField: 'HistId',  name: 'Project ID History',  hasProject: false },
+  // Workflows & system
+  'SHIC_IdChangeRequests': {
+    dataKey: 'idChangeRequests', idField: 'ReqId', name: 'ID Change Requests', hasProject: false,
+    indexCols: [
+      { field: 'status',    spCol: 'Status',    spType: 'Text' },
+      { field: 'projectId', spCol: 'ProjectId', spType: 'Text' },
+    ],
+  },
+  'SHIC_DeletionRequests': {
+    dataKey: 'deletionRequests', idField: 'ReqId', name: 'Deletion Requests', hasProject: false,
+    indexCols: [
+      { field: 'status',             spCol: 'Status',             spType: 'Text' },
+      { field: 'requestedByEmail',   spCol: 'RequestedByEmail',   spType: 'Text' },
+    ],
+  },
+  'SHIC_Notifications': {
+    dataKey: 'notifications', idField: 'NotifId', name: 'Notifications', hasProject: false,
+    indexCols: [
+      { field: 'type', spCol: 'Type', spType: 'Text'    },
+      { field: 'read', spCol: 'Read', spType: 'Boolean' },
+    ],
+  },
+  'SHIC_Activities': {
+    dataKey: 'activities', idField: 'ActId', name: 'Activities', hasProject: false,
+    indexCols: [
+      { field: 'type',    spCol: 'Type',      spType: 'Text'     },
+      { field: 'project', spCol: 'ProjectId', spType: 'Text'     },
+      { field: 'time',    spCol: 'ActTime',   spType: 'DateTime' },
+    ],
+  },
+  'SHIC_ProjectIdHistory': {
+    dataKey: 'projectIdHistory', idField: 'HistId', name: 'Project ID History', hasProject: false,
+    indexCols: [
+      { field: 'projectId', spCol: 'ProjectId', spType: 'Text'     },
+      { field: 'changedAt', spCol: 'ChangedAt', spType: 'DateTime' },
+    ],
+  },
 };
 const SHIC_OFFLOADED_KEYS = Object.values(SHIC_LIST_CONFIG).map(c => c.dataKey);
 // Cache for list IDs to avoid re-resolving
