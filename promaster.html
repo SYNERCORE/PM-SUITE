@@ -20047,7 +20047,8 @@ function _whNextId(prefix,arr){
   return prefix+String((Math.max(0,...nums)+1)).padStart(4,'0');
 }
 
-let _whTab='items', _whItemSearch='', _whItemCat='all', _whTxItemFilter='all', _whReqStatus='all';
+let _whTab='items', _whItemSearch='', _whItemCat='all', _whTxItemFilter='all', _whReqStatus='all', _whItemPage=0;
+const _WH_PAGE_SIZE=50;
 
 // ── MAIN RENDER ──────────────────────────────────────────────
 function renderWarehouse(){
@@ -20130,7 +20131,12 @@ function _whItemsHTML(){
   if(_whItemCat!=='all')items=items.filter(i=>(i.category||'Uncategorized')===_whItemCat);
   if(_whItemSearch)items=items.filter(i=>(i.name+' '+(i.code||'')+' '+(i.location||'')+' '+(i.rack||'')+' '+(i.row||'')).toLowerCase().includes(_whItemSearch.toLowerCase()));
 
-  const rows=items.map(item=>{
+  const totalFiltered=items.length;
+  const totalPages=Math.max(1,Math.ceil(totalFiltered/_WH_PAGE_SIZE));
+  if(_whItemPage>=totalPages)_whItemPage=totalPages-1;
+  const pageItems=items.slice(_whItemPage*_WH_PAGE_SIZE,(_whItemPage+1)*_WH_PAGE_SIZE);
+
+  const rows=pageItems.map(item=>{
     const q=_whCalcQty(item.id);
     const low=item.minStock>0&&q.qtyOnHand<=item.minStock;
     const stockColor=q.qtyAvailable<=0?'var(--accent-red)':low?'var(--accent-amber)':'var(--accent-green)';
@@ -20186,7 +20192,7 @@ function _whItemsHTML(){
   <!-- Toolbar -->
   <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap">
     <div style="font-size:13px;font-weight:700;color:var(--text-secondary)">
-      Warehouse Items — <span style="color:var(--text-primary)">${items.length}</span> items
+      Warehouse Items — <span style="color:var(--text-primary)">${totalFiltered}</span>${totalFiltered!==_whItems().length?` <span style="font-size:11px;font-weight:400">of ${_whItems().length}</span>`:''}
     </div>
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-danger btn-sm" onclick="_whClearAll()" title="Clear all items"><i class="fas fa-trash"></i></button>
@@ -20198,8 +20204,8 @@ function _whItemsHTML(){
   <!-- Search & filter -->
   <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
     <input class="form-control" style="flex:1;min-width:200px" placeholder="Search items, code, location…" value="${_whItemSearch}"
-      oninput="_whItemSearch=this.value;_whRenderTab()">
-    <select class="form-control" style="width:180px" onchange="_whItemCat=this.value;_whRenderTab()">
+      oninput="_whItemSearch=this.value;_whItemPage=0;_whRenderTab()">
+    <select class="form-control" style="width:180px" onchange="_whItemCat=this.value;_whItemPage=0;_whRenderTab()">
       ${cats.map(c=>`<option value="${c}" ${_whItemCat===c?'selected':''}>${c==='all'?'All Categories':c}</option>`).join('')}
     </select>
   </div>
@@ -20218,7 +20224,19 @@ function _whItemsHTML(){
     <tbody>${rows||`<tr><td colspan="11"><div class="empty-state"><i class="fas fa-boxes"></i><p>No items in warehouse yet.</p><p style="font-size:12px;margin-top:4px">Click <strong>Add</strong> to add a single item, or <strong>Import</strong> to load stock in bulk from a CSV/Excel file.</p></div></td></tr>`}</tbody>
   </table>
   </div>
-  ${items.length?`<div style="padding:8px 4px;font-size:11px;color:var(--text-secondary)">SHOWING ${items.length} of ${_whItems().length} items · Total inventory value: <strong style="color:var(--accent-green)">₱${fmtNum(_whItems().reduce((s,i)=>{const q=_whCalcQty(i.id);return s+(q.qtyOnHand*(i.unitCost||0));},0))}</strong></div>`:''}`;
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;flex-wrap:wrap;gap:8px">
+    <div style="font-size:11px;color:var(--text-secondary)">
+      Showing <strong style="color:var(--text-primary)">${_whItemPage*_WH_PAGE_SIZE+1}–${Math.min((_whItemPage+1)*_WH_PAGE_SIZE,totalFiltered)}</strong> of <strong style="color:var(--text-primary)">${totalFiltered}</strong> items
+      · Total value: <strong style="color:var(--accent-green)">₱${fmtNum(_whItems().reduce((s,i)=>{const q=_whCalcQty(i.id);return s+(q.qtyOnHand*(i.unitCost||0));},0))}</strong>
+    </div>
+    ${totalPages>1?`<div style="display:flex;align-items:center;gap:4px">
+      <button class="btn btn-secondary btn-sm" style="padding:3px 10px" ${_whItemPage===0?'disabled':''} onclick="_whItemPage=0;_whRenderTab()"><i class="fas fa-angle-double-left"></i></button>
+      <button class="btn btn-secondary btn-sm" style="padding:3px 10px" ${_whItemPage===0?'disabled':''} onclick="_whItemPage--;_whRenderTab()"><i class="fas fa-angle-left"></i></button>
+      <span style="font-size:12px;color:var(--text-secondary);padding:0 6px">Page ${_whItemPage+1} / ${totalPages}</span>
+      <button class="btn btn-secondary btn-sm" style="padding:3px 10px" ${_whItemPage>=totalPages-1?'disabled':''} onclick="_whItemPage++;_whRenderTab()"><i class="fas fa-angle-right"></i></button>
+      <button class="btn btn-secondary btn-sm" style="padding:3px 10px" ${_whItemPage>=totalPages-1?'disabled':''} onclick="_whItemPage=${totalPages-1};_whRenderTab()"><i class="fas fa-angle-double-right"></i></button>
+    </div>`:''}
+  </div>`;
 }
 
 // ── IMPORT ITEMS ─────────────────────────────────────────────
