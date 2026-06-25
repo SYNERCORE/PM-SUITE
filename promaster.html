@@ -892,6 +892,46 @@ const SHIC_LIST_CONFIG = {
       { field: 'active', spCol: 'Active', spType: 'Boolean' },
     ],
   },
+  'SHIC_Resources': {
+    dataKey: 'resources', idField: 'ResId', name: 'Resources', hasProject: false,
+    indexCols: [
+      { field: 'availability', spCol: 'Availability', spType: 'Text' },
+      { field: 'trade',        spCol: 'Trade',        spType: 'Text' },
+    ],
+  },
+  'SHIC_Progress': {
+    dataKey: 'progress', idField: 'ProgId', name: 'Progress', hasProject: true,
+    indexCols: [
+      { field: 'date',      spCol: 'ProgDate', spType: 'DateTime' },
+      { field: 'milestone', spCol: 'Milestone', spType: 'Text'    },
+    ],
+  },
+  'SHIC_KpiData': {
+    dataKey: 'kpiData', idField: 'KpiId', name: 'KPI Data', hasProject: true,
+    indexCols: [
+      { field: 'period', spCol: 'Period', spType: 'Text' },
+    ],
+  },
+  'SHIC_Calendar': {
+    dataKey: 'calendar', idField: 'CalId', name: 'Calendar', hasProject: false,
+    indexCols: [
+      { field: 'date',      spCol: 'EventDate', spType: 'DateTime' },
+      { field: 'projectId', spCol: 'ProjectId', spType: 'Text'     },
+    ],
+  },
+  'SHIC_ProjectTeam': {
+    dataKey: 'projectTeam', idField: 'TeamId', name: 'Project Team', hasProject: true,
+    indexCols: [
+      { field: 'role',      spCol: 'Role',      spType: 'Text' },
+      { field: 'projectId', spCol: 'ProjectId', spType: 'Text' },
+    ],
+  },
+  'SHIC_Trades': {
+    dataKey: 'trades', idField: 'TradeId', name: 'Trades', hasProject: false,
+    indexCols: [
+      { field: 'name', spCol: 'Name', spType: 'Text' },
+    ],
+  },
 };
 const SHIC_OFFLOADED_KEYS = Object.values(SHIC_LIST_CONFIG).map(c => c.dataKey);
 // Cache for list IDs to avoid re-resolving
@@ -984,7 +1024,7 @@ function getDefaultData(){
     warehouseItems:[],stockTransactions:[],issuanceRequests:[],
     resourceAllocations:[],resourceUsageLogs:[],costs:[],qaqc:[],risks:[],
     actions:[],documents:[],progress:[],kpiData:[],calendar:[],
-    assetHistory:[],thirdParties:[],projectTeam:[],activities:[],notifications:[],
+    assetHistory:[],assetUtilization:[],thirdParty:[],projectTeam:[],activities:[],notifications:[],
     trades:[],
     settings:{companyName:'SHIC',currency:'PHP',timezone:'Asia/Manila'},
     businessUnits:[], // [{id,name,color,description}]
@@ -1002,7 +1042,7 @@ const SHIC_DATA_ARRAY_KEYS=['projects','tasks','resources','equipment','tools','
   'resourceAllocations','resourceUsageLogs','costs','qaqc','risks',
   'actions','documents','progress','assetHistory','thirdParties','thirdParty',
   'projectTeam','calendar','activities','notifications','trades',
-  'dailyMeetingLogs','businessUnits'];
+  'dailyMeetingLogs','businessUnits','assetUtilization'];
 function _dataRecordCount(data){
   if(!data)return 0;
   return SHIC_DATA_ARRAY_KEYS.reduce((s,k)=>s+(Array.isArray(data[k])?data[k].length:0),0);
