@@ -5056,12 +5056,13 @@ function _spApplyRemote(data, _ts, _by) {
 
   if (hasLocalEdits) {
     // User has local changes — merge instead of replace
-    // This preserves local additions and field edits
-    const ARRAY_KEYS = ['projects','tasks','resources','equipment','tools','vehicles',
-      'consumables','materials','manpower','procurement','procurementLogs',
-      'resourceAllocations','resourceUsageLogs','costs','qaqc','risks',
-      'actions','documents','progress','kpiData','assetHistory',
-      'thirdParties','thirdParty','projectTeam','calendar','activities','notifications','trades'];
+    // This preserves local additions and field edits.
+    // Derive array keys from SHIC_LIST_CONFIG (offloaded) + legacy non-offloaded arrays
+    // so this list never falls out of sync when new lists are added to SHIC_LIST_CONFIG.
+    const ARRAY_KEYS = [
+      ...(SHIC_OFFLOADED_KEYS || []),
+      'resources','progress','kpiData','thirdParties','projectTeam','calendar','trades',
+    ];
     const merged = Object.assign({}, data);
     ARRAY_KEYS.forEach(key => {
       merged[key] = _spMergeArrays(
@@ -5281,14 +5282,14 @@ async function _spPushListData(token, listName, records, prevIdMap) {
   }
 
   // Delete remote items — but ONLY ones we intentionally deleted locally
-  // (tracked in _spDeletedIds). NEVER delete records just because they're
+  // (tracked in _spDeletedIds[dataKey]). NEVER delete records just because they're
   // missing from our local data — they may have been added by another user.
-  const intentionalDeletes = (typeof _spDeletedIds !== 'undefined' && _spDeletedIds)
-    ? Object.keys(_spDeletedIds)
+  const deletedForThisList = (typeof _spDeletedIds !== 'undefined' && _spDeletedIds && cfg.dataKey)
+    ? Object.keys(_spDeletedIds[cfg.dataKey] || {})
     : [];
   for (const idToDelete of remoteIdsToDelete) {
-    // Skip unless this ID was explicitly deleted by THIS user
-    if (!intentionalDeletes.includes(idToDelete)) {
+    // Skip unless this ID was explicitly deleted by THIS user in this list
+    if (!deletedForThisList.includes(idToDelete)) {
       // Not intentional → another user may have added it or it's a stale map.
       // Drop from local idMap so we re-discover it on next pull, but DON'T delete from SP.
       delete prevIdMap[idToDelete];
@@ -5424,7 +5425,10 @@ async function _spPushAllSubLists(token) {
             console.log('[SP] ' + listName + ': cleaned ' + dupCleanup.removed + ' duplicate row(s)');
           }
         } catch(e) {
-          _spListIdMaps[listName] = {};
+          // Could not resolve existing SP rows — abort push for this list to avoid mass duplicates.
+          // The list will be retried on the next push cycle once SP is reachable.
+          console.warn('[SP] Skipping push for ' + listName + ' — could not fetch existing items:', e.message);
+          return; // skip this list entirely
         }
       }
       const r = await _spPushListData(token, listName, records, _spListIdMaps[listName]);
@@ -5891,6 +5895,25 @@ async function spPushData(silent = false) {
     // ── Step 2: Push merged data ──────────────────────────
     spSetStatus('syncing', 'Uploading to SharePoint...');
     const nowTs = Date.now();
+
+    // ── PHASE 2a: Push sub-lists FIRST ──────────────────────
+    // Push high-volume arrays to their dedicated SP lists before stripping them
+    // from the main blob. This ensures that if the main blob write later fails,
+    // the sub-lists are already up to date and no data is lost.
+    spSetStatus('syncing', 'Syncing tasks & logs to sub-lists...');
+    let subListsOk = false;
+    try {
+      const subResult = await _spPushAllSubLists(token);
+      subListsOk = true;
+      if (subResult.added || subResult.updated || subResult.deleted) {
+        console.log('[SP] Sub-lists synced: +' + subResult.added + ' ~' + subResult.updated + ' -' + subResult.deleted);
+      }
+    } catch(subErr) {
+      console.warn('[SP] Sub-list push had errors (continuing):', subErr.message);
+    }
+
+    // ── PHASE 2b: Build and push main blob ──────────────────
+    spSetStatus('syncing', 'Uploading to SharePoint...');
     // Prune large arrays to keep blob under 5MB SP limit
     const dataForPush = { ...AppState.data };
     if ((dataForPush.activities || []).length > 200)
@@ -5906,13 +5929,11 @@ async function spPushData(silent = false) {
       });
     }
 
-    // ── PHASE 2: Strip offloaded high-volume arrays from main blob ──
-    // These now live in their own dedicated SharePoint Lists for scalability.
-    // The main blob stays small even with thousands of tasks/logs.
-    SHIC_OFFLOADED_KEYS.forEach(key => {
-      // Keep as empty array — UI/code references won't break
-      dataForPush[key] = [];
-    });
+    // Strip offloaded arrays from main blob ONLY after sub-lists were pushed successfully.
+    // If sub-lists failed, keep the arrays in the main blob as a fallback so SP has the data.
+    if (subListsOk) {
+      SHIC_OFFLOADED_KEYS.forEach(key => { dataForPush[key] = []; });
+    }
 
     // Safety: check the final payload size before pushing
     const payloadStr = JSON.stringify(dataForPush);
@@ -5923,17 +5944,6 @@ async function spPushData(silent = false) {
     dataForPush._deletedIds = _spDeletedIds;
     const payload = { ...dataForPush, _ts: nowTs, _by: _spAccount.username };
     await _spWriteRemote(token, siteId, listId, payload);
-
-    // ── PHASE 2: Push offloaded data to sub-lists ────────────
-    spSetStatus('syncing', 'Syncing tasks & logs to sub-lists...');
-    try {
-      const subResult = await _spPushAllSubLists(token);
-      if (subResult.added || subResult.updated || subResult.deleted) {
-        console.log('[SP] Sub-lists synced: +' + subResult.added + ' ~' + subResult.updated + ' -' + subResult.deleted);
-      }
-    } catch(subErr) {
-      console.warn('[SP] Sub-list push had errors (continuing):', subErr.message);
-    }
     _spLastWriteTs = nowTs;
     localStorage.setItem('shic_sp_lastwritets', String(_spLastWriteTs));
     _spDataHash = _spHash(AppState.data) + nowTs;
