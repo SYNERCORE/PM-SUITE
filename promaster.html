@@ -20590,7 +20590,7 @@ function _whReceiveHTML(){
   return`
   <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:14px;align-items:start">
     <!-- LEFT: form -->
-    <div class="card" style="padding:18px 20px;min-width:0;overflow:hidden">
+    <div class="card" style="padding:18px 20px;min-width:0">
       <div class="section-header" style="margin-bottom:14px">
         <div>
           <div style="font-size:13px;font-weight:700"><i class="fas fa-truck-loading" style="color:var(--accent-green);margin-right:8px"></i>Receive Goods</div>
@@ -20622,8 +20622,8 @@ function _whReceiveHTML(){
             <i class="fas fa-plus"></i> Add Item
           </button>
         </div>
-        <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">
-          <table style="width:100%;border-collapse:collapse">
+        <div style="border:1px solid var(--border);border-radius:6px;overflow-x:auto">
+          <table style="width:100%;min-width:420px;border-collapse:collapse">
             <thead>
               <tr style="background:var(--bg-tertiary)">
                 <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left">Item</th>
@@ -20676,7 +20676,7 @@ function _whIssueHTML(){
   return`
   <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:14px;align-items:start">
     <!-- LEFT: form -->
-    <div class="card" style="padding:18px 20px;min-width:0;overflow:hidden">
+    <div class="card" style="padding:18px 20px;min-width:0">
       <div class="section-header" style="margin-bottom:14px">
         <div>
           <div style="font-size:13px;font-weight:700"><i class="fas fa-dolly" style="color:var(--accent-amber);margin-right:8px"></i>Issue / Return Stock</div>
@@ -20719,8 +20719,8 @@ function _whIssueHTML(){
             <i class="fas fa-plus"></i> Add Item
           </button>
         </div>
-        <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">
-          <table style="width:100%;border-collapse:collapse">
+        <div style="border:1px solid var(--border);border-radius:6px;overflow-x:auto">
+          <table style="width:100%;min-width:380px;border-collapse:collapse">
             <thead>
               <tr style="background:var(--bg-tertiary)">
                 <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left">Item</th>
@@ -21318,8 +21318,8 @@ function _whShowAddRequest(){
           <div style="font-size:12px;font-weight:600;color:var(--text-secondary)"><i class="fas fa-list" style="margin-right:6px"></i>Items Requested</div>
           <button class="btn btn-secondary btn-sm" onclick="_whReqLines.push({itemId:'',qty:''});_whRefreshReqLines()"><i class="fas fa-plus"></i> Add Item</button>
         </div>
-        <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:4px">
-          <table style="width:100%;border-collapse:collapse">
+        <div style="border:1px solid var(--border);border-radius:6px;overflow-x:auto;margin-bottom:4px">
+          <table style="width:100%;min-width:340px;border-collapse:collapse">
             <thead><tr style="background:var(--bg-tertiary)">
               <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left">Item</th>
               <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:center;width:80px">Available</th>
