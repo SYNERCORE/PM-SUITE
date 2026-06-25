@@ -2896,11 +2896,13 @@ class SyncStateMachine {
     IDLE:    ['PUSHING', 'PULLING', 'SYNCED', 'ERROR'],
     PUSHING: ['SYNCED', 'ERROR', 'IDLE'],
     PULLING: ['SYNCED', 'ERROR', 'IDLE'],
-    SYNCED:  ['IDLE', 'PUSHING', 'PULLING', 'ERROR'],
-    ERROR:   ['IDLE', 'PUSHING', 'PULLING'],
+    SYNCED:  ['IDLE', 'PUSHING', 'PULLING', 'ERROR', 'SYNCED'],
+    ERROR:   ['IDLE', 'PUSHING', 'PULLING', 'SYNCED'],
   };
 
   transition(newState, opts = {}) {
+    // Same-state is a silent no-op (e.g. SYNCED->SYNCED on rapid auto-sync)
+    if (this._state === newState) { if (newState === 'SYNCED') this._lastSyncTs = Date.now(); return true; }
     const allowed = SyncStateMachine.TRANSITIONS[this._state] || [];
     if (!allowed.includes(newState)) {
       console.warn(`[SSM] Invalid transition: ${this._state} ? ${newState}`);
@@ -2908,8 +2910,10 @@ class SyncStateMachine {
     }
     // PUSHING is blocked while editing to prevent wipe-on-sync bug
     if (newState === 'PUSHING' && this._editing) {
-      console.warn('[SSM] PUSHING blocked � edit in progress');
-      return false;
+      // Auto-clear if editing flag is stale (> 30 min) — guards against unclosed modals
+      if (this._editingSetAt && (Date.now() - this._editingSetAt) > 1800000) { this._editing = false; } else {
+      return false; // silently skip — auto-sync retries every 30s
+      }
     }
     const prev = this._state;
     this._state = newState;
@@ -2919,8 +2923,8 @@ class SyncStateMachine {
     return true;
   }
 
-  startEdit()  { this._editing = true; }
-  endEdit()    { this._editing = false; }
+  startEdit()  { this._editing = true; this._editingSetAt = Date.now(); }
+  endEdit()    { this._editing = false; this._editingSetAt = null; }
 
   onChange(fn) { this._listeners.push(fn); }
 
