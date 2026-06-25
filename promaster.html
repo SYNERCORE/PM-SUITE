@@ -4923,28 +4923,38 @@ async function _spWriteRemote(token, siteId, listId, payload, attempt = 0) {
       UpdatedAt: new Date().toISOString(),
     }
   });
-  let res;
-  if (_spItemId) {
-    res = await fetch(
-      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${_spItemId}`,
-      { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body }
+
+  // Always resolve the canonical SHIC_Main item from SP before writing.
+  // Fetch up to 50 items so we catch any duplicates regardless of who created them.
+  try {
+    const existing = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=50`,
+      { headers: { Authorization: 'Bearer ' + token } }
     );
-    if (res.status === 404) { _spItemId = ''; localStorage.removeItem('shic_sp_itemid'); res = null; }
-  }
-  if (!_spItemId) {
-    // Search for an existing item before creating to prevent duplicates
-    try {
-      const existing = await fetch(
-        `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=5`,
-        { headers: { Authorization: 'Bearer ' + token } }
-      );
-      if (existing.ok) {
-        const exData = await existing.json();
-        const found = (exData.value || []).find(i => i.fields?.Title === 'SHIC_Main' || i.fields?.DataKey === 'main');
-        if (found) { _spItemId = found.id; localStorage.setItem('shic_sp_itemid', _spItemId); }
+    if (existing.ok) {
+      const exData = await existing.json();
+      const matches = (exData.value || []).filter(i => i.fields?.Title === 'SHIC_Main' || i.fields?.DataKey === 'main');
+      if (matches.length > 0) {
+        // Sort newest first — keep the latest, delete the rest
+        matches.sort((a, b) => new Date(b.fields?.UpdatedAt || 0) - new Date(a.fields?.UpdatedAt || 0));
+        _spItemId = matches[0].id;
+        localStorage.setItem('shic_sp_itemid', _spItemId);
+        // Silently delete any duplicates
+        for (let di = 1; di < matches.length; di++) {
+          fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${matches[di].id}`,
+            { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } }).catch(() => {});
+        }
+        if (matches.length > 1) {
+          console.warn('[SP] _spWriteRemote: removed ' + (matches.length - 1) + ' duplicate SHIC_Main row(s)');
+        }
+      } else {
+        // No existing main item — clear cached id so we POST fresh
+        _spItemId = ''; localStorage.removeItem('shic_sp_itemid');
       }
-    } catch(e) { /* ignore — fall through to POST */ }
-  }
+    }
+  } catch(e) { /* non-fatal — fall through to cached _spItemId */ }
+
+  let res;
   if (!_spItemId) {
     res = await fetch(
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`,
