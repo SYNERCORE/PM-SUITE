@@ -20720,6 +20720,42 @@ function _whImportExecute(){
 // ── MULTI-LINE TRANSACTION STATE ────────────────────────────
 let _whRcvLines=[];
 let _whIssLines=[];
+let _whRcvAttachments=[]; // {file, name, size, preview?}
+
+function _whRcvAddFiles(fileList){
+  const remaining=4-_whRcvAttachments.length;
+  if(remaining<=0){showToast('Maximum 4 attachments allowed','warning');return;}
+  const toAdd=Array.from(fileList).slice(0,remaining);
+  toAdd.forEach(file=>{
+    _whRcvAttachments.push({file,name:file.name,size:file.size});
+  });
+  _whRcvRenderAttachments();
+  // Reset file input so same file can be added again if needed
+  const inp=$('#wh-rcv-files');if(inp)inp.value='';
+}
+function _whRcvDropFiles(e){
+  e.preventDefault();
+  const area=$('#wh-rcv-attach-area');if(area)area.style.borderColor='var(--border)';
+  _whRcvAddFiles(e.dataTransfer.files);
+}
+function _whRcvRemoveAttachment(idx){
+  _whRcvAttachments.splice(idx,1);
+  _whRcvRenderAttachments();
+}
+function _whRcvRenderAttachments(){
+  const el=$('#wh-rcv-attach-list');if(!el)return;
+  if(!_whRcvAttachments.length){el.innerHTML='';return;}
+  el.innerHTML=_whRcvAttachments.map((a,i)=>{
+    const icon=a.name.match(/\.(jpe?g|png|gif|webp)$/i)?'fa-file-image':a.name.match(/\.pdf$/i)?'fa-file-pdf':a.name.match(/\.xlsx?$/i)?'fa-file-excel':'fa-file-alt';
+    const kb=(a.size/1024).toFixed(0);
+    return`<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-secondary);border-radius:6px;font-size:12px">
+      <i class="fas ${icon}" style="color:var(--accent-blue);width:16px;text-align:center;flex-shrink:0"></i>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.name}</span>
+      <span style="color:var(--text-secondary);flex-shrink:0">${kb} KB</span>
+      <button class="btn btn-secondary btn-sm" style="padding:2px 6px;color:var(--accent-red);flex-shrink:0" onclick="_whRcvRemoveAttachment(${i})"><i class="fas fa-times"></i></button>
+    </div>`;
+  }).join('');
+}
 
 // Exact currency formatter (no K/M rounding) for warehouse money fields
 const _whFmt=v=>Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -20884,6 +20920,7 @@ function _whRefreshIss(){
 // ── TAB: RECEIVE ─────────────────────────────────────────────
 function _whReceiveHTML(){
   _whRcvLines=[{itemId:'',qty:'',unitCost:''}];
+  _whRcvAttachments=[];
   const recent=_whTx().filter(t=>t.type==='receive').sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,15);
   return`
   <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:14px;align-items:start">
@@ -20912,6 +20949,17 @@ function _whReceiveHTML(){
           <label class="form-label">Notes</label>
           <input class="form-control" id="wh-rcv-notes" placeholder="Lot number, condition…">
         </div>
+      </div>
+      <div style="margin-bottom:14px">
+        <label class="form-label"><i class="fas fa-paperclip" style="margin-right:5px;color:var(--text-secondary)"></i>Attachments <span style="font-size:10px;color:var(--text-secondary);font-weight:400">(DR, PO, delivery photo — max 4 files)</span></label>
+        <div id="wh-rcv-attach-area" ondragover="event.preventDefault();this.style.borderColor='var(--accent-blue)'" ondragleave="this.style.borderColor='var(--border)'" ondrop="_whRcvDropFiles(event)"
+          style="border:2px dashed var(--border);border-radius:8px;padding:12px;text-align:center;cursor:pointer;transition:border-color .2s;color:var(--text-secondary);font-size:12px"
+          onclick="$('#wh-rcv-files').click()">
+          <i class="fas fa-cloud-upload-alt" style="font-size:20px;margin-bottom:4px;display:block"></i>
+          Click or drag files here
+          <input type="file" id="wh-rcv-files" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none" onchange="_whRcvAddFiles(this.files)">
+        </div>
+        <div id="wh-rcv-attach-list" style="margin-top:8px;display:flex;flex-direction:column;gap:4px"></div>
       </div>
       <div style="margin-bottom:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
@@ -21311,7 +21359,12 @@ function _whLedgerHTML(){
       <td style="font-size:11px">${t.vendor||t.issuedBy||t.by||'—'}</td>
       <td style="font-size:11px">${t.ref||'—'}</td>
       <td style="font-size:11px;color:var(--text-secondary)">${t.notes||'—'}</td>
-      <td style="padding:4px 6px">${canPrint?`<button class="btn btn-secondary btn-sm" style="padding:2px 7px" title="Print slip" onclick="_whReprintTx('${t.id}')"><i class="fas fa-print"></i></button>`:''}</td>
+      <td style="padding:4px 6px">
+        <div style="display:flex;gap:4px">
+          ${canPrint?`<button class="btn btn-secondary btn-sm" style="padding:2px 7px" title="Print slip" onclick="_whReprintTx('${t.id}')"><i class="fas fa-print"></i></button>`:''}
+          ${(t.attachments&&t.attachments.length)?`<button class="btn btn-secondary btn-sm" style="padding:2px 7px;color:var(--accent-blue)" title="${t.attachments.length} attachment(s)" onclick="_whViewAttachments('${t.id}')"><i class="fas fa-paperclip"></i><span style="font-size:9px;margin-left:2px">${t.attachments.length}</span></button>`:''}
+        </div>
+      </td>
     </tr>`;
   }).join('');
 
@@ -21330,6 +21383,27 @@ function _whLedgerHTML(){
   </table>
   </div>
   ${shown.length>100?`<div style="text-align:center;padding:10px;color:var(--text-secondary);font-size:12px">Showing 100 of ${shown.length} records</div>`:''}`;
+}
+
+function _whViewAttachments(txId){
+  const tx=_whTx().find(t=>t.id===txId);
+  if(!tx||!tx.attachments?.length)return;
+  const list=tx.attachments.map(a=>{
+    const icon=a.name.match(/\.(jpe?g|png|gif|webp)$/i)?'fa-file-image':a.name.match(/\.pdf$/i)?'fa-file-pdf':a.name.match(/\.xlsx?$/i)?'fa-file-excel':'fa-file-alt';
+    const kb=a.size?(a.size/1024).toFixed(0)+' KB':'';
+    return`<a href="${a.url}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-secondary);border-radius:7px;text-decoration:none;color:var(--text-primary);border:1px solid var(--border)">
+      <i class="fas ${icon}" style="font-size:18px;color:var(--accent-blue);flex-shrink:0"></i>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.name}</div>
+        ${kb?`<div style="font-size:10px;color:var(--text-secondary)">${kb}</div>`:''}
+      </div>
+      <i class="fas fa-external-link-alt" style="color:var(--text-secondary);font-size:11px;flex-shrink:0"></i>
+    </a>`;
+  }).join('');
+  showModal('Attachments — '+txId,`
+    <div style="padding:4px 0;display:flex;flex-direction:column;gap:8px">${list}</div>
+    <div style="font-size:11px;color:var(--text-secondary);margin-top:10px"><i class="fas fa-info-circle"></i> Files open in SharePoint. You may need to sign in.</div>
+  `);
 }
 
 function _whReprintTx(txId){
@@ -21356,7 +21430,7 @@ function _whReprintTx(txId){
 }
 
 // ── SAVE HELPERS ─────────────────────────────────────────────
-function _whSaveReceive(){
+async function _whSaveReceive(){
   const date=$('#wh-rcv-date')?.value||new Date().toISOString().slice(0,10);
   const ref=$('#wh-rcv-ref')?.value.trim();
   const vendor=$('#wh-rcv-vendor')?.value.trim();
@@ -21365,16 +21439,33 @@ function _whSaveReceive(){
   const valid=_whRcvLines.filter(ln=>ln.itemId&&parseFloat(ln.qty)>0);
   if(!valid.length){showToast('Add at least one item with qty > 0','error');return;}
 
+  // Upload attachments first
+  let attachments=[];
+  if(_whRcvAttachments.length){
+    showToast(`Uploading ${_whRcvAttachments.length} attachment(s)…`,'info',8000);
+    for(const a of _whRcvAttachments){
+      try{
+        const result=await spUploadFile(a.file,'Warehouse');
+        attachments.push({name:a.name,size:a.size,url:result.webUrl,downloadUrl:result.url});
+      }catch(e){
+        showToast(`Failed to upload "${a.name}": ${e.message}`,'error',6000);
+        return; // Stop — don't post partial
+      }
+    }
+  }
+
   if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
   const postedAt=new Date().toISOString();
   const by=AppState.currentUser?.displayName||'';
+  const batchRef='RCV-'+Date.now().toString(36).toUpperCase(); // Groups multi-line receipts
   valid.forEach(ln=>{
     const qty=parseFloat(ln.qty);
     const cost=parseFloat(ln.unitCost||0);
     AppState.data.stockTransactions.push({
       id:_whNextId('TX-',AppState.data.stockTransactions),
-      itemId:ln.itemId,type:'receive',qty,date,ref,vendor,notes,by,postedAt,
+      itemId:ln.itemId,type:'receive',qty,date,ref,vendor,notes,by,postedAt,batchRef,
       unitCost:cost||undefined,
+      attachments:attachments.length?attachments:undefined,
     });
     if(cost>0){
       const idx=(AppState.data.warehouseItems||[]).findIndex(i=>i.id===ln.itemId);
@@ -21383,8 +21474,9 @@ function _whSaveReceive(){
     _whSyncQty(ln.itemId);
   });
   AppState.save();
-  showToast(`${valid.length} item${valid.length>1?'s':''} received & posted`,'success',3500);
+  showToast(`${valid.length} item${valid.length>1?'s':''} received & posted${attachments.length?' with '+attachments.length+' attachment(s)':''}`,'success',4000);
   _whRcvLines=[{itemId:'',qty:'',unitCost:''}];
+  _whRcvAttachments=[];
   _whRenderTab();
 }
 
