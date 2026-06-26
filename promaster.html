@@ -662,6 +662,7 @@ let _m365AuthMsal = null;    // Dedicated MSAL app for auth (separate from SP sy
 let _m365LoggedIn = false;   // True when M365 auth completed
 const M365_AUTH_SCOPES = ['User.Read', 'https://graph.microsoft.com/Sites.ReadWrite.All'];
 const SHIC_USERS_LIST = 'SHIC_Users'; // SharePoint list for user profiles
+const SHIC_FORMS_LIST = 'SHIC_FormTemplates'; // SharePoint list for withdrawal form templates
 
 // ── Multi-list configuration ─────────────────────────────────
 // Maps data array keys to dedicated SharePoint lists.
@@ -2986,7 +2987,7 @@ class SyncStateMachine {
     if (newState === 'PUSHING' && this._editing) {
       // Auto-clear if editing flag is stale (> 30 min) — guards against unclosed modals
       if (this._editingSetAt && (Date.now() - this._editingSetAt) > 1800000) { this._editing = false; } else {
-      return false; // silently skip — auto-sync retries every 30s
+      return false; // silently skip — auto-sync retries every 30s
       }
     }
     const prev = this._state;
@@ -7084,6 +7085,106 @@ async function m365SetAdmin(uid, isAdmin) {
     showToast('Admin status updated', 'success');
     renderSettings();
   } catch(e) { showToast('Failed: ' + e.message, 'error'); }
+}
+
+// ── Form Templates SP CRUD ──────────────────────────────────
+let _formsListId = null;
+async function _getOrCreateFormsListId(token, siteId) {
+  if (_formsListId) return _formsListId;
+  const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists?$top=100`, { headers: { Authorization: 'Bearer ' + token } });
+  const data = await res.json();
+  const found = (data.value||[]).find(l => l.displayName === SHIC_FORMS_LIST);
+  if (found) { _formsListId = found.id; return _formsListId; }
+  const createRes = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      displayName: SHIC_FORMS_LIST,
+      list: { template: 'genericList' },
+      columns: [
+        { name: 'FormId', text: {} },
+        { name: 'FormName', text: {} },
+        { name: 'CompanyName', text: {} },
+        { name: 'CompanySub', text: {} },
+        { name: 'DocControlNo', text: {} },
+        { name: 'RevisionNo', text: {} },
+        { name: 'EffectiveDate', text: {} },
+        { name: 'LogoDataUrl', text: { allowMultipleLines: true, textType: 'plain' } },
+      ]
+    })
+  });
+  if (createRes.ok || createRes.status === 409) {
+    const retry = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists?$top=100`, { headers: { Authorization: 'Bearer ' + token } });
+    const retryData = await retry.json();
+    _formsListId = (retryData.value||[]).find(l => l.displayName === SHIC_FORMS_LIST)?.id;
+    return _formsListId;
+  }
+  throw new Error('Could not create form templates list');
+}
+
+async function spGetFormTemplates() {
+  try {
+    const token = await getM365AuthToken();
+    if (!token) return null;
+    const { siteId } = await spResolveSiteAndList(token);
+    const listId = await _getOrCreateFormsListId(token, siteId);
+    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=999`, { headers: { Authorization: 'Bearer ' + token } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data.value||[]).map(i => ({
+      _spId: i.id,
+      id: i.fields?.FormId || i.id,
+      name: i.fields?.FormName || '',
+      companyName: i.fields?.CompanyName || '',
+      companySub: i.fields?.CompanySub || '',
+      docControlNo: i.fields?.DocControlNo || '',
+      revisionNo: i.fields?.RevisionNo || '',
+      effectiveDate: i.fields?.EffectiveDate || '',
+      logoDataUrl: i.fields?.LogoDataUrl || '',
+    }));
+  } catch(e) { console.warn('[Forms] Load failed:', e.message); return null; }
+}
+
+async function spSaveFormTemplate(form) {
+  try {
+    const token = await getM365AuthToken();
+    const { siteId } = await spResolveSiteAndList(token);
+    const listId = await _getOrCreateFormsListId(token, siteId);
+    const fields = {
+      Title: form.name,
+      FormId: form.id,
+      FormName: form.name,
+      CompanyName: form.companyName,
+      CompanySub: form.companySub,
+      DocControlNo: form.docControlNo,
+      RevisionNo: form.revisionNo,
+      EffectiveDate: form.effectiveDate,
+      LogoDataUrl: form.logoDataUrl || '',
+    };
+    if (form._spId) {
+      await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${form._spId}`, {
+        method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields })
+      });
+    } else {
+      const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`, {
+        method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields })
+      });
+      if (res.ok) { const d = await res.json(); form._spId = d.id; }
+    }
+  } catch(e) { console.warn('[Forms] Save failed:', e.message); throw e; }
+}
+
+async function spDeleteFormTemplate(spId) {
+  try {
+    const token = await getM365AuthToken();
+    const { siteId } = await spResolveSiteAndList(token);
+    const listId = await _getOrCreateFormsListId(token, siteId);
+    await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${spId}`, {
+      method: 'DELETE', headers: { Authorization: 'Bearer ' + token }
+    });
+  } catch(e) { console.warn('[Forms] Delete failed:', e.message); throw e; }
 }
 
 // ── Main M365 Login function ────────────────────────────────
@@ -20070,14 +20171,29 @@ function _openRecentItem(r) {
 function _whItems(){return(AppState.data.warehouseItems||[]).filter(i=>!i._deleted);}
 function _whTx(){return(AppState.data.stockTransactions||[]).filter(t=>!t._deleted);}
 function _whReq(){return(AppState.data.issuanceRequests||[]).filter(r=>!r._deleted);}
+// In-memory cache of form templates loaded from SP (shared across all users)
+let _whFormsCache=null;
 function _whForms(){
-  if(!AppState.data.whForms||!AppState.data.whForms.length){
-    AppState.data.whForms=[
-      {id:'form-shic',name:'SHIC Form',companyName:'SYNERCORE',companySub:'HEAVY INDUSTRIES CORP.',logoDataUrl:'',docControlNo:'SHIC-WHD-F-003',revisionNo:'REV.000',effectiveDate:'January 4, 2025'},
-      {id:'form-sy3', name:'SY3 Form', companyName:'SY3 ENERGY', companySub:'MAINTENANCE SERVICES CORP.',logoDataUrl:'',docControlNo:'SY3-F-WHD-003', revisionNo:'REV.003',effectiveDate:'April 21, 2025'},
-    ];
-  }
-  return AppState.data.whForms;
+  // Return cache if loaded, otherwise fall back to local defaults until SP loads
+  if(_whFormsCache&&_whFormsCache.length)return _whFormsCache;
+  if(AppState.data.whForms&&AppState.data.whForms.length)return AppState.data.whForms;
+  return[
+    {id:'form-shic',name:'SHIC Form',companyName:'SYNERCORE',companySub:'HEAVY INDUSTRIES CORP.',logoDataUrl:'',docControlNo:'SHIC-WHD-F-003',revisionNo:'REV.000',effectiveDate:'January 4, 2025'},
+    {id:'form-sy3', name:'SY3 Form', companyName:'SY3 ENERGY', companySub:'MAINTENANCE SERVICES CORP.',logoDataUrl:'',docControlNo:'SY3-F-WHD-003', revisionNo:'REV.003',effectiveDate:'April 21, 2025'},
+  ];
+}
+async function _whLoadFormsFromSP(){
+  try{
+    const forms=await spGetFormTemplates();
+    if(forms&&forms.length){_whFormsCache=forms;return forms;}
+    // SP is empty — seed with defaults if admin
+    if(_currentUserProfile?.isAdmin){
+      const defaults=_whForms();
+      for(const f of defaults){try{await spSaveFormTemplate(f);}catch(e){console.warn('[Forms] Seed failed',e);}}
+      _whFormsCache=defaults;
+    }
+    return _whFormsCache||_whForms();
+  }catch(e){console.warn('[Forms] SP load failed, using local:',e.message);return _whForms();}
 }
 // Generate WHD-MCWF NO.: 26YY - NNN (sequential per year across all withdrawal tx)
 function _whGenMcwfNo(date){
@@ -21038,6 +21154,8 @@ function _whRequestsHTML(){
 
 // ── TAB: FORM SETUP ──────────────────────────────────────────
 function _whFormsHTML(){
+  // Always refresh from SP in background so all users see the latest templates
+  _whLoadFormsFromSP().then(forms=>{ if(_whFormsCache&&_whTab==='forms')_whRenderTab(); });
   const forms=_whForms();
   const cards=forms.map(f=>`
     <div class="card" style="margin-bottom:12px;padding:14px 16px">
@@ -21132,18 +21250,21 @@ function _whSaveFormEntry(id){
   const effDate=$('#wff-effdate')?.value.trim();
   if(!name||!coName){showToast('Form Name and Company Name are required','error');return;}
   const logoFile=$('#wff-logo')?.files?.[0];
-  const save=(logoDataUrl)=>{
-    if(!AppState.data.whForms)AppState.data.whForms=[];
-    const idx=AppState.data.whForms.findIndex(f=>f.id===id);
-    const existing=idx>=0?AppState.data.whForms[idx]:{};
+  const save=async(logoDataUrl)=>{
+    if(!_whFormsCache)_whFormsCache=_whForms().slice();
+    const idx=_whFormsCache.findIndex(f=>f.id===id);
+    const existing=idx>=0?_whFormsCache[idx]:{};
     const updated={...existing,id,name,companyName:coName,companySub:coSub,docControlNo:docNo,revisionNo:revNo,effectiveDate:effDate,
       logoDataUrl:logoDataUrl!==undefined?logoDataUrl:(existing.logoDataUrl||'')};
-    if(idx>=0)AppState.data.whForms[idx]=updated;
-    else AppState.data.whForms.push(updated);
-    AppState.save();
+    if(idx>=0)_whFormsCache[idx]=updated;
+    else _whFormsCache.push(updated);
     _whCloseFormModal();
     _whRenderTab();
-    showToast('Form saved','success');
+    showToast('Saving to SharePoint...','info',2000);
+    try{
+      await spSaveFormTemplate(updated);
+      showToast('Form saved and shared with all users','success');
+    }catch(e){showToast('Saved locally — SP sync failed: '+e.message,'warning',5000);}
   };
   if(logoFile){
     const reader=new FileReader();
@@ -21154,12 +21275,16 @@ function _whSaveFormEntry(id){
   }
 }
 
-function _whDeleteForm(id){
+async function _whDeleteForm(id){
   if(!confirm('Delete this form template?'))return;
-  AppState.data.whForms=(AppState.data.whForms||[]).filter(f=>f.id!==id);
-  AppState.save();
+  const form=(_whFormsCache||_whForms()).find(f=>f.id===id);
+  if(!_whFormsCache)_whFormsCache=_whForms().slice();
+  _whFormsCache=_whFormsCache.filter(f=>f.id!==id);
   _whRenderTab();
-  showToast('Form deleted','success');
+  if(form?._spId){
+    try{await spDeleteFormTemplate(form._spId);showToast('Form deleted','success');}
+    catch(e){showToast('Deleted locally — SP sync failed: '+e.message,'warning',5000);}
+  }else{showToast('Form deleted','success');}
 }
 
 // ── TAB: LEDGER ──────────────────────────────────────────────
