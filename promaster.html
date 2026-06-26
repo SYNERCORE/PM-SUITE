@@ -2218,6 +2218,9 @@ function _renderUserTable(users){
   ${pending.length?`<div style="padding:10px 14px;background:rgba(240,164,80,.1);border:1px solid rgba(240,164,80,.3);border-radius:8px;margin-bottom:14px;font-size:12px;color:var(--accent-amber)">
     <i class="fas fa-clock" style="margin-right:7px"></i><strong>${pending.length} user(s) pending approval</strong>
   </div>`:''}
+  <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+    <button class="btn btn-primary btn-sm" onclick="showInviteModal()" style="font-size:11px"><i class="fas fa-user-plus"></i> Invite User</button>
+  </div>
   <div class="table-wrap"><table>
     <thead><tr><th>User</th><th>Email</th><th>Dept/Role</th><th>Status</th><th>Registered</th><th>Last Login</th><th>Admin</th><th>Actions</th></tr></thead>
     <tbody>${users.length?_pgSlice('users',users).map(u=>{
@@ -2248,12 +2251,83 @@ function _renderUserTable(users){
   </table></div>
   ${users.length<=1?`<div style="margin-top:12px;padding:14px;background:rgba(56,139,253,.06);border:1px solid rgba(56,139,253,.15);border-radius:8px;font-size:12px;color:var(--text-secondary)">
     <i class="fas fa-users" style="color:var(--accent-blue);margin-right:8px"></i>
-    <strong>No other users yet.</strong> Share the SHIC app file with your team.
-    When they open it and sign in with Microsoft 365, click <strong>Request access</strong> —
-    their accounts will appear here for you to approve.
-  </div>`:''}`;
+    <strong>No other users yet.</strong> Use the <strong>Invite User</strong> button above to pre-register teammates —
+    they can sign in immediately with their Microsoft 365 account without waiting for approval.
+  </div>`:''}
+  <div id="inviteUserModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:var(--bg-card);border-radius:12px;padding:24px;width:380px;max-width:95vw;box-shadow:0 8px 32px rgba(0,0,0,.3)">
+      <div style="font-weight:700;font-size:15px;margin-bottom:16px;display:flex;align-items:center;gap:8px">
+        <i class="fas fa-user-plus" style="color:var(--accent-blue)"></i> Invite New User
+      </div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px;padding:8px 10px;background:rgba(56,139,253,.07);border-radius:6px">
+        Enter the user's Microsoft 365 email. When they sign in, they'll be automatically approved.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <label style="font-size:11px;font-weight:600;display:block;margin-bottom:4px">Full Name <span style="color:var(--accent-red)">*</span></label>
+          <input id="inviteName" class="form-control" style="font-size:12px" placeholder="e.g. Juan Dela Cruz">
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;display:block;margin-bottom:4px">M365 Email <span style="color:var(--accent-red)">*</span></label>
+          <input id="inviteEmail" class="form-control" style="font-size:12px" placeholder="e.g. juan@company.com" type="email">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div>
+            <label style="font-size:11px;font-weight:600;display:block;margin-bottom:4px">Department</label>
+            <input id="inviteDept" class="form-control" style="font-size:12px" placeholder="e.g. Warehouse">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;display:block;margin-bottom:4px">Role</label>
+            <select id="inviteRole" class="form-control" style="font-size:12px">
+              <option value="User">User</option>
+              <option value="Viewer">Viewer</option>
+              <option value="Admin">Admin</option>
+            </select>
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;margin-top:2px">
+          <input type="checkbox" id="inviteAdmin" style="width:14px;height:14px">
+          Grant Admin privileges
+        </label>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
+        <button class="btn btn-secondary btn-sm" onclick="closeInviteModal()">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="saveInvitedUser()"><i class="fas fa-paper-plane"></i> Add &amp; Pre-approve</button>
+      </div>
+    </div>
+  </div>`;
 }
 
+
+function showInviteModal(){
+  const m=document.getElementById('inviteUserModal');
+  if(m){m.style.display='flex';['inviteName','inviteEmail','inviteDept'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});const r=document.getElementById('inviteRole');if(r)r.value='User';const a=document.getElementById('inviteAdmin');if(a)a.checked=false;}
+}
+function closeInviteModal(){
+  const m=document.getElementById('inviteUserModal');
+  if(m)m.style.display='none';
+}
+async function saveInvitedUser(){
+  const name=(document.getElementById('inviteName')?.value||'').trim();
+  const email=(document.getElementById('inviteEmail')?.value||'').trim().toLowerCase();
+  const dept=(document.getElementById('inviteDept')?.value||'').trim();
+  const role=document.getElementById('inviteRole')?.value||'User';
+  const isAdmin=document.getElementById('inviteAdmin')?.checked||role==='Admin';
+  if(!name||!email){showToast('Name and email are required.','error');return;}
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){showToast('Enter a valid M365 email address.','error');return;}
+  try{
+    const token=await getM365AuthToken();
+    const{siteId}=await spResolveSiteAndList(token);
+    const existing=await m365GetUserProfile(token,siteId,email);
+    if(existing){showToast('A user with that email already exists.','warning');return;}
+    const profile={uid:'invited-'+Date.now(),email,name,status:'approved',isAdmin,role:isAdmin?'Admin':role,department:dept,registeredAt:new Date().toISOString(),approvedBy:_currentUser?.email||'admin'};
+    await m365SaveUserProfile(token,siteId,profile,null);
+    showToast(name+' added and pre-approved. They can sign in immediately.','success',5000);
+    closeInviteModal();
+    _userMgmtCache=null;_userMgmtHash='';
+    renderUserManagement();
+  }catch(e){showToast('Error: '+e.message,'error');}
+}
 
 let _userMgmtCache=null,_userMgmtHash='',_userMgmtBusy=false;
 function _hashUsers(users){return users.map(u=>u.uid+'|'+u.status+'|'+u.isAdmin+'|'+(u.lastLogin||0)).join(',');}
