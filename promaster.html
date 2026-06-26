@@ -20181,6 +20181,7 @@ function _whTx(){return(AppState.data.stockTransactions||[]).filter(t=>!t._delet
 function _whReq(){return(AppState.data.issuanceRequests||[]).filter(r=>!r._deleted);}
 // In-memory cache of form templates loaded from SP (shared across all users)
 let _whFormsCache=null;
+let _whFormsCacheTime=0; // timestamp of last SP load
 function _whForms(){
   // Return cache if loaded, otherwise fall back to local defaults until SP loads
   if(_whFormsCache&&_whFormsCache.length)return _whFormsCache;
@@ -20190,18 +20191,22 @@ function _whForms(){
     {id:'form-sy3', name:'SY3 Form', companyName:'SY3 ENERGY', companySub:'MAINTENANCE SERVICES CORP.',logoDataUrl:'',docControlNo:'SY3-F-WHD-003', revisionNo:'REV.003',effectiveDate:'April 21, 2025'},
   ];
 }
+let _whFormsLoading=false;
 async function _whLoadFormsFromSP(){
+  if(_whFormsLoading)return _whFormsCache||_whForms();
+  _whFormsLoading=true;
   try{
     const forms=await spGetFormTemplates();
-    if(forms&&forms.length){_whFormsCache=forms;return forms;}
+    if(forms&&forms.length){_whFormsCache=forms;_whFormsCacheTime=Date.now();return forms;}
     // SP is empty — seed with defaults if admin
     if(_currentUserProfile?.isAdmin){
       const defaults=_whForms();
       for(const f of defaults){try{await spSaveFormTemplate(f);}catch(e){console.warn('[Forms] Seed failed',e);}}
-      _whFormsCache=defaults;
+      _whFormsCache=defaults;_whFormsCacheTime=Date.now();
     }
     return _whFormsCache||_whForms();
   }catch(e){console.warn('[Forms] SP load failed, using local:',e.message);return _whForms();}
+  finally{_whFormsLoading=false;}
 }
 // Generate WHD-MCWF NO.: 26YY - NNN (sequential per year across all withdrawal tx)
 function _whGenMcwfNo(date){
@@ -21223,8 +21228,14 @@ function _whRequestsHTML(){
 
 // ── TAB: FORM SETUP ──────────────────────────────────────────
 function _whFormsHTML(){
-  // Always refresh from SP in background so all users see the latest templates
-  _whLoadFormsFromSP().then(forms=>{ if(_whFormsCache&&_whTab==='forms')_whRenderTab(); });
+  // Load from SP only if cache is empty or older than 5 minutes — never re-render if modal is open
+  const cacheStale=!_whFormsCache||!_whFormsCacheTime||(Date.now()-_whFormsCacheTime>300000);
+  if(cacheStale&&!_whFormsLoading){
+    _whLoadFormsFromSP().then(()=>{
+      const modalOpen=document.getElementById('wh-form-modal')?.style.display==='block';
+      if(_whTab==='forms'&&!modalOpen)_whRenderTab();
+    });
+  }
   const forms=_whForms();
   const cards=forms.map(f=>`
     <div class="card" style="margin-bottom:12px;padding:14px 16px">
