@@ -24040,6 +24040,10 @@ function _detectDataCorruption() {
     const arrays = ['projects','tasks','equipment','tools','vehicles','consumables','manpower'];
     const prevTotal = arrays.reduce((s, k) => s + (snap.data[k]?.length || 0), 0);
     const currTotal = arrays.reduce((s, k) => s + (AppState.data[k]?.length || 0), 0);
+    // Skip check if SP is connected — data lives in SP lists and may not be in local AppState yet
+    if (typeof _spConnected !== 'undefined' && _spConnected) return null;
+    // Skip check if snapshot is very recent (< 2 min) — SP pull may still be in progress
+    if (snap.ts && (Date.now() - snap.ts) < 120000) return null;
     // If previous had >50 records and current has 0, something's wrong
     if (prevTotal > 50 && currTotal === 0) {
       return { snap, prevTotal, currTotal };
@@ -24066,7 +24070,8 @@ function _offerRestoreSnapshot() {
   }
   return false;
 }
-setTimeout(() => { try { _offerRestoreSnapshot(); } catch(e) {} }, 3000);
+// Delay check by 15s to give SP sync time to load data before evaluating
+setTimeout(() => { try { _offerRestoreSnapshot(); } catch(e) {} }, 15000);
 
 // Hook pre-sync snapshot into spPushData
 (function hookPreSyncSnapshot() {
