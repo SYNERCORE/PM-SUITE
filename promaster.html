@@ -20020,13 +20020,13 @@ function _whCalcQty(itemId){
   const tx=_whTx().filter(t=>t.itemId===itemId);
   const qtyOnHand=tx.reduce((s,t)=>{
     if(t.type==='receive')return s+t.qty;
-    if(t.type==='issue')return s-t.qty;
+    if(t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser')return s-t.qty;
     if(t.type==='return')return s+t.qty;
     if(t.type==='adjust')return s+t.qty;
     return s;
   },0);
   const qtyReserved=(AppState.data.resourceAllocations||[]).filter(a=>!a._deleted&&a.resourceId===itemId&&(a.resourceType==='Material'||a.resourceType==='Consumable')).reduce((s,a)=>s+(a.allocatedQty||0),0);
-  const issued=tx.filter(t=>t.type==='issue').reduce((s,t)=>s+t.qty,0);
+  const issued=tx.filter(t=>t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser').reduce((s,t)=>s+t.qty,0);
   const returned=tx.filter(t=>t.type==='return').reduce((s,t)=>s+t.qty,0);
   const netIssued=Math.max(0,issued-returned);
   const qtyAvailable=Math.max(0,qtyOnHand-Math.max(0,qtyReserved-netIssued));
@@ -20761,7 +20761,7 @@ function _whReceiveHTML(){
 // ── TAB: ISSUE / RETURN ──────────────────────────────────────
 function _whIssueHTML(){
   _whIssLines=[{itemId:'',qty:''}];
-  const recent=_whTx().filter(t=>t.type==='issue'||t.type==='return'||t.type==='adjust').sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,15);
+  const recent=_whTx().filter(t=>t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser'||t.type==='return'||t.type==='adjust').sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,15);
   const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='completed');
   return`
   <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:14px;align-items:start">
@@ -20778,6 +20778,8 @@ function _whIssueHTML(){
           <label class="form-label">Transaction Type *</label>
           <select class="form-control" id="wh-iss-type">
             <option value="issue">Issue — Send to Site</option>
+            <option value="issue-shop">Issue — Send to Shop</option>
+            <option value="issue-enduser">Issue — To End User</option>
             <option value="return">Return — Back to Warehouse</option>
             <option value="adjust">Adjustment — Inventory Correction</option>
           </select>
@@ -20847,6 +20849,7 @@ function _whIssueHTML(){
           const isReturn=t.type==='return';
           const isAdj=t.type==='adjust';
           const color=isReturn?'var(--accent-green)':isAdj?'#39d3f2':'var(--accent-amber)';
+          const typeTag={issue:'ISSUE→SITE','issue-shop':'ISSUE→SHOP','issue-enduser':'ISSUE→USER',return:'RETURN',adjust:'ADJUST'}[t.type]||t.type;
           const sign=isReturn?'+':isAdj?(t.qty>=0?'+':''):'−';
           const label={issue:'ISSUE',return:'RETURN',adjust:'ADJUST'}[t.type]||t.type.toUpperCase();
           return`<div class="card" style="padding:10px 14px;border-left:3px solid ${color}">
@@ -20952,8 +20955,9 @@ function _whLedgerHTML(){
   const rows=shown.slice(0,100).map(t=>{
     const item=items.find(i=>i.id===t.itemId);
     const col=typeColor[t.type]||'#aaa';
-    const sign=t.type==='issue'?'−':'+';
-    const canPrint=(t.type==='issue'||t.type==='return'||t.type==='adjust');
+    const isIss=t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser';
+    const sign=isIss?'−':'+';
+    const canPrint=isIss||t.type==='return'||t.type==='adjust';
     return`<tr>
       <td style="font-size:10px;color:var(--text-secondary);font-family:var(--font-mono)">${(t.date||'').slice(0,10)}</td>
       <td><span class="badge" style="background:${col}22;color:${col};border:1px solid ${col}44;font-size:10px;text-transform:uppercase">${t.type}</span></td>
@@ -21048,7 +21052,8 @@ function _whSaveIssue(){
   const valid=_whIssLines.filter(ln=>ln.itemId&&parseFloat(ln.qty)!==0&&ln.qty!=='');
   if(!valid.length){showToast('Add at least one item with a quantity','error');return;}
 
-  if(type==='issue'){
+  const isIssueType=type==='issue'||type==='issue-shop'||type==='issue-enduser';
+  if(isIssueType){
     for(const ln of valid){
       const q=_whCalcQty(ln.itemId);
       const qty=parseFloat(ln.qty);
@@ -21060,7 +21065,7 @@ function _whSaveIssue(){
     }
   }
 
-  if(type==='issue'&&projId){
+  if(isIssueType&&projId){
     const overBudget=[];
     for(const ln of valid){
       const qty=parseFloat(ln.qty);
@@ -21087,7 +21092,7 @@ function _whSaveIssue(){
       id:_whNextId('TX-',AppState.data.stockTransactions),
       itemId:ln.itemId,type,bu,
       qty:type==='adjust'&&String(ln.qty).startsWith('-')?-Math.abs(qty):qty,
-      unitCost:type==='issue'?_whCalcWAC(ln.itemId):undefined,
+      unitCost:isIssueType?_whCalcWAC(ln.itemId):undefined,
       projectId:projId||null,date,issuedBy:by,by,notes,postedAt,
     });
     _whSyncQty(ln.itemId);
