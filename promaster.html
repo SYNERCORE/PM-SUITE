@@ -20782,6 +20782,13 @@ function _whIssueHTML(){
             <option value="adjust">Adjustment — Inventory Correction</option>
           </select>
         </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Business Unit (Form)</label>
+          <select class="form-control" id="wh-iss-bu">
+            <option value="SHIC">SHIC — SHIC-WHD-F-003</option>
+            <option value="SY3">SY3 — SY3-F-WHD-003</option>
+          </select>
+        </div>
         <div class="form-group" style="margin:0;grid-column:1/-1">
           <label class="form-label">Project</label>
           <select class="form-control" id="wh-iss-proj">
@@ -20985,6 +20992,7 @@ function _whReprintTx(txId){
   const qty=Math.abs(tx.qty);
   const slipData={
     type:tx.type,
+    bu:tx.bu||'SHIC',
     projId:tx.projectId,
     date:tx.date,
     by:tx.issuedBy||tx.by||tx.vendor||'',
@@ -21031,6 +21039,7 @@ function _whSaveReceive(){
 
 function _whSaveIssue(){
   const type=$('#wh-iss-type')?.value||'issue';
+  const bu=$('#wh-iss-bu')?.value||'SHIC';
   const projId=$('#wh-iss-proj')?.value;
   const date=$('#wh-iss-date')?.value||new Date().toISOString().slice(0,10);
   const by=$('#wh-iss-by')?.value.trim();
@@ -21076,7 +21085,7 @@ function _whSaveIssue(){
     const qty=parseFloat(ln.qty);
     AppState.data.stockTransactions.push({
       id:_whNextId('TX-',AppState.data.stockTransactions),
-      itemId:ln.itemId,type,
+      itemId:ln.itemId,type,bu,
       qty:type==='adjust'&&String(ln.qty).startsWith('-')?-Math.abs(qty):qty,
       unitCost:type==='issue'?_whCalcWAC(ln.itemId):undefined,
       projectId:projId||null,date,issuedBy:by,by,notes,postedAt,
@@ -21091,7 +21100,7 @@ function _whSaveIssue(){
     const qty=parseFloat(ln.qty);
     return{name:item?.name||ln.itemId,code:item?.code||ln.itemId,unit:item?.unit||'',qty,wac,total:qty*wac};
   });
-  const slipData={type,projId,date,by,notes,items:slipItems,
+  const slipData={type,bu,projId,date,by,notes,items:slipItems,
     grand:slipItems.reduce((s,r)=>s+r.total,0),
     postedAt:new Date().toLocaleString('en-PH')};
   showToast(`${valid.length} item${valid.length>1?'s':''} — ${type} posted`,'success',3500);
@@ -21102,82 +21111,196 @@ function _whSaveIssue(){
 }
 
 function _whPrintSlip(d){
-  const typeLabel={issue:'MATERIALS ISSUANCE SLIP',return:'STOCK RETURN SLIP',adjust:'INVENTORY ADJUSTMENT SLIP'};
-  const accentColor={issue:'#f59e0b',return:'#3b82f6',adjust:'#8b5cf6'};
-  const color=accentColor[d.type]||'#f59e0b';
+  const bu=d.bu||'SHIC';
+  const isSHIC=bu==='SHIC';
+  const docNo=isSHIC?'SHIC-WHD-F-003':'SY3-F-WHD-003';
+  const revNo=isSHIC?'REV.000':'REV.003';
+  const effDate=isSHIC?'January 4, 2025':'April 21, 2025';
   const proj=d.projId?(AppState.data.projects||[]).find(p=>p.id===d.projId):null;
-  const rows=d.items.map((r,i)=>`
-    <tr style="border-bottom:1px solid #e5e7eb">
-      <td style="padding:8px 10px;font-size:13px">${i+1}</td>
-      <td style="padding:8px 10px;font-size:12px;color:#6b7280">${r.code}</td>
-      <td style="padding:8px 10px;font-size:13px;font-weight:600">${r.name}</td>
-      <td style="padding:8px 10px;text-align:center;font-size:13px">${r.qty}</td>
-      <td style="padding:8px 10px;text-align:center;font-size:13px">${r.unit}</td>
-      <td style="padding:8px 10px;text-align:right;font-family:monospace;font-size:13px">₱${_whFmt(r.wac)}</td>
-      <td style="padding:8px 10px;text-align:right;font-family:monospace;font-size:13px;font-weight:700;color:${color}">₱${_whFmt(r.total)}</td>
+  // Pad items to at least 10 rows for the form
+  const MIN_ROWS=15;
+  const padded=[...d.items];
+  while(padded.length<MIN_ROWS)padded.push({name:'',code:'',unit:'',qty:'',wac:0,total:0});
+  const rows=padded.map((r,i)=>`
+    <tr>
+      <td class="c">${i<d.items.length?i+1:''}</td>
+      <td class="desc">${r.name?`<span class="code">${r.code}</span> ${r.name}`:''}</td>
+      <td class="c">${r.qty||''}</td>
+      <td class="c">${r.unit||''}</td>
+      <td class="reason">${i===0&&d.notes?d.notes:''}</td>
+      <td class="c num">${r.total>0?'₱'+_whFmt(r.total):''}</td>
     </tr>`).join('');
-  const company=(AppState.data.settings?.companyName)||'SY3 Energy Maintenance Services Corporation';
-  const html=`<!DOCTYPE html><html><head><title>${typeLabel[d.type]||'Transaction Slip'}</title>
+  const timeStr=new Date().toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'});
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>Materials & Consumables Withdrawal Form — ${bu}</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:Arial,sans-serif;color:#111;background:#fff;padding:28px 36px;font-size:13px}
-    .header{border-bottom:3px solid ${color};padding-bottom:14px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end}
-    .title{font-size:20px;font-weight:700;color:${color};letter-spacing:.5px}
-    .company{font-size:11px;color:#6b7280;margin-top:3px}
-    .meta{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;margin-bottom:18px;background:#f9fafb;padding:12px 16px;border-radius:6px;border:1px solid #e5e7eb}
-    .meta-row{display:flex;gap:8px;font-size:12px}<br>
-    .meta-label{color:#6b7280;min-width:90px;flex-shrink:0}
-    .meta-value{font-weight:600}
-    table{width:100%;border-collapse:collapse;margin-bottom:18px}
-    thead tr{background:${color};color:#fff}
-    th{padding:9px 10px;text-align:left;font-size:12px;font-weight:600}
-    th:nth-child(4),th:nth-child(5){text-align:center}
-    th:nth-child(6),th:nth-child(7){text-align:right}
-    .total-row td{padding:10px;font-weight:700;font-size:14px;border-top:2px solid ${color}}
-    .footer{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:30px;padding-top:16px;border-top:1px solid #e5e7eb}
-    .sig-box{text-align:center}
-    .sig-line{border-bottom:1px solid #374151;margin-bottom:6px;height:40px}
-    .sig-label{font-size:11px;color:#6b7280}
-    @media print{body{padding:16px 20px}button{display:none}}
+    body{font-family:Arial,sans-serif;font-size:10px;color:#000;background:#fff;padding:10mm 12mm}
+    .no-print{text-align:center;padding:12px;background:#f3f4f6;margin-bottom:12px;border-radius:6px}
+    .no-print button{padding:8px 22px;margin:0 5px;border:none;border-radius:4px;font-size:13px;cursor:pointer;font-weight:600}
+    .btn-print{background:#1d4ed8;color:#fff}
+    .btn-close{background:#6b7280;color:#fff}
+    .form-wrap{border:2px solid #000;padding:0}
+    .top-bar{display:flex;align-items:stretch;border-bottom:1px solid #000}
+    .logo-cell{padding:6px 10px;border-right:1px solid #000;display:flex;align-items:center;min-width:160px}
+    .logo-text{font-size:13px;font-weight:700;color:#000}
+    .title-cell{flex:1;text-align:center;padding:8px 6px;border-right:1px solid #000;display:flex;align-items:center;justify-content:center}
+    .form-title{font-size:14px;font-weight:700;letter-spacing:0.5px}
+    .ctrl-cell{font-size:9px;padding:4px 8px;min-width:180px}
+    .ctrl-row{display:flex;justify-content:space-between;padding:1px 0;border-bottom:1px solid #ddd}
+    .ctrl-label{color:#555;white-space:nowrap}
+    .ctrl-val{font-weight:700;margin-left:6px}
+    .fields{border-bottom:1px solid #000}
+    .field-row{display:flex;border-bottom:1px solid #000}
+    .field-row:last-child{border-bottom:none}
+    .field{display:flex;align-items:center;padding:4px 8px;border-right:1px solid #000}
+    .field:last-child{border-right:none}
+    .field-label{font-size:8.5px;font-weight:700;color:#555;white-space:nowrap;margin-right:6px}
+    .field-val{font-size:10px;font-weight:700;min-width:80px;border-bottom:1px solid #aaa;padding-bottom:1px}
+    table.items{width:100%;border-collapse:collapse;font-size:9.5px}
+    table.items th{background:#1e3a5f;color:#fff;padding:5px 6px;text-align:center;border:1px solid #000;font-size:9px;text-transform:uppercase}
+    table.items th.left{text-align:left}
+    table.items td{border:1px solid #ccc;padding:4px 6px;height:18px}
+    td.c{text-align:center}
+    td.desc{font-weight:500}
+    td.reason{font-style:italic;color:#444}
+    td.num{font-family:monospace;text-align:right;font-weight:700}
+    span.code{font-size:8px;color:#888;margin-right:4px}
+    .sig-section{border-top:1px solid #000}
+    .sig-row{display:flex;border-bottom:1px solid #000}
+    .sig-row:last-child{border-bottom:none}
+    .sig-cell{flex:1;border-right:1px solid #000;padding:4px 8px;min-height:40px}
+    .sig-cell:last-child{border-right:none}
+    .sig-title{font-size:8.5px;font-weight:700;text-transform:uppercase;margin-bottom:2px;color:#333}
+    .sig-line{border-bottom:1px solid #555;margin:14px 10px 2px;height:1px}
+    .sig-sub{font-size:8px;color:#555;text-align:center}
+    .sig-pos{font-size:8px;color:#000;font-weight:700;text-align:center;margin-top:1px}
+    @media print{.no-print{display:none}body{padding:5mm 8mm}}
   </style></head><body>
-  <div class="header">
-    <div>
-      <div class="title">${typeLabel[d.type]||'TRANSACTION SLIP'}</div>
-      <div class="company">${company}</div>
+  <div class="no-print">
+    <button class="btn-print" onclick="window.print()">🖨 Print Form</button>
+    <button class="btn-close" onclick="window.close()">✕ Close</button>
+  </div>
+  <div class="form-wrap">
+    <!-- TOP BAR -->
+    <div class="top-bar">
+      <div class="logo-cell"><div class="logo-text">${bu}<br><span style="font-size:9px;font-weight:400">Energy Maintenance Services</span></div></div>
+      <div class="title-cell"><div class="form-title">MATERIALS &amp; CONSUMABLES WITHDRAWAL FORM</div></div>
+      <div class="ctrl-cell">
+        <div class="ctrl-row"><span class="ctrl-label">Doc. Control No.:</span><span class="ctrl-val">${docNo}</span></div>
+        <div class="ctrl-row"><span class="ctrl-label">Revision No.:</span><span class="ctrl-val">${revNo}</span></div>
+        <div class="ctrl-row"><span class="ctrl-label">Effective Date:</span><span class="ctrl-val">${effDate}</span></div>
+        <div class="ctrl-row"><span class="ctrl-label">Page:</span><span class="ctrl-val">1 of 1</span></div>
+        <div class="ctrl-row"><span class="ctrl-label">WHD-MCWF NO.:</span><span class="ctrl-val">${bu==='SHIC'?'26 -':'26 -'} ____</span></div>
+      </div>
     </div>
-    <div style="text-align:right;font-size:12px;color:#6b7280">
-      <div style="font-size:15px;font-weight:700;color:#111">Date: ${d.date}</div>
-      <div>Printed: ${d.postedAt}</div>
+    <!-- HEADER FIELDS -->
+    <div class="fields">
+      <div class="field-row">
+        <div class="field" style="flex:2">
+          <span class="field-label">REQUESTOR'S NAME:</span>
+          <span class="field-val">${d.by||''}</span>
+        </div>
+        <div class="field" style="flex:1">
+          <span class="field-label">JOB ORDER NO.:</span>
+          <span class="field-val">${d.notes||''}</span>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field" style="flex:2">
+          <span class="field-label">CLIENT NAME:</span>
+          <span class="field-val">${proj?.client||''}</span>
+        </div>
+        <div class="field" style="flex:1">
+          <span class="field-label">DATE:</span>
+          <span class="field-val">${d.date}</span>
+          <span class="field-label" style="margin-left:10px">TIME:</span>
+          <span class="field-val">${timeStr}</span>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field" style="flex:1">
+          <span class="field-label">PROJECT DESCRIPTION:</span>
+          <span class="field-val">${proj?proj.id+' — '+(proj.name||''):''}</span>
+        </div>
+      </div>
     </div>
-  </div>
-  <div class="meta">
-    ${proj?`<div class="meta-row"><span class="meta-label">Project:</span><span class="meta-value">${proj.id} — ${proj.name||''}</span></div>`:''}
-    <div class="meta-row"><span class="meta-label">Issued / By:</span><span class="meta-value">${d.by||'—'}</span></div>
-    <div class="meta-row"><span class="meta-label">Transaction:</span><span class="meta-value" style="color:${color};text-transform:capitalize">${d.type}</span></div>
-    ${d.notes?`<div class="meta-row"><span class="meta-label">Notes / WO Ref:</span><span class="meta-value">${d.notes}</span></div>`:''}
-  </div>
-  <table>
-    <thead><tr><th>#</th><th>Code</th><th>Description</th><th>Qty</th><th>Unit</th><th>Unit Cost</th><th>Total</th></tr></thead>
-    <tbody>${rows}</tbody>
-    <tfoot><tr class="total-row">
-      <td colspan="6" style="text-align:right;padding:10px">TOTAL TRANSACTION VALUE</td>
-      <td style="text-align:right;font-family:monospace;color:${color};padding:10px">₱${_whFmt(d.grand)}</td>
-    </tr></tfoot>
-  </table>
-  <div class="footer">
-    <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Prepared / Issued By</div></div>
-    <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Received By</div></div>
-    <div class="sig-box"><div class="sig-line"></div><div class="sig-label">Authorized By</div></div>
-  </div>
-  <div style="text-align:center;margin-top:28px">
-    <button onclick="window.print()" style="padding:10px 28px;background:${color};color:#fff;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer">🖨 Print</button>
-    <button onclick="window.close()" style="padding:10px 20px;margin-left:10px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;font-size:14px;cursor:pointer">Close</button>
+    <!-- ITEMS TABLE -->
+    <table class="items">
+      <thead>
+        <tr>
+          <th style="width:36px">LINE No.</th>
+          <th class="left" style="width:auto">ITEM NAME / DESCRIPTION</th>
+          <th style="width:48px">QTY</th>
+          <th style="width:60px">UNIT</th>
+          <th class="left" style="width:140px">REASON FOR WITHDRAWAL</th>
+          <th style="width:90px">WHD STOCKS</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <!-- SIGNATURES -->
+    <div class="sig-section">
+      <div class="sig-row">
+        <div class="sig-cell">
+          <div class="sig-title">Requestor's Signature</div>
+          <div class="sig-line"></div>
+          <div class="sig-sub">Signature</div>
+          <div class="sig-line"></div>
+          <div class="sig-sub">Name</div>
+        </div>
+        <div class="sig-cell">
+          <div class="sig-title">Pre Approved By</div>
+          <div class="sig-line"></div>
+          <div class="sig-sub">Signature</div>
+          <div class="sig-line"></div>
+          <div class="sig-sub">Name</div>
+          <div class="sig-pos">DEPARTMENT MANAGER / SUPERVISOR</div>
+        </div>
+        <div class="sig-cell">
+          <div class="sig-title">Approved By (RND Only)</div>
+          <div class="sig-line"></div>
+          <div class="sig-sub">Signature</div>
+          <div class="sig-line"></div>
+          <div class="sig-sub">Name</div>
+          <div class="sig-pos">E-VP OPERATION</div>
+        </div>
+        <div class="sig-cell">
+          <div class="sig-title">Checked By</div>
+          <div class="sig-line"></div>
+          <div class="sig-sub">Signature</div>
+          <div class="sig-line"></div>
+          <div class="sig-sub">Name</div>
+          <div class="sig-pos">ACCOUNTING DEPARTMENT</div>
+        </div>
+      </div>
+      <div class="sig-row">
+        <div class="sig-cell">
+          <div class="sig-title">Received By (Requesting Party)</div>
+          <div class="sig-line"></div>
+          <div class="sig-sub">Signature</div>
+          <div class="sig-line"></div>
+          <div class="sig-sub">Name</div>
+        </div>
+        <div class="sig-cell">
+          <div class="sig-title">Released By</div>
+          <div class="sig-line"></div>
+          <div class="sig-sub">Signature</div>
+          <div class="sig-line"></div>
+          <div class="sig-sub">Name</div>
+          <div class="sig-pos">WHSE DEPARTMENT</div>
+        </div>
+        <div class="sig-cell" style="flex:2;background:#f9f9f9">
+          <div style="font-size:8px;color:#777;padding:4px">Form generated from PROCMASTER Warehouse System · ${d.postedAt}</div>
+        </div>
+      </div>
+    </div>
   </div>
   <script>window.onload=()=>window.print();<\/script>
   </body></html>`;
-  const w=window.open('','_blank','width=900,height=700,scrollbars=yes');
+  const w=window.open('','_blank','width=960,height=780,scrollbars=yes');
   if(w){w.document.write(html);w.document.close();}
-  else showToast('Allow popups to print the slip','error',4000);
+  else showToast('Allow popups to print the form','error',4000);
 }
 
 // ── ISSUANCE REQUEST ACTIONS ─────────────────────────────────
