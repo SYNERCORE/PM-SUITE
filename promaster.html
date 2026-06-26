@@ -21135,10 +21135,17 @@ function _whRequestsHTML(){
   const statuses=['all','pending','approved','rejected','pr_started','released'];
   let reqs=_whReq();
   if(_whReqStatus!=='all')reqs=reqs.filter(r=>r.status===_whReqStatus);
-  reqs=reqs.sort((a,b)=>new Date(b.requestedAt)-new Date(a.requestedAt));
+  reqs=reqs.sort((a,b)=>{
+    // Sort urgent first, then by date
+    const p={urgent:0,normal:1,low:2};
+    const pa=p[a.priority||'normal']??1, pb=p[b.priority||'normal']??1;
+    if(pa!==pb)return pa-pb;
+    return new Date(b.requestedAt)-new Date(a.requestedAt);
+  });
 
   const statusColor={pending:'var(--accent-amber)',approved:'var(--accent-blue)',rejected:'var(--accent-red)',released:'var(--accent-green)',pr_started:'#bc8cff'};
   const statusLabel={pending:'Pending',approved:'Approved',rejected:'Rejected',released:'Released',pr_started:'PR Started'};
+  const priorityBadge={urgent:'<span style="font-size:9px;font-weight:700;color:var(--accent-red);background:rgba(220,53,69,.12);border:1px solid rgba(220,53,69,.3);border-radius:4px;padding:1px 5px">🔴 URGENT</span>',normal:'',low:'<span style="font-size:9px;color:var(--accent-green);background:rgba(40,167,69,.1);border:1px solid rgba(40,167,69,.25);border-radius:4px;padding:1px 5px">🟢 Low</span>'};
   const rows=reqs.map(r=>{
     const item=_whItems().find(i=>i.id===r.itemId);
     const isStock=!!item;
@@ -21156,7 +21163,10 @@ function _whRequestsHTML(){
         ${r.sourceLog?`<div style="font-size:9px;color:var(--accent-blue);margin-top:2px"><i class="fas fa-link" style="margin-right:3px"></i>${r.sourceLog}</div>`:''}
       </td>
       <td>
-        <div style="font-weight:600;font-size:12px">${displayName}</div>
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px">
+          <span style="font-weight:600;font-size:12px">${displayName}</span>
+          ${priorityBadge[r.priority||'normal']||''}
+        </div>
         <div style="font-size:10px;color:var(--text-secondary);display:flex;gap:6px;flex-wrap:wrap;margin-top:1px">
           <span>${displayCat}</span>
           ${isStock?`<span style="color:${hasStock?'var(--accent-green)':'var(--accent-red)'}">● ${q.qtyAvailable} avail</span>`:`<span style="color:var(--accent-amber)">● Not in stock</span>`}
@@ -21165,7 +21175,10 @@ function _whRequestsHTML(){
       <td style="font-family:var(--font-mono);text-align:right">${r.qty} ${r.unit||item?.unit||''}</td>
       <td style="font-size:11px">${r.projectId||'—'}</td>
       <td style="font-size:11px">${r.requestedBy||'—'}<div style="font-size:10px;color:var(--text-secondary)">${(r.requestedAt||'').slice(0,10)}</div></td>
-      <td style="font-size:11px;max-width:140px;white-space:normal">${r.reason||'—'}</td>
+      <td style="font-size:11px;max-width:140px;white-space:normal">
+        ${r.reason||'—'}
+        ${r.location?`<div style="font-size:10px;color:var(--accent-blue);margin-top:2px"><i class="fas fa-map-marker-alt" style="margin-right:3px"></i>${r.location}</div>`:''}
+      </td>
       <td>
         <span class="badge" style="background:${sc}22;color:${sc};border:1px solid ${sc}44;font-size:10px">
           ${statusLabel[r.status]||r.status}
@@ -22099,6 +22112,18 @@ function _whShowAddRequest(){
             <label class="form-label">Date Needed</label>
             <input class="form-control" type="date" id="whr-date" value="${new Date().toISOString().slice(0,10)}">
           </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Priority</label>
+            <select class="form-control" id="whr-priority">
+              <option value="normal">🟡 Normal</option>
+              <option value="urgent">🔴 Urgent</option>
+              <option value="low">🟢 Low</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Deliver To / Location</label>
+            <input class="form-control" id="whr-location" placeholder="e.g. Site A, Shop, Gate 2">
+          </div>
           <div class="form-group" style="margin:0;grid-column:1/-1">
             <label class="form-label">Purpose / Reason *</label>
             <textarea class="form-control" id="whr-reason" rows="2" placeholder="Why are these items needed?"></textarea>
@@ -22138,12 +22163,14 @@ function _whSaveRequest(){
   const projectId=$('#whr-proj')?.value||null;
   const requestedBy=$('#whr-by')?.value.trim();
   const dateNeeded=$('#whr-date')?.value;
+  const priority=$('#whr-priority')?.value||'normal';
+  const location=$('#whr-location')?.value.trim();
   const requestedAt=new Date().toISOString();
   valid.forEach(ln=>{
     AppState.data.issuanceRequests.push({
       id:_whNextId('REQ-',AppState.data.issuanceRequests),
       itemId:ln.itemId,qty:parseFloat(ln.qty),
-      projectId,requestedBy,dateNeeded,reason,
+      projectId,requestedBy,dateNeeded,reason,priority,location,
       status:'pending',requestedAt,
     });
   });
