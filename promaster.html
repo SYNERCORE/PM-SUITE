@@ -5629,7 +5629,7 @@ async function showSpListWizard() {
       <div style="font-size:11px;color:var(--text-secondary);line-height:1.6">
         This wizard checks for required SharePoint lists and creates any that are missing — automatically and with the right columns.<br>
         Safe to run multiple times. Existing lists are never modified.<br><br>
-        <strong>Required lists:</strong> ${Object.keys(SHIC_LIST_CONFIG).length} module lists + SHIC_AppData + SHIC_Users + SHIC_Documents library
+        <strong>Required lists:</strong> ${Object.keys(SHIC_LIST_CONFIG).length} module lists + SHIC_AppData + SHIC_Users + SHIC_FormTemplates + SHIC_Documents library
       </div>
     </div>
     <div id="wizardStatus" style="display:none;padding:10px;background:var(--bg-hover);border-radius:7px;margin-bottom:10px;font-size:11px"></div>
@@ -5668,6 +5668,13 @@ function _getAllRequiredLists() {
   if (ahItem) ahItem.addColumns = ['EventId', 'AssetId', 'DataBlob', 'UpdatedBy', 'UpdatedAt'];
   const auItem = lists.find(l => l.name === 'SHIC_AssetUtilization');
   if (auItem) auItem.addColumns = ['UtilId', 'AssetId', 'DataBlob', 'UpdatedBy', 'UpdatedAt'];
+  // Add SHIC_FormTemplates — managed separately from SHIC_LIST_CONFIG (uses its own SP CRUD)
+  lists.push({
+    name: SHIC_FORMS_LIST,
+    role: 'data',
+    cfg: { name: 'Form Templates' },
+    addColumns: ['FormId','FormName','CompanyName','CompanySub','DocControlNo','RevisionNo','EffectiveDate','LogoDataUrl'],
+  });
   return lists;
 }
 
@@ -5760,12 +5767,13 @@ async function _createMissingLists() {
       const statusEl = document.getElementById('wzStatus_' + l.name);
       if (statusEl) { statusEl.textContent = 'creating...'; statusEl.style.color = 'var(--accent-blue)'; }
       try {
-        const cols = l.addColumns.filter(c => c !== 'Title' && c !== 'DataBlob' && c !== 'UpdatedAt')
+        const multilineFields = new Set(['DataBlob', 'LogoDataUrl']);
+        const cols = l.addColumns.filter(c => c !== 'Title' && c !== 'DataBlob' && c !== 'LogoDataUrl' && c !== 'UpdatedAt')
           .map(c => ({ name: c, text: { allowMultipleLines: false } }));
-        // DataBlob is multi-line text
-        cols.push({ name: 'DataBlob', text: { allowMultipleLines: true } });
+        // Multi-line text fields
+        multilineFields.forEach(f => { if (l.addColumns.includes(f)) cols.push({ name: f, text: { allowMultipleLines: true } }); });
         // UpdatedAt is datetime
-        cols.push({ name: 'UpdatedAt', dateTime: {} });
+        if (l.addColumns.includes('UpdatedAt')) cols.push({ name: 'UpdatedAt', dateTime: {} });
 
         const createRes = await fetch(
           `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists`,
