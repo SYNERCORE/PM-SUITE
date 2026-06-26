@@ -19996,6 +19996,24 @@ function _openRecentItem(r) {
 function _whItems(){return(AppState.data.warehouseItems||[]).filter(i=>!i._deleted);}
 function _whTx(){return(AppState.data.stockTransactions||[]).filter(t=>!t._deleted);}
 function _whReq(){return(AppState.data.issuanceRequests||[]).filter(r=>!r._deleted);}
+function _whForms(){
+  if(!AppState.data.whForms||!AppState.data.whForms.length){
+    AppState.data.whForms=[
+      {id:'form-shic',name:'SHIC Form',companyName:'SYNERCORE',companySub:'HEAVY INDUSTRIES CORP.',logoDataUrl:'',docControlNo:'SHIC-WHD-F-003',revisionNo:'REV.000',effectiveDate:'January 4, 2025'},
+      {id:'form-sy3', name:'SY3 Form', companyName:'SY3 ENERGY', companySub:'MAINTENANCE SERVICES CORP.',logoDataUrl:'',docControlNo:'SY3-F-WHD-003', revisionNo:'REV.003',effectiveDate:'April 21, 2025'},
+    ];
+  }
+  return AppState.data.whForms;
+}
+// Generate WHD-MCWF NO.: 26YY - NNN (sequential per year across all withdrawal tx)
+function _whGenMcwfNo(date){
+  const yr=new Date(date||Date.now());
+  const yy=String(yr.getFullYear()).slice(-2);
+  const yearStr=yr.getFullYear().toString();
+  const isWithdrawal=t=>t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser'||t.type==='return'||t.type==='adjust';
+  const countThisYear=_whTx().filter(t=>isWithdrawal(t)&&(t.date||'').startsWith(yearStr)).length;
+  return`${yy} - ${String(countThisYear).padStart(3,'0')}`;
+}
 
 // Weighted Average Cost — recalculated from all receipts; falls back to item stored cost
 function _whCalcWAC(itemId){
@@ -20069,6 +20087,7 @@ function renderWarehouse(){
     {id:'issue',   label:'Issue / Return',     icon:'fa-dolly',          count:null},
     {id:'requests',label:'Issuance Requests',  icon:'fa-clipboard-list', count:pendingReqs||null},
     {id:'ledger',  label:'Transaction Ledger', icon:'fa-list-alt',       count:null},
+    {id:'forms',   label:'Form Setup',         icon:'fa-id-card',        count:null},
   ];
 
   $('#warehouse').innerHTML=`
@@ -20122,6 +20141,7 @@ function _whRenderTab(){
   else if(_whTab==='issue')   el.innerHTML=_whIssueHTML();
   else if(_whTab==='requests')el.innerHTML=_whRequestsHTML();
   else if(_whTab==='ledger')  el.innerHTML=_whLedgerHTML();
+  else if(_whTab==='forms')   el.innerHTML=_whFormsHTML();
 }
 
 // ── TAB: ITEMS ────────────────────────────────────────────────
@@ -20787,8 +20807,7 @@ function _whIssueHTML(){
         <div class="form-group" style="margin:0">
           <label class="form-label">Business Unit (Form)</label>
           <select class="form-control" id="wh-iss-bu">
-            <option value="SHIC">SHIC — SHIC-WHD-F-003</option>
-            <option value="SY3">SY3 — SY3-F-WHD-003</option>
+            ${_whForms().map(f=>`<option value="${f.id}">${f.companyName} — ${f.docControlNo}</option>`).join('')}
           </select>
         </div>
         <div class="form-group" style="margin:0;grid-column:1/-1">
@@ -20943,6 +20962,132 @@ function _whRequestsHTML(){
   </div>`;
 }
 
+// ── TAB: FORM SETUP ──────────────────────────────────────────
+function _whFormsHTML(){
+  const forms=_whForms();
+  const cards=forms.map(f=>`
+    <div class="card" style="margin-bottom:12px;padding:14px 16px">
+      <div style="display:flex;align-items:flex-start;gap:14px">
+        <div style="width:72px;height:60px;border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--bg-secondary);flex-shrink:0">
+          ${f.logoDataUrl?`<img src="${f.logoDataUrl}" style="max-width:70px;max-height:58px;object-fit:contain">`:`<i class="fas fa-image" style="font-size:22px;color:var(--text-secondary)"></i>`}
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:700;margin-bottom:2px">${f.name}</div>
+          <div style="font-size:12px;color:var(--text-secondary)">${f.companyName} ${f.companySub}</div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:4px">
+            ${f.docControlNo} &nbsp;|&nbsp; ${f.revisionNo} &nbsp;|&nbsp; Eff: ${f.effectiveDate}
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn btn-secondary btn-sm" onclick="_whEditForm('${f.id}')"><i class="fas fa-edit"></i> Edit</button>
+          <button class="btn btn-secondary btn-sm" style="color:var(--danger)" onclick="_whDeleteForm('${f.id}')"><i class="fas fa-trash"></i></button>
+        </div>
+      </div>
+    </div>`).join('');
+  return`
+    <div style="max-width:640px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div>
+          <div style="font-size:15px;font-weight:700">Withdrawal Form Templates</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:2px">Configure company forms used when printing withdrawal slips</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="_whEditForm(null)"><i class="fas fa-plus"></i> Add Form</button>
+      </div>
+      ${cards||'<div class="empty-state"><i class="fas fa-id-card"></i><p>No forms configured</p></div>'}
+    </div>
+    <div id="wh-form-modal" style="display:none"></div>`;
+}
+
+function _whEditForm(id){
+  const f=id?(_whForms().find(x=>x.id===id)||{}):
+    {id:'form-'+Date.now(),name:'',companyName:'',companySub:'',logoDataUrl:'',docControlNo:'',revisionNo:'',effectiveDate:''};
+  const el=$('#wh-form-modal');if(!el)return;
+  el.style.display='block';
+  el.innerHTML=`
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)_whCloseFormModal()">
+      <div class="card" style="width:480px;max-width:95vw;padding:20px;max-height:90vh;overflow-y:auto" onclick="event.stopPropagation()">
+        <div style="font-size:15px;font-weight:700;margin-bottom:14px">${id?'Edit Form':'New Form'}</div>
+        <div class="form-group">
+          <label class="form-label">Form Name (display label)</label>
+          <input class="form-control" id="wff-name" value="${f.name||''}" placeholder="e.g. SHIC Withdrawal Form">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Company Name</label>
+          <input class="form-control" id="wff-coname" value="${f.companyName||''}" placeholder="e.g. SYNERCORE">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Company Sub-name / Description</label>
+          <input class="form-control" id="wff-cosub" value="${f.companySub||''}" placeholder="e.g. HEAVY INDUSTRIES CORP.">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Doc. Control No.</label>
+          <input class="form-control" id="wff-docno" value="${f.docControlNo||''}" placeholder="e.g. SHIC-WHD-F-003">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Revision No.</label>
+          <input class="form-control" id="wff-revno" value="${f.revisionNo||''}" placeholder="e.g. REV.000">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Effective Date</label>
+          <input class="form-control" id="wff-effdate" value="${f.effectiveDate||''}" placeholder="e.g. January 4, 2025">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Company Logo</label>
+          ${f.logoDataUrl?`<div style="margin-bottom:8px"><img src="${f.logoDataUrl}" style="max-height:60px;border:1px solid var(--border);border-radius:4px;padding:4px"></div>`:''}
+          <input type="file" class="form-control" id="wff-logo" accept="image/*" style="padding:4px">
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Upload PNG/JPG logo. Leave blank to keep current.</div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button class="btn btn-secondary" onclick="_whCloseFormModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="_whSaveFormEntry('${f.id}')">Save Form</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function _whCloseFormModal(){
+  const el=$('#wh-form-modal');if(el)el.style.display='none';
+}
+
+function _whSaveFormEntry(id){
+  const name=$('#wff-name')?.value.trim();
+  const coName=$('#wff-coname')?.value.trim();
+  const coSub=$('#wff-cosub')?.value.trim();
+  const docNo=$('#wff-docno')?.value.trim();
+  const revNo=$('#wff-revno')?.value.trim();
+  const effDate=$('#wff-effdate')?.value.trim();
+  if(!name||!coName){showToast('Form Name and Company Name are required','error');return;}
+  const logoFile=$('#wff-logo')?.files?.[0];
+  const save=(logoDataUrl)=>{
+    if(!AppState.data.whForms)AppState.data.whForms=[];
+    const idx=AppState.data.whForms.findIndex(f=>f.id===id);
+    const existing=idx>=0?AppState.data.whForms[idx]:{};
+    const updated={...existing,id,name,companyName:coName,companySub:coSub,docControlNo:docNo,revisionNo:revNo,effectiveDate:effDate,
+      logoDataUrl:logoDataUrl!==undefined?logoDataUrl:(existing.logoDataUrl||'')};
+    if(idx>=0)AppState.data.whForms[idx]=updated;
+    else AppState.data.whForms.push(updated);
+    AppState.save();
+    _whCloseFormModal();
+    _whRenderTab();
+    showToast('Form saved','success');
+  };
+  if(logoFile){
+    const reader=new FileReader();
+    reader.onload=e=>save(e.target.result);
+    reader.readAsDataURL(logoFile);
+  }else{
+    save(undefined);
+  }
+}
+
+function _whDeleteForm(id){
+  if(!confirm('Delete this form template?'))return;
+  AppState.data.whForms=(AppState.data.whForms||[]).filter(f=>f.id!==id);
+  AppState.save();
+  _whRenderTab();
+  showToast('Form deleted','success');
+}
+
 // ── TAB: LEDGER ──────────────────────────────────────────────
 function _whLedgerHTML(){
   const all=_whTx().sort((a,b)=>new Date(b.date)-new Date(a.date));
@@ -20994,9 +21139,12 @@ function _whReprintTx(txId){
   const item=_whItems().find(i=>i.id===tx.itemId);
   const wac=tx.unitCost||_whCalcWAC(tx.itemId)||0;
   const qty=Math.abs(tx.qty);
+  const buId=tx.bu||_whForms()[0]?.id||'form-shic';
+  const formCfg=_whForms().find(f=>f.id===buId)||_whForms()[0];
   const slipData={
     type:tx.type,
-    bu:tx.bu||'SHIC',
+    bu:buId,formCfg,
+    mcwfNo:_whGenMcwfNo(tx.date),
     projId:tx.projectId,
     date:tx.date,
     by:tx.issuedBy||tx.by||tx.vendor||'',
@@ -21105,7 +21253,9 @@ function _whSaveIssue(){
     const qty=parseFloat(ln.qty);
     return{name:item?.name||ln.itemId,code:item?.code||ln.itemId,unit:item?.unit||'',qty,wac,total:qty*wac,stock:_whCalcQty(ln.itemId)};
   });
-  const slipData={type,bu,projId,date,by,notes,items:slipItems,
+  const formCfg=_whForms().find(f=>f.id===bu)||_whForms()[0];
+  const mcwfNo=_whGenMcwfNo(date);
+  const slipData={type,bu,formCfg,mcwfNo,projId,date,by,notes,items:slipItems,
     grand:slipItems.reduce((s,r)=>s+r.total,0),
     postedAt:new Date().toLocaleString('en-PH')};
   showToast(`${valid.length} item${valid.length>1?'s':''} — ${type} posted`,'success',3500);
@@ -21116,15 +21266,14 @@ function _whSaveIssue(){
 }
 
 function _whPrintSlip(d){
-  const bu=d.bu||'SHIC';
-  const isSHIC=bu==='SHIC';
-  const docNo=isSHIC?'SHIC-WHD-F-003':'SY3-F-WHD-003';
-  const revNo=isSHIC?'REV.000':'REV.003';
-  const effDate=isSHIC?'January 4, 2025':'April 21, 2025';
+  const cfg=d.formCfg||_whForms().find(f=>f.id===d.bu)||_whForms()[0];
+  const docNo=cfg.docControlNo||'';
+  const revNo=cfg.revisionNo||'';
+  const effDate=cfg.effectiveDate||'';
   const proj=d.projId?(AppState.data.projects||[]).find(p=>p.id===d.projId):null;
-  // Pad to 30 rows (3 groups of 10 for page breaks if needed)
-  const padded=[...d.items];
-  while(padded.length<30)padded.push({name:'',code:'',unit:'',qty:'',wac:0,total:0});
+  // Exactly 10 rows per page
+  const padded=[...d.items].slice(0,10);
+  while(padded.length<10)padded.push({name:'',code:'',unit:'',qty:'',wac:0,total:0});
   const rows=padded.map((r,i)=>{
     const reason=i===0&&d.notes?d.notes:'';
     const name=r.name?`${r.code?`<span style="color:#888;font-size:7pt">[${r.code}]</span> `:''}${r.name}`:'';
@@ -21140,21 +21289,12 @@ function _whPrintSlip(d){
   }).join('');
   const timeStr=new Date().toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'});
   const dateStr=d.date||new Date().toISOString().slice(0,10);
-  // SYNERCORE / SY3 logo SVG — hexagonal cube mark
-  const logoSVG=isSHIC?`<svg width="52" height="52" viewBox="0 0 52 52" xmlns="http://www.w3.org/2000/svg">
-    <polygon points="26,2 48,14 48,38 26,50 4,38 4,14" fill="none" stroke="#aaa" stroke-width="1"/>
-    <polygon points="26,2 48,14 26,26 4,14" fill="#c0392b"/>
-    <polygon points="26,26 48,14 48,38 26,50" fill="#e67e22"/>
-    <polygon points="4,14 26,26 26,50 4,38" fill="#7f8c8d"/>
-  </svg>`:
-  `<svg width="52" height="52" viewBox="0 0 52 52" xmlns="http://www.w3.org/2000/svg">
-    <polygon points="26,2 48,14 48,38 26,50 4,38 4,14" fill="none" stroke="#aaa" stroke-width="1"/>
-    <polygon points="26,2 48,14 26,26 4,14" fill="#1a5276"/>
-    <polygon points="26,26 48,14 48,38 26,50" fill="#2471a3"/>
-    <polygon points="4,14 26,26 26,50 4,38" fill="#5d6d7e"/>
-  </svg>`;
-  const coName=isSHIC?'SYNERCORE':'SY3 ENERGY';
-  const coSub=isSHIC?'HEAVY INDUSTRIES CORP.':'MAINTENANCE SERVICES CORP.';
+  // Logo: use uploaded image if available, otherwise show company name text
+  const logoSVG=cfg.logoDataUrl
+    ?`<img src="${cfg.logoDataUrl}" style="max-width:70pt;max-height:50pt;object-fit:contain">`
+    :`<div style="font-size:11pt;font-weight:700;color:#c0392b;line-height:1">${cfg.companyName}</div>`;
+  const coName=cfg.companyName||'';
+  const coSub=cfg.companySub||'';
   const html=`<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Materials &amp; Consumables Withdrawal Form</title>
 <style>
@@ -21221,7 +21361,7 @@ table.sigs td{border:0.5pt solid #000;vertical-align:top;padding:2pt 3pt;font-si
 <table class="hdr"><tbody><tr>
   <td class="hdr-logo">
     ${logoSVG}
-    <div class="co">${coName}</div>
+    ${cfg.logoDataUrl?`<div class="co" style="margin-top:2pt">${coName}</div>`:''}
     <div class="sub">${coSub}</div>
   </td>
   <td class="hdr-title">
@@ -21234,7 +21374,7 @@ table.sigs td{border:0.5pt solid #000;vertical-align:top;padding:2pt 3pt;font-si
       <tr><td class="lbl">Effective Date:</td><td class="val">${effDate}</td></tr>
       <tr><td class="lbl" colspan="2" style="text-align:center;font-weight:700;font-size:7.5pt">PAGE 1 OF 1</td></tr>
     </tbody></table>
-    <div class="whd-no"><b>WHD-MCWF NO.: 26 &ndash;</b><div class="whd-blank"></div></div>
+    <div class="whd-no"><b>WHD-MCWF NO.: ${d.mcwfNo||'—'}</b></div>
   </td>
 </tr></tbody></table>
 <!-- ══ FIELD ROWS ══ -->
