@@ -20460,7 +20460,7 @@ function _whRenderTab(){
   if(_whTab==='items'){
     el.innerHTML=_whItemsHTML();
     const si=el.querySelector('input[placeholder*="Search"]');
-    if(si)setTimeout(()=>si.focus(),0);
+    if(si)setTimeout(()=>{si.focus();const l=si.value.length;si.setSelectionRange(l,l);},0);
   }
   else if(_whTab==='receive') el.innerHTML=_whReceiveHTML();
   else if(_whTab==='issue')   el.innerHTML=_whIssueHTML();
