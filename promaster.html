@@ -20226,6 +20226,128 @@ function _whCalcWAC(itemId){
   return receipts.reduce((s,t)=>s+(t.qty*(t.unitCost||0)),0)/totalQty;
 }
 
+// Cost trend modal — running WAC history + SVG line chart
+function _whShowCostTrend(itemId){
+  const item=_whItems().find(i=>i.id===itemId);
+  if(!item)return;
+
+  // Build chronological receive events, computing running WAC after each
+  const receipts=_whTx()
+    .filter(t=>t.type==='receive'&&t.itemId===itemId&&(t.unitCost||0)>0)
+    .sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+
+  let runQty=0,runVal=0;
+  const points=receipts.map(t=>{
+    runQty+=t.qty;
+    runVal+=t.qty*(t.unitCost||0);
+    const wac=runQty>0?runVal/runQty:0;
+    return{date:t.date||'',qty:t.qty,unitCost:t.unitCost||0,wac,ref:t.ref||t.batchRef||'',vendor:t.vendor||''};
+  });
+
+  const currentWAC=_whCalcWAC(itemId);
+  const lastPurchase=points.length?points[points.length-1].unitCost:0;
+  const allCosts=points.map(p=>p.unitCost);
+  const minCost=allCosts.length?Math.min(...allCosts):0;
+  const maxCost=allCosts.length?Math.max(...allCosts):0;
+  const avgPurchase=allCosts.length?allCosts.reduce((s,c)=>s+c,0)/allCosts.length:0;
+
+  // Build SVG sparkline for running WAC
+  let chartSVG='<div style="color:var(--text-secondary);font-size:12px;text-align:center;padding:20px">No receive transactions yet</div>';
+  if(points.length>=2){
+    const W=480,H=120,PAD=10;
+    const wacs=points.map(p=>p.wac);
+    const lo=Math.min(...wacs),hi=Math.max(...wacs);
+    const range=hi-lo||1;
+    const xs=points.map((_,i)=>PAD+i*(W-PAD*2)/(points.length-1));
+    const ys=wacs.map(w=>H-PAD-(w-lo)/(range)*(H-PAD*2));
+    const polyline=xs.map((x,i)=>`${x},${ys[i]}`).join(' ');
+    // Gradient fill path
+    const fillPath=`M${xs[0]},${H-PAD} `+xs.map((x,i)=>`L${x},${ys[i]}`).join(' ')+` L${xs[xs.length-1]},${H-PAD} Z`;
+    // Last point highlight
+    const lx=xs[xs.length-1],ly=ys[ys.length-1];
+    chartSVG=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:130px;display:block">
+      <defs>
+        <linearGradient id="wacGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--accent-blue)" stop-opacity="0.25"/>
+          <stop offset="100%" stop-color="var(--accent-blue)" stop-opacity="0.02"/>
+        </linearGradient>
+      </defs>
+      <path d="${fillPath}" fill="url(#wacGrad)"/>
+      <polyline points="${polyline}" fill="none" stroke="var(--accent-blue)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${xs.map((x,i)=>`<circle cx="${x}" cy="${ys[i]}" r="3" fill="var(--accent-blue)" opacity="0.7"/>`).join('')}
+      <circle cx="${lx}" cy="${ly}" r="5" fill="var(--accent-blue)"/>
+      <text x="${lx>W*0.75?lx-6:lx+6}" y="${ly-8}" font-size="9" fill="var(--accent-blue)" text-anchor="${lx>W*0.75?'end':'start'}">₱${fmtNum(wacs[wacs.length-1])}</text>
+      <text x="${PAD}" y="${PAD+6}" font-size="8" fill="var(--text-secondary)">₱${fmtNum(hi)}</text>
+      <text x="${PAD}" y="${H-PAD-2}" font-size="8" fill="var(--text-secondary)">₱${fmtNum(lo)}</text>
+    </svg>`;
+  }else if(points.length===1){
+    chartSVG=`<div style="color:var(--text-secondary);font-size:12px;text-align:center;padding:20px">Only 1 receive transaction — need 2+ to show trend</div>`;
+  }
+
+  // Transaction history table rows
+  const histRows=points.slice().reverse().map(p=>`<tr>
+    <td style="font-size:11px;color:var(--text-secondary)">${p.date}</td>
+    <td style="font-size:11px">${p.vendor||'—'}</td>
+    <td style="font-size:11px;color:var(--text-secondary)">${p.ref||'—'}</td>
+    <td style="text-align:right;font-family:var(--font-mono);font-size:11px">${p.qty}</td>
+    <td style="text-align:right;font-family:var(--font-mono);font-size:11px">₱${fmtNum(p.unitCost)}</td>
+    <td style="text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--accent-blue)">₱${fmtNum(p.wac)}</td>
+  </tr>`).join('');
+
+  const trendColor=points.length>=2?(points[points.length-1].wac>points[0].wac?'var(--accent-red)':'var(--accent-green)'):'var(--text-secondary)';
+  const trendIcon=points.length>=2?(points[points.length-1].wac>points[0].wac?'fa-arrow-trend-up':'fa-arrow-trend-down'):'fa-minus';
+
+  showModal(`
+    <div class="modal-header">
+      <h3 style="margin:0;font-size:16px"><i class="fas fa-chart-line" style="color:var(--accent-blue);margin-right:8px"></i>Cost Trend — ${item.name}</h3>
+      <button class="btn btn-secondary btn-sm" onclick="closeModal()"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" style="padding:16px">
+      <!-- KPI cards -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-bottom:16px">
+        <div style="background:var(--bg-tertiary);border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px">CURRENT WAC</div>
+          <div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:var(--accent-blue)">₱${fmtNum(currentWAC)}</div>
+        </div>
+        <div style="background:var(--bg-tertiary);border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px">LAST PURCHASE</div>
+          <div style="font-size:16px;font-weight:700;font-family:var(--font-mono)">₱${fmtNum(lastPurchase)}</div>
+        </div>
+        <div style="background:var(--bg-tertiary);border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px">AVG PURCHASE</div>
+          <div style="font-size:16px;font-weight:700;font-family:var(--font-mono)">₱${fmtNum(avgPurchase)}</div>
+        </div>
+        <div style="background:var(--bg-tertiary);border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px">LOWEST</div>
+          <div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:var(--accent-green)">₱${fmtNum(minCost)}</div>
+        </div>
+        <div style="background:var(--bg-tertiary);border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px">HIGHEST</div>
+          <div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:var(--accent-red)">₱${fmtNum(maxCost)}</div>
+        </div>
+        <div style="background:var(--bg-tertiary);border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px">TREND</div>
+          <div style="font-size:16px;font-weight:700;color:${trendColor}"><i class="fas ${trendIcon}"></i></div>
+        </div>
+      </div>
+      <!-- Chart -->
+      <div style="background:var(--bg-tertiary);border-radius:8px;padding:12px;margin-bottom:16px">
+        <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;font-weight:600">RUNNING WAC OVER TIME</div>
+        ${chartSVG}
+        ${points.length>=2?`<div style="font-size:10px;color:var(--text-secondary);text-align:center;margin-top:4px">${points[0].date} → ${points[points.length-1].date} · ${points.length} purchases</div>`:''}
+      </div>
+      <!-- History table -->
+      ${points.length?`<div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">PURCHASE HISTORY</div>
+      <div style="max-height:200px;overflow-y:auto">
+      <table style="font-size:11px"><thead><tr>
+        <th>DATE</th><th>VENDOR</th><th>REF</th><th style="text-align:right">QTY</th>
+        <th style="text-align:right">UNIT COST</th><th style="text-align:right">RUNNING WAC</th>
+      </tr></thead><tbody>${histRows}</tbody></table></div>`:''}
+    </div>
+    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>
+  `);
+}
+
 // Actual cost issued to a project for a resource (supports direct WH id or itemMasterId linkage)
 function _whActualIssueCost(projectId, resourceId){
   if(!projectId||!resourceId)return 0;
@@ -20408,6 +20530,7 @@ function _whItemsHTML(){
         <div style="display:flex;gap:4px">
           <button class="btn btn-secondary btn-sm" style="padding:3px 7px" onclick="_whShowReceive('${item.id}')" title="Receive stock"><i class="fas fa-truck-loading" style="color:var(--accent-green)"></i></button>
           <button class="btn btn-secondary btn-sm" style="padding:3px 7px" onclick="_whShowIssueItem('${item.id}')" title="Issue/Return"><i class="fas fa-dolly" style="color:var(--accent-amber)"></i></button>
+          <button class="btn btn-secondary btn-sm" style="padding:3px 7px" onclick="_whShowCostTrend('${item.id}')" title="Cost trend"><i class="fas fa-chart-line" style="color:var(--accent-blue)"></i></button>
           <button class="btn btn-secondary btn-sm" style="padding:3px 7px" onclick="_whEditItem('${item.id}')" title="Edit"><i class="fas fa-edit"></i></button>
           <button class="btn btn-secondary btn-sm" style="padding:3px 7px" onclick="_whDeleteItem('${item.id}')" title="Delete"><i class="fas fa-trash" style="color:var(--accent-red)"></i></button>
         </div>
