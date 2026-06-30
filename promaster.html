@@ -21067,6 +21067,7 @@ function _whReceiveHTML(){
           <div style="font-size:13px;font-weight:700"><i class="fas fa-truck-loading" style="color:var(--accent-green);margin-right:8px"></i>Receive Goods</div>
           <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Post incoming stock — supports multiple items per delivery</div>
         </div>
+        <button class="btn btn-secondary btn-sm" onclick="_whImportDeliveries()" title="Import historical delivery records from CSV"><i class="fas fa-file-import"></i> Import History</button>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
         <div class="form-group" style="margin:0">
@@ -21582,6 +21583,166 @@ function _whReprintTx(txId){
     postedAt:tx.postedAt?new Date(tx.postedAt).toLocaleString('en-PH'):tx.date,
   };
   _whPrintSlip(slipData);
+}
+
+// ── IMPORT DELIVERY HISTORY ───────────────────────────────────
+function _whImportDeliveries(){
+  const tmpl=`Date,ItemCode,Qty,UnitCost,Vendor,Reference,Notes\n2024-01-15,MAT-001,100,320.00,Holcim Philippines,PO-2024-001,First delivery\n2024-02-10,CON-001,500,18.50,Lincoln Electric,DR-0042,`;
+  const html=`
+  <div class="modal-overlay open" data-dynamic="1" id="whRcvImportModal">
+    <div class="modal" style="max-width:680px;width:95vw">
+      <div class="modal-header">
+        <h3 style="margin:0;font-size:15px"><i class="fas fa-file-import" style="color:var(--accent-green);margin-right:8px"></i>Import Delivery History</h3>
+        <button class="btn btn-secondary btn-sm" onclick="closeModal('whRcvImportModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div style="background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.25);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px">
+          <strong style="color:var(--accent-blue)">Required columns:</strong> <code>Date</code>, <code>ItemCode</code>, <code>Qty</code>, <code>UnitCost</code><br>
+          <strong style="color:var(--text-secondary)">Optional:</strong> <code>Vendor</code>, <code>Reference</code>, <code>Notes</code><br>
+          <span style="color:var(--text-secondary)">Date format: <code>YYYY-MM-DD</code> · ItemCode must match an existing warehouse item code.</span>
+        </div>
+        <!-- File picker -->
+        <div style="margin-bottom:12px">
+          <label class="form-label">Upload CSV / Excel file</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="file" id="wh-rcv-import-file" accept=".csv,.xlsx,.xls,.txt" style="display:none" onchange="_whRcvImportFileLoad(this)">
+            <button class="btn btn-secondary btn-sm" onclick="$('#wh-rcv-import-file').click()"><i class="fas fa-folder-open"></i> Choose File</button>
+            <span id="wh-rcv-import-filename" style="font-size:12px;color:var(--text-secondary)">No file chosen</span>
+          </div>
+        </div>
+        <!-- Paste area -->
+        <div style="margin-bottom:10px">
+          <label class="form-label">— or paste CSV content directly —</label>
+          <textarea class="form-control" id="wh-rcv-import-csv" rows="7"
+            placeholder="${tmpl.replace(/</g,'&lt;')}"
+            style="font-family:var(--font-mono);font-size:11px"
+            oninput="_whRcvImportPreview()"></textarea>
+        </div>
+        <div id="wh-rcv-import-preview"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('whRcvImportModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="_whRcvImportExecute()"><i class="fas fa-upload"></i> Import Records</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+
+function _whRcvImportFileLoad(input){
+  const file=input.files[0];
+  if(!file)return;
+  const nameEl=$('#wh-rcv-import-filename');
+  if(nameEl)nameEl.textContent=file.name;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const el=$('#wh-rcv-import-csv');
+    if(el){el.value=e.target.result;_whRcvImportPreview();}
+  };
+  reader.readAsText(file);
+}
+
+function _whRcvImportPreview(){
+  const text=$('#wh-rcv-import-csv')?.value||'';
+  const preview=$('#wh-rcv-import-preview');
+  if(!preview)return;
+  if(!text.trim()){preview.innerHTML='';return;}
+  const {headers,rows}=_whImportParseCsv(text);
+  const norm=h=>h.toLowerCase().replace(/[\s_\-\/]/g,'');
+  const col=(...aliases)=>{const n=aliases.map(a=>a.toLowerCase().replace(/[\s_\-\/]/g,''));return headers.findIndex(h=>n.includes(norm(h)));};
+  const dateIdx=col('date','deliverydate','receivedate','receiveddate','txdate');
+  const codeIdx=col('itemcode','code','sku','item code','itemid');
+  const qtyIdx=col('qty','quantity','receivedqty','qtyreceived');
+  const costIdx=col('unitcost','unit cost','cost','price','unitprice');
+  const vendorIdx=col('vendor','supplier','vendorname','suppliername');
+  const refIdx=col('reference','ref','po','dr','pono','drno','ponumber','drnumber');
+  const notesIdx=col('notes','note','remarks','remark');
+
+  const itemsByCode=new Map(_whItems().map(i=>[i.code||i.id,i]));
+  let valid=0,invalid=0;
+  const previewRows=rows.slice(0,10).map(row=>{
+    const code=(codeIdx>=0?row[codeIdx]:'').trim();
+    const item=code?itemsByCode.get(code):null;
+    const qty=parseFloat(qtyIdx>=0?row[qtyIdx]:0)||0;
+    const cost=parseFloat(costIdx>=0?row[costIdx]:0)||0;
+    const date=dateIdx>=0?row[dateIdx]:'';
+    const ok=!!item&&qty>0&&!!date;
+    if(ok)valid++;else invalid++;
+    return`<tr style="${ok?'':'opacity:.5'}">
+      <td style="font-size:11px">${date||'<span style="color:var(--accent-red)">missing</span>'}</td>
+      <td style="font-size:11px;font-family:var(--font-mono)">${code||'—'}</td>
+      <td style="font-size:11px">${item?item.name:'<span style="color:var(--accent-red)">not found</span>'}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:11px">${qty||'—'}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:11px">${cost?'₱'+fmtNum(cost):'—'}</td>
+      <td style="font-size:11px">${ok?'<span style="color:var(--accent-green)">✓ OK</span>':'<span style="color:var(--accent-red)">✗ Skip</span>'}</td>
+    </tr>`;
+  }).join('');
+
+  preview.innerHTML=`
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">
+      Preview (first 10 of ${rows.length} rows) · <span style="color:var(--accent-green)">${valid} valid</span> · <span style="color:var(--accent-red)">${invalid} will be skipped</span>
+    </div>
+    <div style="max-height:200px;overflow-y:auto">
+    <table style="font-size:11px"><thead><tr>
+      <th>DATE</th><th>CODE</th><th>ITEM</th><th style="text-align:right">QTY</th><th style="text-align:right">UNIT COST</th><th>STATUS</th>
+    </tr></thead><tbody>${previewRows}</tbody></table></div>`;
+}
+
+function _whRcvImportExecute(){
+  const text=$('#wh-rcv-import-csv')?.value||'';
+  if(!text.trim()){showToast('Paste or select a CSV file first','error');return;}
+  const {headers,rows}=_whImportParseCsv(text);
+  const norm=h=>h.toLowerCase().replace(/[\s_\-\/]/g,'');
+  const col=(...aliases)=>{const n=aliases.map(a=>a.toLowerCase().replace(/[\s_\-\/]/g,''));return headers.findIndex(h=>n.includes(norm(h)));};
+  const dateIdx=col('date','deliverydate','receivedate','receiveddate','txdate');
+  const codeIdx=col('itemcode','code','sku','item code','itemid');
+  const qtyIdx=col('qty','quantity','receivedqty','qtyreceived');
+  const costIdx=col('unitcost','unit cost','cost','price','unitprice');
+  const vendorIdx=col('vendor','supplier','vendorname','suppliername');
+  const refIdx=col('reference','ref','po','dr','pono','drno','ponumber','drnumber');
+  const notesIdx=col('notes','note','remarks','remark');
+
+  if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
+  const itemsByCode=new Map(_whItems().map(i=>[i.code||i.id,i]));
+  const now=new Date().toISOString();
+  const today=now.slice(0,10);
+  let imported=0,skipped=0;
+
+  rows.forEach(row=>{
+    const code=(codeIdx>=0?row[codeIdx]:'').trim();
+    const item=code?itemsByCode.get(code):null;
+    if(!item){skipped++;return;}
+    const qty=parseFloat(qtyIdx>=0?row[qtyIdx]:0)||0;
+    if(qty<=0){skipped++;return;}
+    const date=(dateIdx>=0?row[dateIdx]:'').trim()||today;
+    if(!date){skipped++;return;}
+    const unitCost=parseFloat(costIdx>=0?row[costIdx]:0)||0;
+    const vendor=(vendorIdx>=0?row[vendorIdx]:'').trim();
+    const ref=(refIdx>=0?row[refIdx]:'').trim();
+    const notes=(notesIdx>=0?row[notesIdx]:'').trim();
+
+    AppState.data.stockTransactions.push({
+      id:_whNextId('TX-',AppState.data.stockTransactions),
+      itemId:item.id,
+      type:'receive',
+      qty,
+      date,
+      vendor:vendor||'',
+      ref:ref||'',
+      notes:notes||'Historical import',
+      unitCost:unitCost||undefined,
+      batchRef:'HIST-IMPORT-'+Date.now().toString(36).toUpperCase(),
+      by:AppState.currentUser?.displayName||'import',
+      postedAt:now,
+    });
+    _whSyncQty(item.id);
+    imported++;
+  });
+
+  AppState.save();
+  closeModal('whRcvImportModal');
+  showToast(`Import complete — ${imported} records imported · ${skipped} skipped`,'success',5000);
+  _whRenderTab();
 }
 
 // ── SAVE HELPERS ─────────────────────────────────────────────
