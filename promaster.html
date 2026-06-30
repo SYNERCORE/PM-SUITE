@@ -20339,7 +20339,11 @@ function _whSetTab(t){_whTab=t;_whRenderTab();}
 function _whRenderTab(){
   const el=$('#wh-tab-body');
   if(!el)return;
-  if(_whTab==='items')   el.innerHTML=_whItemsHTML();
+  if(_whTab==='items'){
+    el.innerHTML=_whItemsHTML();
+    const si=el.querySelector('input[placeholder*="Search"]');
+    if(si)setTimeout(()=>si.focus(),0);
+  }
   else if(_whTab==='receive') el.innerHTML=_whReceiveHTML();
   else if(_whTab==='issue')   el.innerHTML=_whIssueHTML();
   else if(_whTab==='requests')el.innerHTML=_whRequestsHTML();
