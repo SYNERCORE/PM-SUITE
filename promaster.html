@@ -216,6 +216,32 @@ canvas{display:block}
 .mobile-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:199;backdrop-filter:blur(2px)}
 @media(max-width:480px){.grid-4,.grid-3,.grid-2{grid-template-columns:1fr}}
 @media print{.sidebar,.topbar,.fab,.toast-container{display:none!important}}
+
+/* ── Mobile enhancements ──────────────────────────────────── */
+@media(max-width:768px){
+  /* Warehouse tabs — scroll horizontally on mobile */
+  .wh-tabs-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+  .wh-tabs-wrap::-webkit-scrollbar{height:3px}
+  /* Table wrap — horizontal scroll */
+  .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  /* Make action buttons bigger touch targets */
+  .btn-sm{min-height:32px;padding:4px 10px}
+  /* Ledger: hide less-critical columns on mobile */
+  .wh-ledger-hide-mobile{display:none}
+  /* Stack form grids */
+  .modal-body .form-group{margin-bottom:10px}
+  /* Larger touch-friendly inputs */
+  .form-control{min-height:36px;font-size:14px!important}
+  select.form-control{font-size:14px!important}
+  /* Full-width modals on mobile */
+  .modal{width:98vw!important;max-width:98vw!important;max-height:92vh;overflow-y:auto}
+  /* Card padding reduction */
+  .card{padding:12px}
+  /* Section header wrapping */
+  .section-header{flex-wrap:wrap;gap:8px}
+  /* Reorder banner — stack cards */
+  #wh-undo-toast{width:90vw;min-width:0;left:5vw;transform:none}
+}
 </style>
   <!-- PWA / Offline support -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -1728,6 +1754,42 @@ function _generateSmartNotifs(){
   if(stale.length)smart.push({id:'stale_proj',type:'warning',title:'Projects Need Update',
     message:`${stale.length} active project${stale.length!==1?'s have':' has'} no updates in 7+ days`,
     onclick:`navigate('projects')`,read:false,auto:true});
+  // Warehouse: low stock alerts
+  if(typeof _whItems==='function'&&typeof _whCalcQty==='function'){
+    const whItems=_whItems();
+    const lowStock=whItems.filter(it=>{
+      const ms=parseFloat(it.minStock||0);
+      if(ms<=0)return false;
+      const q=_whCalcQty(it.id);
+      return q.qtyOnHand<=ms;
+    });
+    if(lowStock.length)smart.push({id:'wh_low_stock',type:'warning',title:'Low Stock Alert',
+      message:`${lowStock.length} item${lowStock.length!==1?'s are':' is'} at or below minimum stock level`,
+      onclick:`navigate('warehouse')`,read:false,auto:true});
+    const stockout=whItems.filter(it=>_whCalcQty(it.id).qtyOnHand<=0);
+    if(stockout.length)smart.push({id:'wh_stockout',type:'error',title:'Stock Out',
+      message:`${stockout.length} item${stockout.length!==1?'s have':' has'} zero or negative stock`,
+      onclick:`navigate('warehouse')`,read:false,auto:true});
+  }
+  // Warehouse: pending issuance requests
+  const whPendingIssues=(AppState.data.whTransactions||[]).filter(t=>!t._deleted&&t.type==='issue'&&t.status==='pending');
+  if(whPendingIssues.length)smart.push({id:'wh_pending_issues',type:'info',title:'Pending Stock Requests',
+    message:`${whPendingIssues.length} stock issuance request${whPendingIssues.length!==1?'s':''} awaiting approval`,
+    onclick:`navigate('warehouse')`,read:false,auto:true});
+  // Warehouse: my recently resolved requests (last 24h)
+  const myEmail24=typeof _currentUserProfile!=='undefined'?(_currentUserProfile?.email||''):'';
+  if(myEmail24){
+    const now24=Date.now()-24*60*60*1000;
+    (AppState.data.whTransactions||[]).filter(t=>
+      !t._deleted&&t.type==='issue'&&(t.status==='approved'||t.status==='rejected')&&
+      t.requestedByEmail===myEmail24&&t._resolvedAt&&new Date(t._resolvedAt).getTime()>now24
+    ).forEach(t=>{
+      smart.push({id:'wh_resolved_'+t.id,type:t.status==='approved'?'success':'warning',
+        title:`Stock Request ${t.status==='approved'?'Approved':'Rejected'}`,
+        message:`Your request for "${t.itemName||t.itemId}" was ${t.status}`,
+        onclick:`navigate('warehouse')`,read:false,auto:true});
+    });
+  }
   return smart;
 }
 
@@ -2219,7 +2281,8 @@ function _renderUserTable(users){
   ${pending.length?`<div style="padding:10px 14px;background:rgba(240,164,80,.1);border:1px solid rgba(240,164,80,.3);border-radius:8px;margin-bottom:14px;font-size:12px;color:var(--accent-amber)">
     <i class="fas fa-clock" style="margin-right:7px"></i><strong>${pending.length} user(s) pending approval</strong>
   </div>`:''}
-  <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
+    <button class="btn btn-secondary btn-sm" onclick="showAuditLog()" style="font-size:11px"><i class="fas fa-clipboard-list"></i> Audit Log</button>
     <button class="btn btn-primary btn-sm" onclick="showInviteModal()" style="font-size:11px"><i class="fas fa-user-plus"></i> Invite User</button>
   </div>
   <div class="table-wrap"><table>
@@ -5675,6 +5738,13 @@ function _getAllRequiredLists() {
     cfg: { name: 'Form Templates' },
     addColumns: ['FormId','FormName','CompanyName','CompanySub','DocControlNo','RevisionNo','EffectiveDate','LogoDataUrl'],
   });
+  // Add SHIC_AuditLog
+  lists.push({
+    name: SHIC_AUDIT_LIST,
+    role: 'data',
+    cfg: { name: 'Audit Log' },
+    addColumns: ['Action','Entity','EntityId','Module','UserEmail','Before','After','Notes'],
+  });
   return lists;
 }
 
@@ -7095,6 +7165,127 @@ async function m365SetAdmin(uid, isAdmin) {
   } catch(e) { showToast('Failed: ' + e.message, 'error'); }
 }
 
+// ── Audit Log SP CRUD ────────────────────────────────────────
+const SHIC_AUDIT_LIST = 'SHIC_AuditLog';
+let _auditListId = null;
+let _auditQueue = []; // buffer entries while SP not ready
+let _auditFlushing = false;
+
+async function _getOrCreateAuditListId(token, siteId) {
+  if (_auditListId) return _auditListId;
+  try {
+    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists?$filter=displayName eq '${SHIC_AUDIT_LIST}'&$select=id`, { headers: { Authorization: 'Bearer ' + token } });
+    const data = await res.json();
+    if (data.value?.length) { _auditListId = data.value[0].id; return _auditListId; }
+    // Create list
+    const cr = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists`, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: SHIC_AUDIT_LIST, list: { template: 'genericList' } })
+    });
+    const created = await cr.json();
+    _auditListId = created.id;
+    // Add columns: Action, Entity, EntityId, Module, UserEmail, Before, After
+    const cols = ['Action','Entity','EntityId','Module','UserEmail'];
+    for (const col of cols) {
+      await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${_auditListId}/columns`, {
+        method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: col, text: { allowMultipleLines: false } })
+      });
+    }
+    for (const col of ['Before','After','Notes']) {
+      await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${_auditListId}/columns`, {
+        method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: col, text: { allowMultipleLines: true } })
+      });
+    }
+    return _auditListId;
+  } catch(e) { console.warn('[Audit] List init failed:', e.message); return null; }
+}
+
+async function _flushAuditQueue() {
+  if (_auditFlushing || !_auditQueue.length) return;
+  _auditFlushing = true;
+  try {
+    const token = await getM365AuthToken();
+    const siteId = await getSharePointSiteId(token);
+    const listId = await _getOrCreateAuditListId(token, siteId);
+    if (!listId) { _auditFlushing = false; return; }
+    while (_auditQueue.length) {
+      const entry = _auditQueue.shift();
+      try {
+        await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`, {
+          method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: {
+            Title: entry.ts,
+            Action: entry.action,
+            Entity: entry.entity,
+            EntityId: String(entry.entityId||'').slice(0,255),
+            Module: entry.module||'',
+            UserEmail: entry.userEmail||'',
+            Before: entry.before ? JSON.stringify(entry.before).slice(0,5000) : '',
+            After: entry.after ? JSON.stringify(entry.after).slice(0,5000) : '',
+            Notes: entry.notes||'',
+          }})
+        });
+      } catch(e) { console.warn('[Audit] Write failed:', e.message); }
+    }
+  } catch(e) { console.warn('[Audit] Flush failed:', e.message); }
+  finally { _auditFlushing = false; }
+}
+
+// Public function — call this everywhere you want to log
+function auditLog(action, module, entity, entityId, before, after, notes) {
+  const entry = {
+    ts: new Date().toISOString(),
+    action, // 'CREATE' | 'UPDATE' | 'DELETE'
+    module, // 'Warehouse' | 'Procurement' | 'Projects' etc
+    entity, // 'StockTransaction' | 'WarehouseItem' | 'IssuanceRequest' etc
+    entityId: entityId||'',
+    userEmail: AppState.currentUser?.email || _currentUser?.email || '',
+    before: before||null,
+    after: after||null,
+    notes: notes||'',
+  };
+  _auditQueue.push(entry);
+  // Flush async — don't block the UI
+  if (_spConnected) setTimeout(_flushAuditQueue, 500);
+}
+
+// Audit Log viewer for admin panel
+async function showAuditLog() {
+  $('#genericModalTitle').textContent = 'Audit Log';
+  $('#genericModalBody').innerHTML = `<div style="text-align:center;padding:20px"><i class="fas fa-spinner fa-spin"></i> Loading...</div>`;
+  $('#genericModalFooter').innerHTML = `<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
+  openModal('genericModal');
+  try {
+    const token = await getM365AuthToken();
+    const siteId = await getSharePointSiteId(token);
+    const listId = await _getOrCreateAuditListId(token, siteId);
+    if (!listId) { $('#genericModalBody').innerHTML = `<div class="empty-state">Audit log list not available</div>`; return; }
+    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$orderby=fields/Title desc&$top=100`, { headers: { Authorization: 'Bearer ' + token } });
+    const data = await res.json();
+    const items = data.value||[];
+    if (!items.length) { $('#genericModalBody').innerHTML = `<div class="empty-state"><i class="fas fa-clipboard-list"></i><p>No audit records yet</p></div>`; return; }
+    const rows = items.map(i => {
+      const f = i.fields||{};
+      const ts = f.Title ? new Date(f.Title).toLocaleString() : '—';
+      const actionColor = f.Action==='DELETE'?'var(--accent-red)':f.Action==='CREATE'?'var(--accent-green)':'var(--accent-amber)';
+      return `<tr>
+        <td style="font-size:10px;color:var(--text-secondary);white-space:nowrap">${ts}</td>
+        <td><span style="font-size:10px;font-weight:700;color:${actionColor};background:${actionColor}22;padding:1px 6px;border-radius:4px">${f.Action||'—'}</span></td>
+        <td style="font-size:11px">${f.Module||'—'}</td>
+        <td style="font-size:11px">${f.Entity||'—'}</td>
+        <td style="font-size:10px;font-family:var(--font-mono);color:var(--text-secondary)">${(f.EntityId||'').slice(0,20)}</td>
+        <td style="font-size:11px">${f.UserEmail||'—'}</td>
+      </tr>`;
+    }).join('');
+    $('#genericModalBody').innerHTML = `
+      <div style="max-height:500px;overflow-y:auto">
+      <table><thead><tr><th>TIME</th><th>ACTION</th><th>MODULE</th><th>ENTITY</th><th>ID</th><th>USER</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  } catch(e) { $('#genericModalBody').innerHTML = `<div class="empty-state">Failed to load audit log: ${e.message}</div>`; }
+}
+
 // ── Form Templates SP CRUD ──────────────────────────────────
 let _formsListId = null;
 async function _getOrCreateFormsListId(token, siteId) {
@@ -7424,13 +7615,161 @@ ${actions.slice(0,4).map(a=>`
 <div style="font-size:10px;color:var(--text-secondary);display:flex;align-items:center;gap:6px">
 <span>${a.projectId}</span><span>·</span><span>${a.assignee.split(' ')[0]}</span><span>·</span>
 <span style="color:${isOverdue(a.dueDate)?'var(--accent-red)':'var(--text-secondary)'}">Due: ${a.dueDate}</span>
-${sBadge(a.status)}</div></div></div>`).join('')}</div></div>`;
+${sBadge(a.status)}</div></div></div>`).join('')}</div></div>
+${_renderWarehouseDashSection()}
+${_renderReorderAlerts()}
+`;
 
 setTimeout(()=>{
 drawDonut('donutMain',[active,completed,planned,Math.max(0,delayed)],['#388bfd','#3fb950','#bc8cff','#f85149']);
 const bC=$('#budgetChartMain');if(bC){bC.width=bC.parentElement.offsetWidth-30;drawBudgetBars();}
+_renderDashWacChart();
 },50);
 let clockInterval=setInterval(()=>{const cl=$('#dashClock');if(cl&&AppState.currentPage==='dashboard')cl.textContent=new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});else clearInterval(clockInterval);},1000);}
+
+// ── Warehouse KPI section for Dashboard ──────────────────────
+function _renderWarehouseDashSection(){
+  const items=(AppState.data.warehouseItems||[]).filter(i=>!i._deleted);
+  const tx=(AppState.data.stockTransactions||[]).filter(t=>!t._deleted);
+  const reqs=(AppState.data.issuanceRequests||[]).filter(r=>!r._deleted);
+  if(!items.length)return'';
+
+  const totalItems=items.length;
+  const totalValue=items.reduce((s,i)=>{
+    const qty=tx.filter(t=>t.itemId===i.id).reduce((q,t)=>{
+      if(t.type==='receive')return q+t.qty;
+      if(t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser')return q-t.qty;
+      if(t.type==='return')return q+t.qty;
+      if(t.type==='adjust')return q+t.qty;
+      return q;
+    },0);
+    return s+(qty*(i.unitCost||0));
+  },0);
+
+  const lowStock=items.filter(i=>{
+    const qty=tx.filter(t=>t.itemId===i.id).reduce((q,t)=>{
+      if(t.type==='receive')return q+t.qty;
+      if(t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser')return q-t.qty;
+      if(t.type==='return')return q+t.qty;
+      if(t.type==='adjust')return q+t.qty;
+      return q;
+    },0);
+    return i.minStock>0&&qty<=i.minStock;
+  }).length;
+
+  const pendingReqs=reqs.filter(r=>r.status==='pending').length;
+  const now=new Date();
+  const thisMonth=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const monthReceive=tx.filter(t=>t.type==='receive'&&(t.date||'').startsWith(thisMonth));
+  const monthIssue=tx.filter(t=>(t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser')&&(t.date||'').startsWith(thisMonth));
+  const monthReceiveVal=monthReceive.reduce((s,t)=>s+(t.qty*(t.unitCost||0)),0);
+  const monthIssueVal=monthIssue.reduce((s,t)=>s+(t.qty*((t.unitCost)||0)),0);
+
+  // Top 5 most issued items this month
+  const issueCounts={};
+  monthIssue.forEach(t=>{issueCounts[t.itemId]=(issueCounts[t.itemId]||0)+t.qty;});
+  const top5=Object.entries(issueCounts).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([id,qty])=>{
+    const item=items.find(i=>i.id===id);
+    return{name:item?.name||id,code:item?.code||id,qty,unit:item?.unit||'ea'};
+  });
+
+  // Recent receives (last 5)
+  const recentRcv=tx.filter(t=>t.type==='receive').sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,5);
+
+  const kpis=[
+    {icon:'fa-boxes',label:'Total Items',val:totalItems,sub:'in warehouse',color:'var(--accent-blue)',action:"navigate('warehouse')"},
+    {icon:'fa-peso-sign',label:'Inventory Value',val:'₱'+fmtNum(Math.round(totalValue)),sub:'estimated at cost',color:'var(--accent-green)',action:null},
+    {icon:'fa-exclamation-circle',label:'Low Stock',val:lowStock,sub:'items at/below min',color:lowStock>0?'var(--accent-red)':'var(--accent-green)',action:"navigate('warehouse')"},
+    {icon:'fa-clipboard-list',label:'Pending Requests',val:pendingReqs,sub:'awaiting approval',color:pendingReqs>0?'var(--accent-amber)':'var(--text-secondary)',action:"navigate('warehouse')"},
+    {icon:'fa-truck-loading',label:'Received (Month)',val:monthReceive.length+' tx',sub:'₱'+fmtNum(Math.round(monthReceiveVal)),color:'var(--accent-blue)',action:null},
+    {icon:'fa-dolly',label:'Issued (Month)',val:monthIssue.length+' tx',sub:'₱'+fmtNum(Math.round(monthIssueVal)),color:'var(--accent-amber)',action:null},
+  ];
+
+  return`<div class="card" style="margin-bottom:14px">
+    <div class="section-header" style="margin-bottom:12px">
+      <div class="section-title"><i class="fas fa-warehouse" style="margin-right:7px;color:var(--accent-blue)"></i>Warehouse Overview</div>
+      <button class="btn btn-secondary btn-sm" onclick="navigate('warehouse')">Open Warehouse</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px">
+      ${kpis.map(k=>`<div style="background:var(--bg-tertiary);border-radius:8px;padding:10px;cursor:${k.action?'pointer':'default'}" ${k.action?`onclick="${k.action}"`:''}">
+        <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px"><i class="fas ${k.icon}" style="margin-right:4px"></i>${k.label}</div>
+        <div style="font-size:18px;font-weight:700;font-family:var(--font-mono);color:${k.color}">${k.val}</div>
+        <div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${k.sub}</div>
+      </div>`).join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">TOP 5 ISSUED THIS MONTH</div>
+        ${top5.length?top5.map((t,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
+          <div style="width:18px;height:18px;border-radius:50%;background:var(--accent-blue)22;color:var(--accent-blue);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">${i+1}</div>
+          <div style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.name}</div>
+          <div style="font-size:11px;font-family:var(--font-mono);font-weight:600;color:var(--accent-amber)">${t.qty} ${t.unit}</div>
+        </div>`).join(''):'<div style="font-size:11px;color:var(--text-secondary);padding:8px 0">No issues this month</div>'}
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">RECENT DELIVERIES</div>
+        ${recentRcv.length?recentRcv.map(t=>{
+          const item=items.find(i=>i.id===t.itemId);
+          return`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
+            <i class="fas fa-truck-loading" style="color:var(--accent-green);font-size:10px;flex-shrink:0"></i>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item?.name||t.itemId}</div>
+              <div style="font-size:10px;color:var(--text-secondary)">${t.date} · ${t.vendor||'Unknown vendor'}</div>
+            </div>
+            <div style="font-size:11px;font-family:var(--font-mono);font-weight:600;color:var(--accent-green)">+${t.qty}</div>
+          </div>`;
+        }).join(''):'<div style="font-size:11px;color:var(--text-secondary);padding:8px 0">No recent deliveries</div>'}
+      </div>
+    </div>
+  </div>`;
+}
+
+function _renderReorderAlerts(){
+  const items=(AppState.data.warehouseItems||[]).filter(i=>!i._deleted);
+  const tx=(AppState.data.stockTransactions||[]).filter(t=>!t._deleted);
+  const lowItems=items.filter(i=>{
+    if(!i.minStock)return false;
+    const qty=tx.filter(t=>t.itemId===i.id).reduce((q,t)=>{
+      if(t.type==='receive')return q+t.qty;
+      if(t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser')return q-t.qty;
+      if(t.type==='return')return q+t.qty;
+      if(t.type==='adjust')return q+t.qty;
+      return q;
+    },0);
+    return qty<=i.minStock;
+  });
+  if(!lowItems.length)return'';
+  return`<div class="card" style="margin-bottom:14px;border-left:3px solid var(--accent-red)">
+    <div class="section-header" style="margin-bottom:10px">
+      <div class="section-title" style="color:var(--accent-red)"><i class="fas fa-exclamation-triangle" style="margin-right:7px"></i>Low Stock Alerts (${lowItems.length})</div>
+      <button class="btn btn-secondary btn-sm" onclick="navigate('warehouse')">View in Warehouse</button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      ${lowItems.slice(0,10).map(i=>{
+        const qty=tx.filter(t=>t.itemId===i.id).reduce((q,t)=>{
+          if(t.type==='receive')return q+t.qty;
+          if(t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser')return q-t.qty;
+          if(t.type==='return')return q+t.qty;
+          if(t.type==='adjust')return q+t.qty;
+          return q;
+        },0);
+        const pct=i.minStock>0?Math.round(qty/i.minStock*100):0;
+        return`<div style="background:var(--bg-tertiary);border:1px solid rgba(248,81,73,.3);border-radius:8px;padding:8px 12px;min-width:160px;flex:1">
+          <div style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.name}</div>
+          <div style="font-size:10px;color:var(--text-secondary);margin:2px 0">${i.code||''}</div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+            <div style="flex:1;height:4px;background:var(--bg-hover);border-radius:2px"><div style="height:100%;width:${Math.min(100,pct)}%;background:var(--accent-red);border-radius:2px"></div></div>
+            <span style="font-size:10px;font-family:var(--font-mono);color:var(--accent-red);font-weight:700">${qty}/${i.minStock}</span>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+function _renderDashWacChart(){
+  // placeholder — WAC trend chart can be added per-item via warehouse cost trend button
+}
 
 function drawBudgetBars(){
 const c=$('#budgetChartMain');if(!c)return;
@@ -20175,6 +20514,35 @@ function _openRecentItem(r) {
 // ── WAREHOUSE MODULE ──────────────────────────────────────────
 // Items catalog + Stock Transactions + Issuance Requests
 
+// ── Undo toast ───────────────────────────────────────────────
+let _whUndoTimer=null;
+function _whShowUndoToast(msg, undoFn, seconds=30){
+  // Remove any existing undo toast
+  const old=document.getElementById('wh-undo-toast');
+  if(old)old.remove();
+  if(_whUndoTimer)clearTimeout(_whUndoTimer);
+  const toast=document.createElement('div');
+  toast.id='wh-undo-toast';
+  let remaining=seconds;
+  toast.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:12px 18px;display:flex;align-items:center;gap:12px;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,.4);min-width:320px;max-width:90vw';
+  const update=()=>{
+    toast.innerHTML=`<i class="fas fa-check-circle" style="color:var(--accent-green);font-size:16px"></i>
+    <span style="flex:1;font-size:12px">${msg}</span>
+    <span style="font-size:11px;color:var(--text-secondary);min-width:24px;text-align:right">${remaining}s</span>
+    <button onclick="document.getElementById('wh-undo-toast')._undoFn&&document.getElementById('wh-undo-toast')._undoFn();document.getElementById('wh-undo-toast')?.remove();clearTimeout(window._whUndoTimer)" style="background:rgba(248,81,73,.15);color:var(--accent-red);border:1px solid rgba(248,81,73,.3);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-undo"></i> Undo</button>
+    <button onclick="document.getElementById('wh-undo-toast')?.remove();clearTimeout(window._whUndoTimer)" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:14px;padding:2px 4px">×</button>`;
+    toast._undoFn=undoFn;
+  };
+  update();
+  document.body.appendChild(toast);
+  window._whUndoTimer=setInterval(()=>{
+    remaining--;
+    if(remaining<=0){clearInterval(window._whUndoTimer);toast.remove();return;}
+    const span=toast.querySelector('span:nth-child(3)');
+    if(span)span.textContent=remaining+'s';
+  },1000);
+}
+
 // ── helpers ──────────────────────────────────────────────────
 function _whItems(){return(AppState.data.warehouseItems||[]).filter(i=>!i._deleted);}
 function _whTx(){return(AppState.data.stockTransactions||[]).filter(t=>!t._deleted);}
@@ -20224,6 +20592,60 @@ function _whCalcWAC(itemId){
   const totalQty=receipts.reduce((s,t)=>s+t.qty,0);
   if(!totalQty){const item=_whItems().find(i=>i.id===itemId);return item?.unitCost||0;}
   return receipts.reduce((s,t)=>s+(t.qty*(t.unitCost||0)),0)/totalQty;
+}
+
+// Smart reorder banner — shows items predicted to run out soon
+function _whReorderBanner(){
+  const items=_whItems();
+  if(!items.length)return'';
+  const tx=_whTx();
+  const now=Date.now();
+  const WINDOW_MS=90*24*60*60*1000; // 90-day consumption window
+  const suggestions=[];
+
+  items.forEach(item=>{
+    const issues=tx.filter(t=>t.itemId===item.id&&(t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser')&&t.date);
+    const recent=issues.filter(t=>new Date(t.date).getTime()>now-WINDOW_MS);
+    if(!recent.length)return;
+    const totalIssued=recent.reduce((s,t)=>s+t.qty,0);
+    const avgDailyUse=totalIssued/90;
+    if(avgDailyUse<=0)return;
+    const qtyOnHand=_whCalcQty(item.id).qtyOnHand;
+    const daysLeft=qtyOnHand/avgDailyUse;
+    const reorderPt=item.reorderPoint||item.minStock||0;
+    const daysToReorder=reorderPt>0?(qtyOnHand-reorderPt)/avgDailyUse:daysLeft;
+    // Flag if: will hit reorder point within 14 days OR will run out within 7 days
+    if(daysToReorder<=14||daysLeft<=7){
+      suggestions.push({item,qtyOnHand,avgDailyUse:Math.round(avgDailyUse*10)/10,daysLeft:Math.round(daysLeft),daysToReorder:Math.round(daysToReorder),suggestedQty:Math.ceil(avgDailyUse*30)});
+    }
+  });
+
+  if(!suggestions.length)return'';
+  suggestions.sort((a,b)=>a.daysLeft-b.daysLeft);
+
+  return`<div style="background:rgba(240,164,80,.08);border:1px solid rgba(240,164,80,.3);border-radius:10px;padding:12px 14px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:700;color:var(--accent-amber)"><i class="fas fa-bell" style="margin-right:6px"></i>Reorder Suggestions (${suggestions.length} items)</div>
+      <span style="font-size:10px;color:var(--text-secondary)">Based on 90-day consumption rate</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      ${suggestions.slice(0,6).map(s=>{
+        const urgent=s.daysLeft<=7;
+        const c=urgent?'var(--accent-red)':'var(--accent-amber)';
+        return`<div style="background:var(--bg-secondary);border:1px solid ${c}44;border-radius:8px;padding:8px 12px;min-width:180px;flex:1;max-width:280px">
+          <div style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${s.item.name}">${s.item.name}</div>
+          <div style="font-size:10px;color:${c};margin-top:3px"><i class="fas fa-${urgent?'exclamation-triangle':'clock'}" style="margin-right:3px"></i>${urgent?'Runs out in ~'+s.daysLeft+'d':'Reorder in ~'+s.daysToReorder+'d'}</div>
+          <div style="display:flex;justify-content:space-between;margin-top:5px;font-size:10px;color:var(--text-secondary)">
+            <span>On hand: <strong style="color:var(--text-primary)">${s.qtyOnHand}</strong></span>
+            <span>Daily use: ~${s.avgDailyUse}</span>
+          </div>
+          <button class="btn btn-sm" style="margin-top:6px;width:100%;font-size:10px;padding:3px;background:${c}22;color:${c};border:1px solid ${c}44;border-radius:5px" onclick="_whShowReceive('${s.item.id}')">
+            <i class="fas fa-truck-loading"></i> Receive (~${s.suggestedQty} ${s.item.unit||'ea'} suggested)
+          </button>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
 }
 
 // Cost trend modal — running WAC history + SVG line chart
@@ -20438,14 +20860,14 @@ function renderWarehouse(){
   </div>
 
   <!-- Tabs -->
-  <div class="tabs">
+  <div class="wh-tabs-wrap"><div class="tabs">
     ${tabs.map(t=>`
     <div class="tab ${_whTab===t.id?'active':''}" onclick="_whSetTab('${t.id}')" style="display:flex;align-items:center;gap:6px;padding:9px 16px;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">
       <i class="fas ${t.icon}" style="font-size:13px"></i>
       <span>${t.label}</span>
       ${t.count?`<span style="background:var(--accent-amber);color:#000;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;min-width:18px;text-align:center">${t.count}</span>`:''}
     </div>`).join('')}
-  </div>
+  </div></div>
 
   <div id="wh-tab-body"></div>`;
 
@@ -20534,7 +20956,9 @@ function _whItemsHTML(){
     </tr>`;
   }).join('');
 
+  const reorderBanner=_whReorderBanner();
   return`
+  ${reorderBanner}
   <!-- Toolbar -->
   <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap">
     <div style="font-size:13px;font-weight:700;color:var(--text-secondary)">
@@ -20542,6 +20966,7 @@ function _whItemsHTML(){
     </div>
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-danger btn-sm" onclick="_whClearAll()" title="Clear all items"><i class="fas fa-trash"></i></button>
+      <button class="btn btn-secondary btn-sm" onclick="_whPrintItemsReport()"><i class="fas fa-print"></i> Print Report</button>
       <button class="btn btn-secondary btn-sm" onclick="_whImportItems()"><i class="fas fa-file-import"></i> Import</button>
       <button class="btn btn-secondary btn-sm" onclick="_whExportItems()"><i class="fas fa-download"></i> Export</button>
       <button class="btn btn-primary btn-sm" onclick="_whShowAddItem()"><i class="fas fa-plus"></i> Add</button>
@@ -21491,6 +21916,75 @@ async function _whDeleteForm(id){
   }else{showToast('Form deleted','success');}
 }
 
+// ── PRINT HELPERS ────────────────────────────────────────────
+function _whPrintReport(title, tableHTML, summaryHTML){
+  const form=_whForms()[0]||{};
+  const logo=form.logoDataUrl?`<img src="${form.logoDataUrl}" style="height:50px;object-fit:contain">`:
+    `<div style="font-size:16px;font-weight:700">${form.companyName||AppState.data.settings?.companyName||'SYNERCORE'}</div>`;
+  const w=window.open('','_blank','width=900,height=700');
+  w.document.write(`<!DOCTYPE html><html><head><title>${title}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px}
+    h1{font-size:14px;margin-bottom:4px}
+    .header{display:flex;align-items:flex-start;justify-content:space-between;border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:14px}
+    .meta{font-size:10px;color:#555;line-height:1.6}
+    table{width:100%;border-collapse:collapse;margin-bottom:10px}
+    th{background:#222;color:#fff;padding:5px 8px;text-align:left;font-size:10px}
+    td{padding:4px 8px;border-bottom:1px solid #eee;font-size:10px}
+    tr:nth-child(even){background:#f9f9f9}
+    .summary{margin-top:10px;font-size:11px}
+    @media print{body{padding:10px}}
+  </style></head><body>
+  <div class="header">
+    ${logo}
+    <div style="text-align:right">
+      <h1>${title}</h1>
+      <div class="meta">Printed: ${new Date().toLocaleString('en-PH')}<br>By: ${AppState.currentUser?.displayName||''}</div>
+    </div>
+  </div>
+  ${tableHTML}
+  ${summaryHTML||''}
+  <script>window.onload=()=>{window.print();}<\/script>
+  </body></html>`);
+  w.document.close();
+}
+
+function _whPrintLedger(){
+  const all=_whTx().sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const items=_whItems();
+  const shown=_whTxItemFilter==='all'?all:all.filter(t=>t.itemId===_whTxItemFilter);
+  const filterLabel=_whTxItemFilter==='all'?'All Items':(items.find(i=>i.id===_whTxItemFilter)?.name||_whTxItemFilter);
+  const typeSign=t=>(t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser')?'-':'+';
+  const rows=shown.map(t=>{
+    const item=items.find(i=>i.id===t.itemId);
+    return`<tr>
+      <td>${(t.date||'').slice(0,10)}</td>
+      <td style="text-transform:uppercase">${t.type}</td>
+      <td>${item?.name||t.itemId}</td>
+      <td style="text-align:right">${typeSign(t)}${Math.abs(t.qty)} ${item?.unit||''}</td>
+      <td>${t.projectId||'—'}</td>
+      <td>${t.vendor||t.issuedBy||t.by||'—'}</td>
+      <td>${t.ref||'—'}</td>
+      <td>${t.notes||'—'}</td>
+    </tr>`;
+  }).join('');
+  const tableHTML=`<table><thead><tr><th>DATE</th><th>TYPE</th><th>ITEM</th><th style="text-align:right">QTY</th><th>PROJECT</th><th>VENDOR/BY</th><th>REF</th><th>NOTES</th></tr></thead><tbody>${rows}</tbody></table>`;
+  const totalVal=shown.reduce((s,t)=>s+(t.qty*(t.unitCost||0)),0);
+  _whPrintReport(`Transaction Ledger — ${filterLabel}`,tableHTML,`<div class="summary"><strong>Total records:</strong> ${shown.length} &nbsp; <strong>Total value:</strong> ₱${fmtNum(Math.round(totalVal))}</div>`);
+}
+
+function _whPrintItemsReport(){
+  const items=_whItems();
+  const rows=items.map(i=>{
+    const q=_whCalcQty(i.id);
+    return`<tr><td>${i.code||i.id}</td><td>${i.name}</td><td>${i.category||'—'}</td><td style="text-align:right">${q.qtyOnHand}</td><td style="text-align:right">${q.qtyAvailable}</td><td>${i.unit||'ea'}</td><td style="text-align:right">₱${fmtNum(i.unitCost||0)}</td><td style="text-align:right">₱${fmtNum(q.qtyOnHand*(i.unitCost||0))}</td><td>${i.rack||''}${i.row?' R'+i.row:''}</td></tr>`;
+  }).join('');
+  const total=items.reduce((s,i)=>s+((_whCalcQty(i.id).qtyOnHand)*(i.unitCost||0)),0);
+  const tableHTML=`<table><thead><tr><th>CODE</th><th>ITEM</th><th>CATEGORY</th><th style="text-align:right">ON HAND</th><th style="text-align:right">AVAILABLE</th><th>UNIT</th><th style="text-align:right">UNIT COST</th><th style="text-align:right">TOTAL VALUE</th><th>LOCATION</th></tr></thead><tbody>${rows}</tbody></table>`;
+  _whPrintReport('Warehouse Stock Report',tableHTML,`<div class="summary"><strong>Total items:</strong> ${items.length} &nbsp; <strong>Total inventory value:</strong> ₱${fmtNum(Math.round(total))}</div>`);
+}
+
 // ── TAB: LEDGER ──────────────────────────────────────────────
 function _whLedgerHTML(){
   const all=_whTx().sort((a,b)=>new Date(b.date)-new Date(a.date));
@@ -21531,6 +22025,7 @@ function _whLedgerHTML(){
       ${items.map(i=>`<option value="${i.id}" ${filterItem===i.id?'selected':''}>${i.name}</option>`).join('')}
     </select>
     <button class="btn btn-secondary btn-sm" onclick="_whExportLedger()"><i class="fas fa-download"></i> Export Ledger</button>
+    <button class="btn btn-secondary btn-sm" onclick="_whPrintLedger()"><i class="fas fa-print"></i> Print</button>
   </div>
   <div class="table-wrap">
   <table>
@@ -21790,10 +22285,15 @@ async function _whSaveReceive(){
     _whSyncQty(ln.itemId);
   });
   AppState.save();
-  showToast(`${valid.length} item${valid.length>1?'s':''} received & posted${attachments.length?' with '+attachments.length+' attachment(s)':''}`,'success',4000);
+  auditLog('CREATE','Warehouse','StockTransaction',batchRef,null,{type:'receive',items:valid.length,vendor,ref,date},'Receive Goods');
+  const _rcvBatchRef=batchRef;
   _whRcvLines=[{itemId:'',qty:'',unitCost:''}];
   _whRcvAttachments=[];
   _whRenderTab();
+  _whShowUndoToast(`${valid.length} item${valid.length>1?'s':''} received & posted${attachments.length?' with '+attachments.length+' attachment(s)':''}`, ()=>{
+    (AppState.data.stockTransactions||[]).filter(t=>t.batchRef===_rcvBatchRef).forEach(t=>{t._deleted=true;_whSyncQty(t.itemId);});
+    AppState.save();showToast('Receive undone','info');_whRenderTab();
+  });
 }
 
 function _whSaveIssue(){
@@ -21853,6 +22353,8 @@ function _whSaveIssue(){
     _whSyncQty(ln.itemId);
   });
   AppState.save();
+  auditLog('CREATE','Warehouse','StockTransaction',postedAt,null,{type,items:valid.length,projId,date,by},'Issue/Return');
+  const _issBatchTs=postedAt;
   // Capture slip data before clearing
   const slipItems=valid.map(ln=>{
     const item=_whItems().find(i=>i.id===ln.itemId);
@@ -21865,9 +22367,12 @@ function _whSaveIssue(){
   const slipData={type,bu,formCfg,mcwfNo,projId,date,by,notes,items:slipItems,
     grand:slipItems.reduce((s,r)=>s+r.total,0),
     postedAt:new Date().toLocaleString('en-PH')};
-  showToast(`${valid.length} item${valid.length>1?'s':''} — ${type} posted`,'success',3500);
   _whIssLines=[{itemId:'',qty:''}];
   _whRenderTab();
+  _whShowUndoToast(`${valid.length} item${valid.length>1?'s':''} — ${type} posted`, ()=>{
+    (AppState.data.stockTransactions||[]).filter(t=>t.postedAt===_issBatchTs).forEach(t=>{t._deleted=true;_whSyncQty(t.itemId);});
+    AppState.save();showToast('Transaction undone','info');_whRenderTab();
+  });
   // Ask to print
   setTimeout(()=>_whPrintSlip(slipData),400);
 }
@@ -22342,7 +22847,11 @@ function _whEditItem(id){_whShowAddItem(id);}
 function _whDeleteItem(id){
   if(!confirm('Delete this warehouse item? This will not delete its transaction history.'))return;
   const idx=(AppState.data.warehouseItems||[]).findIndex(i=>i.id===id);
-  if(idx!==-1){AppState.data.warehouseItems[idx]._deleted=true;}
+  if(idx!==-1){
+    const before={...AppState.data.warehouseItems[idx]};
+    AppState.data.warehouseItems[idx]._deleted=true;
+    auditLog('DELETE','Warehouse','WarehouseItem',id,before,null,'Item deleted');
+  }
   AppState.save();showToast('Item removed','success');_whRenderTab();
 }
 
