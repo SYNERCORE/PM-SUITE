@@ -20297,12 +20297,8 @@ function _whShowCostTrend(itemId){
   const trendColor=points.length>=2?(points[points.length-1].wac>points[0].wac?'var(--accent-red)':'var(--accent-green)'):'var(--text-secondary)';
   const trendIcon=points.length>=2?(points[points.length-1].wac>points[0].wac?'fa-arrow-trend-up':'fa-arrow-trend-down'):'fa-minus';
 
-  showModal(`
-    <div class="modal-header">
-      <h3 style="margin:0;font-size:16px"><i class="fas fa-chart-line" style="color:var(--accent-blue);margin-right:8px"></i>Cost Trend — ${item.name}</h3>
-      <button class="btn btn-secondary btn-sm" onclick="closeModal()"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body" style="padding:16px">
+  $('#genericModalTitle').textContent = `Cost Trend — ${item.name}`;
+  $('#genericModalBody').innerHTML = `
       <!-- KPI cards -->
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-bottom:16px">
         <div style="background:var(--bg-tertiary);border-radius:8px;padding:10px;text-align:center">
@@ -20343,9 +20339,9 @@ function _whShowCostTrend(itemId){
         <th>DATE</th><th>VENDOR</th><th>REF</th><th style="text-align:right">QTY</th>
         <th style="text-align:right">UNIT COST</th><th style="text-align:right">RUNNING WAC</th>
       </tr></thead><tbody>${histRows}</tbody></table></div>`:''}
-    </div>
-    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>
-  `);
+  `;
+  $('#genericModalFooter').innerHTML = `<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
+  openModal('genericModal');
 }
 
 // Actual cost issued to a project for a resource (supports direct WH id or itemMasterId linkage)
