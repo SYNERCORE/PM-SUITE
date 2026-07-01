@@ -708,7 +708,7 @@ async function _decryptFromStorage() {
   } catch(e) { console.warn('[SHIC] Decrypt failed — using fallback:', e.message); return null; }
 }
 
-const AppState={currentPage:'dashboard',theme:localStorage.getItem('pm_theme')||'dark',data:null,
+const AppState={currentPage:'dashboard',theme:localStorage.getItem('pm_theme')||(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'),data:null,
 save(){
   if(!this.data)this.data=getDefaultData();
   try{
@@ -1885,12 +1885,10 @@ function _showSkeleton(container) {
       const open = document.querySelector('.modal.open');
       if (open) { closeModal(open.id); return; }
     }
-    // Ctrl+K / Cmd+K → global search focus
+    // Ctrl+K / Cmd+K → global search
     if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
       e.preventDefault();
-      const gs = $('#globalSearchInput');
-      if (gs) { gs.focus(); gs.select(); return; }
-      showToast('Use the search bar on each page (Ctrl+K)', 'info', 2000);
+      _showGlobalSearch();
       return;
     }
     // ? → show shortcut cheatsheet
@@ -1934,48 +1932,40 @@ function _showShortcutHelp() {
 }
 
 
+// ── Global search (Ctrl+K) ────────────────────────────────────────────────
+function _showGlobalSearch() {
+  $('#genericModalTitle').innerHTML = '<i class="fas fa-search" style="margin-right:7px;color:var(--accent-blue)"></i>Quick Search';
+  $('#genericModalBody').innerHTML = `
+    <input id="_gsInput" class="form-input" placeholder="Search projects, tasks, items, people…" autocomplete="off" style="margin-bottom:10px">
+    <div id="_gsResults" style="max-height:320px;overflow-y:auto"></div>`;
+  $('#genericModalFooter').innerHTML = '<span style="font-size:11px;color:var(--text-secondary)">Press Enter to open first result &nbsp;·&nbsp; Esc to close</span>';
+  openModal('genericModal');
+  const inp = $('#_gsInput');
+  if (inp) { inp.focus(); inp.addEventListener('input', _gsRun); inp.addEventListener('keydown', e => { if (e.key === 'Enter') { const first = $('#_gsResults a'); if (first) first.click(); } }); }
+}
+function _gsRun() {
+  const q = ($('#_gsInput')?.value || '').toLowerCase().trim();
+  const out = $('#_gsResults');
+  if (!out) return;
+  if (!q) { out.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;padding:8px 0">Start typing…</div>'; return; }
+  const hits = [];
+  const d = AppState.data || {};
+  (d.projects||[]).filter(x=>!x._deleted).forEach(x=>{ if((x.id+x.name+x.client+x.pm).toLowerCase().includes(q)) hits.push({icon:'fa-briefcase',col:'#388bfd',label:x.id+(x.name?` — ${x.name}`:''),sub:x.client||'',go:`showProjectDetail('${x.id}')`}); });
+  (d.tasks||[]).filter(x=>!x._deleted).forEach(x=>{ if((x.id+x.name+x.assignee).toLowerCase().includes(q)) hits.push({icon:'fa-tasks',col:'#3fb950',label:x.id+(x.name?` — ${x.name}`:''),sub:x.assignee||'',go:`navigate('tasks')`}); });
+  const wItems=(d.whItems||d.stockItems||[]);
+  wItems.filter(x=>!x._deleted).forEach(x=>{ if((x.id+x.name+x.category).toLowerCase().includes(q)) hits.push({icon:'fa-boxes',col:'#f0a450',label:x.id+(x.name?` — ${x.name}`:''),sub:x.category||'',go:`navigate('warehouse')`}); });
+  (d.personnel||[]).filter(x=>!x._deleted).forEach(x=>{ if((x.name+x.department+x.designation).toLowerCase().includes(q)) hits.push({icon:'fa-user',col:'#bc8cff',label:x.name,sub:`${x.designation||''} · ${x.department||''}`,go:`navigate('masterlist')`}); });
+  NAV_ITEMS.forEach(n=>{ if(n.label.toLowerCase().includes(q)) hits.push({icon:n.icon,col:'#8b949e',label:n.label,sub:'Page',go:`navigate('${n.id}')`}); });
+  if (!hits.length) { out.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;padding:8px 0">No results found</div>'; return; }
+  out.innerHTML = hits.slice(0,12).map(h=>`<a href="#" onclick="closeModal('genericModal');${h.go};return false" style="display:flex;align-items:center;gap:10px;padding:8px 6px;border-radius:6px;text-decoration:none;color:inherit;border-bottom:1px solid var(--border)">
+    <div style="width:28px;height:28px;border-radius:6px;background:${h.col}22;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas ${h.icon}" style="color:${h.col};font-size:11px"></i></div>
+    <div style="min-width:0"><div style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${h.label}</div><div style="font-size:10px;color:var(--text-secondary)">${h.sub}</div></div>
+  </a>`).join('');
+}
+
 // ── Pagination utility ──────────────────────────────────────────────────────
 const PAGE_SIZE = 10;
 const _pages = {};  // keyed by tableId
-
-function _paginate(tableId, data, renderRowFn, containerId) {
-  if (!_pages[tableId]) _pages[tableId] = 0;
-  const total = data.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  _pages[tableId] = Math.min(_pages[tableId], totalPages - 1);
-  const page = _pages[tableId];
-  const start = page * PAGE_SIZE;
-  const slice = data.slice(start, start + PAGE_SIZE);
-
-  const rowsHtml = slice.map(renderRowFn).join('');
-
-  const navHtml = total <= PAGE_SIZE ? '' : `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;
-      background:var(--bg-hover);border-top:1px solid var(--border);font-size:11px;flex-wrap:wrap;gap:6px">
-      <span style="color:var(--text-secondary)">
-        ${start+1}–${Math.min(start+PAGE_SIZE,total)} of <strong>${total}</strong> rows
-      </span>
-      <div style="display:flex;gap:4px">
-        <button class="btn btn-secondary btn-sm" style="padding:2px 8px;min-width:32px"
-          onclick="_pages['${tableId}']=0;_repaginateTable('${tableId}','${containerId}')"
-          ${page===0?'disabled':''}>«</button>
-        <button class="btn btn-secondary btn-sm" style="padding:2px 8px;min-width:32px"
-          onclick="_pages['${tableId}']=Math.max(0,_pages['${tableId}']-1);_repaginateTable('${tableId}','${containerId}')"
-          ${page===0?'disabled':''}>‹</button>
-        <span style="padding:2px 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);font-family:var(--font-mono)">
-          ${page+1} / ${totalPages}
-        </span>
-        <button class="btn btn-secondary btn-sm" style="padding:2px 8px;min-width:32px"
-          onclick="_pages['${tableId}']=Math.min(${totalPages-1},_pages['${tableId}']+1);_repaginateTable('${tableId}','${containerId}')"
-          ${page===totalPages-1?'disabled':''}>›</button>
-        <button class="btn btn-secondary btn-sm" style="padding:2px 8px;min-width:32px"
-          onclick="_pages['${tableId}']=${totalPages-1};_repaginateTable('${tableId}','${containerId}')"
-          ${page===totalPages-1?'disabled':''}>»</button>
-      </div>
-    </div>`;
-
-  return { rowsHtml, navHtml, page, totalPages, total };
-}
 
 // Called by pagination buttons to re-render just the tbody+nav (no full re-render)
 function _repaginateTable(tableId, containerId) {
@@ -2088,6 +2078,26 @@ if (map[pid]) {
   }
 }}
 
+// ── Offline banner ────────────────────────────────────────────
+(function _initOfflineBanner() {
+  const BANNER_ID = 'offlineBanner';
+  function _showBanner(show) {
+    let b = $('#' + BANNER_ID);
+    if (!b) {
+      b = document.createElement('div');
+      b.id = BANNER_ID;
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;display:none;align-items:center;justify-content:center;gap:8px;padding:6px 16px;background:#b45309;color:#fff;font-size:12px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.3)';
+      b.innerHTML = '<i class="fas fa-wifi-slash"></i><span>No internet connection — changes saved locally and will sync when reconnected</span>';
+      document.body.prepend(b);
+    }
+    b.style.display = show ? 'flex' : 'none';
+    document.body.style.paddingTop = show ? '34px' : '';
+  }
+  window.addEventListener('offline', () => _showBanner(true));
+  window.addEventListener('online',  () => { _showBanner(false); showToast('Back online — syncing…', 'success', 3000); });
+  if (!navigator.onLine) _showBanner(true);
+})();
+
 function toggleSidebar(){
 const s=$('#sidebar');
 if(window.innerWidth<768){s.classList.toggle('mobile-open');const ov=$('#mobileOverlay');if(ov)ov.style.display=s.classList.contains('mobile-open')?'block':'none';}
@@ -2102,6 +2112,14 @@ AppState.theme=AppState.theme==='dark'?'light':'dark';
 document.documentElement.setAttribute('data-theme',AppState.theme);
 localStorage.setItem('pm_theme',AppState.theme);
 $('#themeIcon').className=AppState.theme==='dark'?'fas fa-moon':'fas fa-sun';}
+
+// Auto-follow OS colour scheme when user hasn't manually picked a theme
+window.matchMedia('(prefers-color-scheme: light)').addEventListener('change',e=>{
+  if(localStorage.getItem('pm_theme'))return;
+  AppState.theme=e.matches?'light':'dark';
+  document.documentElement.setAttribute('data-theme',AppState.theme);
+  const ti=$('#themeIcon');if(ti)ti.className=AppState.theme==='dark'?'fas fa-moon':'fas fa-sun';
+});
 
 function toggleNotifications(){
 const p=$('#notifPanel');p.classList.toggle('open');renderNotifPanel();
@@ -7938,7 +7956,7 @@ ${[['Active',active,'#388bfd'],['Completed',completed,'#3fb950'],['Planned',plan
 <div class="card"><div class="card-title">Budget vs Spent</div><canvas id="budgetChartMain" height="140" style="width:100%"></canvas></div>
 <div class="card"><div class="card-title">Project Progress</div><div style="max-height:155px;overflow-y:auto">
 ${projects.filter(p=>p.status!=='completed').map(p=>`
-<div style="margin-bottom:9px">
+<div style="margin-bottom:9px;cursor:pointer" onclick="showProjectDetail('${p.id}')" title="Open ${p.id}">
 <div style="display:flex;justify-content:space-between;margin-bottom:3px">
 <span style="font-size:11px;font-weight:500">${p.id}</span>
 <span style="font-size:11px;font-family:var(--font-mono);font-weight:700">${p.progress}%</span></div>
@@ -7973,7 +7991,7 @@ ${(()=>{
 <div class="grid grid-2" style="margin-bottom:14px">
 <div class="card"><div class="section-header"><div class="section-title">Active Projects</div><button class="btn btn-secondary btn-sm" onclick="navigate('projects')">View All</button></div>
 <div class="table-wrap"><table><thead><tr><th>Project</th><th>PM</th><th>Progress</th><th>Status</th></tr></thead><tbody>
-${projects.filter(p=>p.status==='active').slice(0,4).map(p=>`<tr>
+${projects.filter(p=>p.status==='active').slice(0,4).map(p=>`<tr style="cursor:pointer" onclick="showProjectDetail('${p.id}')" title="Open ${p.id}">
 <td><div style="font-size:12px;font-weight:500">${(p.name||p.id||'').substring(0,26)}${(p.name||'').length>26?'…':''}</div><div style="font-size:10px;color:var(--text-secondary)">${p.id}</div></td>
 <td style="font-size:11px">${p.pm.split(' ')[0]}</td>
 <td><div style="display:flex;align-items:center;gap:6px"><div class="progress-bar" style="width:60px;height:5px"><div class="progress-fill" style="width:${p.progress}%;background:${pColor(p.progress)}"></div></div><span style="font-size:10px;font-family:var(--font-mono)">${p.progress}%</span></div></td>
@@ -17599,7 +17617,7 @@ ${[['#c5221f','Critical 15+'],['#e37400','High 8-14'],['#f9ab00','Medium 4-7'],[
 <td><div style="display:flex;align-items:center;gap:4px">${avatarH(r.owner,22)}<span style="font-size:10px">${r.owner.split(' ')[0]}</span></div></td>
 <td style="font-size:10px;font-family:var(--font-mono);color:${isOverdue(r.dueDate)?'var(--accent-red)':'inherit'}">${r.dueDate}</td>
 <td>${sBadge(r.status)}</td>
-</tr>`;}).join('')}</tbody></table></div></div>`;
+</tr>`;}).join('')}</tbody></table>${_pgNav("risks",risks,renderRisks)}</div></div>`;
 setTimeout(()=>{const c=$('#riskCatChart');if(c){c.width=c.parentElement.offsetWidth-30;const cats=[...new Set(risks.map(r=>r.category))];drawBar('riskCatChart',cats,cats.map(ct=>risks.filter(r=>r.category===ct).length),'#f0a450');}},50);}
 
 function showAddRisk(pid){
