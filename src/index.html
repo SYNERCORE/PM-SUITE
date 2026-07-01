@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SHIC — Enterprise Project Management Suite</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="src/css/main.css">
+  <!-- PWA / Offline support -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SHIC">
+  <link rel="manifest" id="pwaManifest" href="./manifest.json">
+</head>
+<body>
+<!-- ── AUTH OVERLAY ────────────────────────────────────── -->
+<div id="authOverlay" style="position:fixed;inset:0;z-index:99999;background:var(--bg-primary,#0d1117);display:flex;align-items:center;justify-content:center;font-family:var(--font-primary,'Inter',sans-serif)">
+  <div style="width:100%;max-width:440px;padding:16px">
+    <!-- Logo -->
+    <div style="text-align:center;margin-bottom:28px">
+      <div style="width:60px;height:60px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:28px;font-weight:900;color:#fff;box-shadow:0 8px 24px rgba(245,158,11,.4)">S</div>
+      <div style="font-size:26px;font-weight:800;color:#e6edf3;letter-spacing:-.5px">SHIC</div>
+      <div style="font-size:12px;color:#8b949e;margin-top:3px">Enterprise PM Suite</div>
+    </div>
+
+    <div id="authCard" style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px">
+
+      <!-- M365 Login -->
+      <div id="authFormLogin">
+        <div style="font-size:16px;font-weight:700;color:#e6edf3;margin-bottom:6px;text-align:center">Sign in to your account</div>
+        <div style="font-size:11px;color:#8b949e;text-align:center;margin-bottom:20px">Use your Microsoft 365 work account</div>
+        <div id="authAlert" style="display:none;padding:10px 14px;border-radius:7px;font-size:12px;margin-bottom:14px"></div>
+        <!-- M365 Sign In Button -->
+        <button onclick="doM365Login()" id="loginBtn"
+          style="width:100%;padding:12px;background:#0078d4;border:none;border-radius:7px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;transition:opacity .2s;display:flex;align-items:center;justify-content:center;gap:10px">
+          <i class="fab fa-microsoft" style="font-size:16px"></i>Sign in with Microsoft 365
+        </button>
+        <!-- Setup prompt if SP not configured -->
+        <div id="authSetupPrompt" style="display:none;padding:10px 14px;background:rgba(240,164,80,.08);border:1px solid rgba(240,164,80,.2);border-radius:7px;font-size:11px;color:#f0a450;text-align:center">
+          <i class="fas fa-exclamation-triangle" style="margin-right:5px"></i>
+          SharePoint not configured. <a href="#" onclick="showAuthForm('setup')" style="color:#f59e0b;font-weight:600">Set up first</a>
+        </div>
+      </div>
+
+      <!-- Pending Approval -->
+      <div id="authFormPending" style="display:none;text-align:center">
+        <div style="font-size:40px;margin-bottom:14px">⏳</div>
+        <div style="font-size:16px;font-weight:700;color:#e6edf3;margin-bottom:8px">Awaiting Admin Approval</div>
+        <div id="pendingUserInfo" style="font-size:12px;color:#8b949e;line-height:1.7;margin-bottom:18px">Your Microsoft 365 account has been registered.<br>An administrator will review and approve your access.<br>You will be able to access the app once approved.</div>
+        <div id="pendingSelfApprove" style="display:none;margin-bottom:14px;padding:12px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:8px">
+          <div style="font-size:11px;color:#f59e0b;margin-bottom:8px"><i class="fas fa-exclamation-triangle" style="margin-right:5px"></i>Are you the first admin? Use this only if no admin exists yet.</div>
+          <button onclick="selfApproveAsAdmin()" style="padding:8px 16px;background:linear-gradient(135deg,#f59e0b,#d97706);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;cursor:pointer"><i class="fas fa-shield-alt" style="margin-right:6px"></i>Approve Myself as Admin</button>
+        </div>
+        <button onclick="doLogout()" style="padding:9px 20px;background:#21262d;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;cursor:pointer">Sign out</button>
+      </div>
+
+      <!-- Rejected -->
+      <div id="authFormRejected" style="display:none;text-align:center">
+        <div style="font-size:40px;margin-bottom:14px">🚫</div>
+        <div style="font-size:16px;font-weight:700;color:#f85149;margin-bottom:8px">Access Denied</div>
+        <div style="font-size:12px;color:#8b949e;line-height:1.7;margin-bottom:18px">Your account has been rejected or suspended.<br>Contact your administrator for assistance.</div>
+        <button onclick="doLogout()" style="padding:9px 20px;background:#21262d;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:13px;cursor:pointer">Sign out</button>
+      </div>
+
+      <!-- Setup (SP not configured yet) -->
+      <div id="authFormSetup" style="display:none">
+        <div style="font-size:16px;font-weight:700;color:#e6edf3;margin-bottom:6px;text-align:center">
+          <i class="fab fa-microsoft" style="color:#0078d4;margin-right:8px"></i>Setup Required
+        </div>
+        <div style="font-size:11px;color:#8b949e;text-align:center;margin-bottom:16px;line-height:1.7">
+          Enter your Azure App Client ID and SharePoint site URL to get started.
+        </div>
+        <div style="margin-bottom:12px">
+          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Azure App Client ID *</label>
+          <input id="setupClientId" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:12px;font-family:monospace;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#0078d4'" onblur="this.style.borderColor='#30363d'">
+        </div>
+        <div style="margin-bottom:14px">
+          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">SharePoint Site URL *</label>
+          <input id="setupSiteUrl" type="text" placeholder="https://company.sharepoint.com/sites/yoursite" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:12px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#0078d4'" onblur="this.style.borderColor='#30363d'">
+        </div>
+        <button onclick="setupAndLogin()" style="width:100%;padding:10px;background:#0078d4;border:none;border-radius:7px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:10px">
+          <i class="fab fa-microsoft" style="margin-right:7px"></i>Save & Sign in with Microsoft
+        </button>
+        <div style="text-align:center;font-size:11px;color:#8b949e">
+          Already configured? <a href="#" onclick="showAuthForm('login')" style="color:#f59e0b;text-decoration:none">Back to Sign in</a>
+        </div>
+      </div>
+
+    </div>
+    <div style="text-align:center;margin-top:14px;font-size:10px;color:#484f58">SHIC Enterprise PM Suite &nbsp;·&nbsp; Microsoft 365 Secured</div>
+  </div>
+</div>
+<!-- ── END AUTH OVERLAY ──────────────────────────────────── -->
+<div class="app-layout">
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon">⚡</div>
+    <div style="flex:1"><div class="logo-text">SHIC</div><div class="logo-sub" id="sidebarUserLabel">Enterprise PM Suite</div></div>
+    <button onclick="doLogout()" title="Sign Out" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);padding:4px 6px;border-radius:5px;font-size:13px" onmouseover="this.style.color='var(--accent-red)'" onmouseout="this.style.color='var(--text-secondary)'"><i class="fas fa-sign-out-alt"></i></button>
+  </div>
+  <div class="sidebar-nav" id="sidebarNav"></div>
+  <div class="sidebar-footer">
+    <div class="nav-item" onclick="navigate('deletionRequests')" title="Deletion Requests">
+      <span class="nav-icon" style="position:relative">
+        <i class="fas fa-clipboard-check"></i>
+        <span id="delReqBadge" style="position:absolute;top:-3px;right:-5px;background:var(--accent-amber);color:#000;font-size:9px;font-weight:700;border-radius:8px;padding:1px 5px;display:none">0</span>
+      </span>
+      <span class="nav-label">Deletion Requests</span>
+    </div>
+    <div class="nav-item" onclick="navigate('trash')" title="Trash">
+      <span class="nav-icon"><i class="fas fa-trash"></i></span>
+      <span class="nav-label">Trash</span>
+    </div>
+    <div class="nav-item" onclick="navigate('settings')">
+      <span class="nav-icon"><i class="fas fa-cog"></i></span>
+      <span class="nav-label">Settings</span>
+    </div>
+  </div>
+</nav>
+<div class="mobile-overlay" id="mobileOverlay" onclick="toggleSidebar()"></div>
+<div class="main-content">
+  <header class="topbar">
+    <button class="sidebar-toggle" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
+    <div class="topbar-title" id="topbarTitle">Dashboard</div>
+    <div id="saveIndicator" style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);margin-right:14px;opacity:0;transition:opacity .3s">
+      <i class="fas fa-check-circle" style="color:var(--accent-green)" id="saveIndicatorIcon"></i>
+      <span id="saveIndicatorText">Saved</span>
+    </div>
+    <div class="topbar-search" onclick="openCmdPalette()" style="cursor:pointer" title="Search everything (Ctrl+K)"><i class="fas fa-search" style="color:var(--text-muted);font-size:11px"></i><input type="text" placeholder="Search... (Ctrl+K)" id="globalSearch" readonly style="cursor:pointer;pointer-events:none"><kbd style="font-size:9px;padding:1px 5px;background:var(--bg-hover);border:1px solid var(--border);border-radius:3px;color:var(--text-muted);flex-shrink:0">⌘K</kbd></div>
+    <div class="topbar-actions">
+      <button class="btn btn-primary btn-sm" onclick="showQuickAdd()"><i class="fas fa-plus"></i> New</button>
+      <!-- ── Sync Status Button (top-right) ──────────────────── -->
+      <button id="syncStatusBtn" onclick="syncStatusClick()" title="Sync with SharePoint"
+        style="background:rgba(63,185,80,.12);border:1px solid rgba(63,185,80,.4);color:#3fb950;border-radius:16px;padding:5px 12px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:6px;cursor:pointer;transition:all .2s;height:30px">
+        <span id="syncStatusDot" style="width:8px;height:8px;border-radius:50%;background:#3fb950;animation:syncPulse 2s ease-in-out infinite"></span>
+        <span id="syncStatusLabel">Synced</span>
+      </button>
+      <div style="position:relative">
+        <button class="notif-btn" onclick="toggleNotifications()" id="notifBtn"><i class="fas fa-bell"></i><span class="notif-dot" id="notifDot"></span></button>
+        <div class="notif-panel" id="notifPanel"></div>
+      </div>
+      <button class="notif-btn" onclick="toggleTheme()"><i class="fas fa-moon" id="themeIcon"></i></button>
+      <div class="user-avatar" title="Admin User">AU</div>
+    </div>
+  </header>
+  <div class="page-content">
+    <div id="dashboard" class="page active"></div>
+    <div id="projects" class="page"></div>
+    <div id="prospects" class="page"></div>
+    <div id="tasks" class="page"></div>
+    <div id="gantt" class="page"></div>
+    <div id="resources" class="page"></div>
+    <div id="manpower" class="page"></div>
+    <div id="materials" class="page"></div>
+    <div id="procurement" class="page"></div>
+    <div id="costs" class="page"></div>
+    <div id="qaqc" class="page"></div>
+    <div id="risks" class="page"></div>
+    <div id="actions" class="page"></div>
+    <div id="documents" class="page"></div>
+    <div id="library" class="page"></div>
+    <div id="progress" class="page"></div>
+    <div id="kpi" class="page"></div>
+    <div id="analytics" class="page"></div>
+    <div id="dailymeeting" class="page"></div>
+<div id="calendar" class="page"></div>
+    <div id="reports" class="page"></div>
+    <div id="warehouse" class="page"></div>
+    <div id="masterlist" class="page"></div>
+    <div id="deletionRequests" class="page"></div>
+    <div id="trash" class="page"></div>
+    <div id="settings" class="page"></div>
+  </div>
+</div>
+</div>
+<!-- Modals -->
+<div class="modal-overlay" id="projectModal">
+  <div class="modal" style="max-width:700px">
+    <div class="modal-header"><div class="modal-title" id="projectModalTitle">New Project</div><button class="modal-close" onclick="closeModal('projectModal')"><i class="fas fa-times"></i></button></div>
+    <div id="projectModalBody"></div>
+  </div>
+</div>
+<div class="modal-overlay" id="taskModal">
+  <div class="modal" style="max-width:650px">
+    <div class="modal-header"><div class="modal-title" id="taskModalTitle">New Task</div><button class="modal-close" onclick="closeModal('taskModal')"><i class="fas fa-times"></i></button></div>
+    <div id="taskModalBody"></div>
+  </div>
+</div>
+<!-- ── COMMAND PALETTE (Cmd+K) ────────────────────────────── -->
+<div id="cmdPalette" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.5);backdrop-filter:blur(2px)" onclick="if(event.target===this)closeCmdPalette()">
+  <div style="max-width:560px;margin:12vh auto 0;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;box-shadow:0 24px 64px rgba(0,0,0,.5);overflow:hidden">
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)">
+      <i class="fas fa-search" style="color:var(--text-muted);font-size:14px"></i>
+      <input id="cmdPaletteInput" type="text" placeholder="Search pages, projects, actions... (Esc to close)"
+        style="flex:1;background:transparent;border:none;outline:none;color:var(--text-primary);font-size:15px;font-family:var(--font-primary)"
+        oninput="renderCmdResults(this.value)" onkeydown="cmdPaletteKeyNav(event)">
+      <kbd style="font-size:10px;padding:2px 6px;background:var(--bg-hover);border:1px solid var(--border);border-radius:4px;color:var(--text-muted)">ESC</kbd>
+    </div>
+    <div id="cmdPaletteResults" style="max-height:380px;overflow-y:auto;padding:6px"></div>
+    <div style="padding:8px 16px;border-top:1px solid var(--border);display:flex;gap:14px;font-size:10px;color:var(--text-muted)">
+      <span><kbd style="padding:1px 5px;background:var(--bg-hover);border:1px solid var(--border);border-radius:3px">↑↓</kbd> Navigate</span>
+      <span><kbd style="padding:1px 5px;background:var(--bg-hover);border:1px solid var(--border);border-radius:3px">↵</kbd> Open</span>
+      <span><kbd style="padding:1px 5px;background:var(--bg-hover);border:1px solid var(--border);border-radius:3px">Esc</kbd> Close</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── KEYBOARD SHORTCUTS HELP (press ?) ──────────────────── -->
+<div id="kbdHelp" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.5);backdrop-filter:blur(2px)" onclick="if(event.target===this)this.style.display='none'">
+  <div style="max-width:480px;margin:10vh auto 0;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;box-shadow:0 24px 64px rgba(0,0,0,.5);padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="font-size:16px;font-weight:700"><i class="fas fa-keyboard" style="margin-right:8px;color:var(--accent-blue)"></i>Keyboard Shortcuts</div>
+      <button onclick="document.getElementById('kbdHelp').style.display='none'" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px"><i class="fas fa-times"></i></button>
+    </div>
+    <div style="display:grid;gap:8px;font-size:13px" id="kbdHelpList"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="genericModal">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title" id="genericModalTitle">Add Item</div><button class="modal-close" onclick="closeModal('genericModal')"><i class="fas fa-times"></i></button></div>
+    <div id="genericModalBody"></div>
+    <div class="modal-footer" id="genericModalFooter"></div>
+  </div>
+</div>
+<div class="toast-container" id="toastContainer"></div>
+<button class="fab" onclick="showQuickAdd()" title="Quick Add"><i class="fas fa-plus"></i></button>
+
+  <!-- Microsoft Authentication Library for OneDrive Sync -->
+  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
+<script src="src/js/core.js"></script>
+<script src="src/js/templates.js"></script>
+<script src="src/js/ui.js"></script>
+<script src="src/js/auth.js"></script>
+<script src="src/js/sync.js"></script>
+<script src="src/js/hardening.js"></script>
+<script src="src/js/views/dashboard.js"></script>
+<script src="src/js/views/projects.js"></script>
+<script src="src/js/views/prospects.js"></script>
+<script src="src/js/views/deletionRequests.js"></script>
+<script src="src/js/views/tasks.js"></script>
+<script src="src/js/cpm.js"></script>
+<script src="src/js/baseline.js"></script>
+<script src="src/js/views/gantt.js"></script>
+<script src="src/js/views/ganttExport.js"></script>
+<script src="src/js/views/resources.js"></script>
+<script src="src/js/views/manpower.js"></script>
+<script src="src/js/views/materials.js"></script>
+<script src="src/js/views/procurement.js"></script>
+<script src="src/js/views/costs.js"></script>
+<script src="src/js/views/qaqc.js"></script>
+<script src="src/js/views/risks.js"></script>
+<script src="src/js/views/actions.js"></script>
+<script src="src/js/views/library.js"></script>
+<script src="src/js/views/documents.js"></script>
+<script src="src/js/views/progress.js"></script>
+<script src="src/js/views/kpi.js"></script>
+<script src="src/js/views/analytics.js"></script>
+<script src="src/js/views/calendar.js"></script>
+<script src="src/js/views/reports.js"></script>
+<script src="src/js/views/settings.js"></script>
+<script src="src/js/views/warehouse.js"></script>
+<script src="src/js/views/masterlist.js"></script>
+<script src="src/js/views/trash.js"></script>
+</body>
+</html>
