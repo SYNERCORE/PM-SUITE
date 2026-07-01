@@ -7167,7 +7167,7 @@ async function m365SetAdmin(uid, isAdmin) {
 
 // ── Audit Log SP CRUD ────────────────────────────────────────
 const SHIC_AUDIT_LIST = 'SHIC_AuditLog';
-let _auditListId = null;
+// _auditListId declared at top of file (line ~690)
 let _auditQueue = []; // buffer entries while SP not ready
 let _auditFlushing = false;
 
