@@ -1691,7 +1691,7 @@ if (!window._snapshotCaptured) {
 const map={dashboard:renderDashboard,projects:renderProjects,tasks:renderTasks,gantt:renderGantt,
 resources:renderResources,manpower:renderManpower,materials:renderMaterials,procurement:renderProcurement,warehouse:renderWarehouse,
 costs:renderCosts,qaqc:renderQAQC,risks:renderRisks,actions:renderActions,documents:renderDocuments,
-progress:renderProgress,kpi:renderKPI,analytics:typeof renderAnalytics==='function'?renderAnalytics:null,dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist,prospects:renderProspects,library:renderLibrary,
+progress:renderProgress,kpi:renderKPI,analytics:()=>{if(typeof renderAnalytics==='function')renderAnalytics();else{const el=$('#analytics');if(el)el.innerHTML='<div class="empty-state"><p>Analytics module not loaded.</p></div>';}},dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist,prospects:renderProspects,library:renderLibrary,
 trash:typeof renderTrash==='function'?renderTrash:null,
 deletionRequests:typeof renderDeletionRequests==='function'?renderDeletionRequests:null};
 if(map[pid])map[pid]();}
