@@ -20859,7 +20859,7 @@ function _whNextId(prefix,arr){
 }
 
 let _whTab='items', _whItemSearch='', _whItemCat='all', _whTxItemFilter='all', _whReqStatus='all', _whItemPage=0;
-const _WH_PAGE_SIZE=50;
+let _whItemPageSize=25, _whItemSortCol='name', _whItemSortAsc=true;
 
 // ── MAIN RENDER ──────────────────────────────────────────────
 function renderWarehouse(){
@@ -20942,16 +20942,38 @@ function _whRenderTab(){
 }
 
 // ── TAB: ITEMS ────────────────────────────────────────────────
+function _whSortHeader(col,label){
+  const active=_whItemSortCol===col;
+  const icon=active?(_whItemSortAsc?'fa-sort-up':'fa-sort-down'):'fa-sort';
+  return`<th style="cursor:pointer;white-space:nowrap;user-select:none" onclick="_whItemSortCol='${col}';_whItemSortAsc=${active}?!_whItemSortAsc:true;_whRenderTab()">${label} <i class="fas ${icon}" style="font-size:9px;opacity:${active?1:.3}"></i></th>`;
+}
+
 function _whItemsHTML(){
   const cats=['all',...new Set(_whItems().map(i=>i.category||'Uncategorized'))];
   let items=_whItems();
   if(_whItemCat!=='all')items=items.filter(i=>(i.category||'Uncategorized')===_whItemCat);
-  if(_whItemSearch)items=items.filter(i=>(i.name+' '+(i.code||'')+' '+(i.location||'')+' '+(i.rack||'')+' '+(i.row||'')).toLowerCase().includes(_whItemSearch.toLowerCase()));
+  if(_whItemSearch){
+    const q=_whItemSearch.toLowerCase();
+    items=items.filter(i=>(i.name+' '+(i.code||'')+' '+(i.barcode||'')+' '+(i.location||'')+' '+(i.rack||'')+' '+(i.row||'')+' '+(i.category||'')).toLowerCase().includes(q));
+  }
+
+  // Sort
+  items=[...items].sort((a,b)=>{
+    let av,bv;
+    if(_whItemSortCol==='qty'){const qa=_whCalcQty(a.id),qb=_whCalcQty(b.id);av=qa.qtyOnHand;bv=qb.qtyOnHand;}
+    else if(_whItemSortCol==='value'){const qa=_whCalcQty(a.id),qb=_whCalcQty(b.id);av=qa.qtyOnHand*(a.unitCost||0);bv=qb.qtyOnHand*(b.unitCost||0);}
+    else if(_whItemSortCol==='cost'){av=parseFloat(a.unitCost||0);bv=parseFloat(b.unitCost||0);}
+    else{av=(a[_whItemSortCol]||'').toString().toLowerCase();bv=(b[_whItemSortCol]||'').toString().toLowerCase();}
+    if(av<bv)return _whItemSortAsc?-1:1;
+    if(av>bv)return _whItemSortAsc?1:-1;
+    return 0;
+  });
 
   const totalFiltered=items.length;
-  const totalPages=Math.max(1,Math.ceil(totalFiltered/_WH_PAGE_SIZE));
+  const ps=_whItemPageSize===0?totalFiltered:_whItemPageSize;
+  const totalPages=Math.max(1,Math.ceil(totalFiltered/ps));
   if(_whItemPage>=totalPages)_whItemPage=totalPages-1;
-  const pageItems=items.slice(_whItemPage*_WH_PAGE_SIZE,(_whItemPage+1)*_WH_PAGE_SIZE);
+  const pageItems=_whItemPageSize===0?items:items.slice(_whItemPage*ps,(_whItemPage+1)*ps);
 
   const rows=pageItems.map(item=>{
     const q=_whCalcQty(item.id);
@@ -21024,21 +21046,26 @@ function _whItemsHTML(){
   </div>
   <!-- Search & filter -->
   <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-    <input class="form-control" style="flex:1;min-width:200px" placeholder="Search items, code, location…" value="${_whItemSearch}"
+    <input class="form-control" style="flex:1;min-width:200px" placeholder="Search name, code, barcode, category, location…" value="${_whItemSearch}"
       oninput="_whItemSearch=this.value;_whItemPage=0;_whRenderTab()">
-    <select class="form-control" style="width:180px" onchange="_whItemCat=this.value;_whItemPage=0;_whRenderTab()">
+    <select class="form-control" style="width:160px" onchange="_whItemCat=this.value;_whItemPage=0;_whRenderTab()">
       ${cats.map(c=>`<option value="${c}" ${_whItemCat===c?'selected':''}>${c==='all'?'All Categories':c}</option>`).join('')}
+    </select>
+    <select class="form-control" style="width:100px" onchange="_whItemPageSize=parseInt(this.value);_whItemPage=0;_whRenderTab()">
+      ${[10,25,50,100,0].map(n=>`<option value="${n}" ${_whItemPageSize===n?'selected':''}>${n===0?'All':n+' / page'}</option>`).join('')}
     </select>
   </div>
   <div class="table-wrap">
   <table>
     <thead><tr>
-      <th>CODE</th><th>ITEM</th><th>LOCATION</th><th>UNIT</th>
-      <th style="text-align:right">ON HAND</th>
+      ${_whSortHeader('code','CODE')}
+      ${_whSortHeader('name','ITEM')}
+      <th>LOCATION</th><th>UNIT</th>
+      <th style="text-align:right;cursor:pointer;user-select:none" onclick="_whItemSortCol='qty';_whItemSortAsc=_whItemSortCol==='qty'?!_whItemSortAsc:true;_whRenderTab()">ON HAND <i class="fas ${_whItemSortCol==='qty'?(_whItemSortAsc?'fa-sort-up':'fa-sort-down'):'fa-sort'}" style="font-size:9px;opacity:${_whItemSortCol==='qty'?1:.3}"></i></th>
       <th style="text-align:right">RESERVED</th>
       <th style="text-align:right">AVAILABLE</th>
-      <th style="text-align:right">UNIT COST</th>
-      <th style="text-align:right">TOTAL VALUE</th>
+      ${_whSortHeader('cost','UNIT COST')}
+      <th style="text-align:right;cursor:pointer;user-select:none" onclick="_whItemSortCol='value';_whItemSortAsc=_whItemSortCol==='value'?!_whItemSortAsc:true;_whRenderTab()">TOTAL VALUE <i class="fas ${_whItemSortCol==='value'?(_whItemSortAsc?'fa-sort-up':'fa-sort-down'):'fa-sort'}" style="font-size:9px;opacity:${_whItemSortCol==='value'?1:.3}"></i></th>
       <th style="width:110px">STOCK LEVEL</th>
       <th>ACTIONS</th>
     </tr></thead>
@@ -21047,10 +21074,10 @@ function _whItemsHTML(){
   </div>
   <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;flex-wrap:wrap;gap:8px">
     <div style="font-size:11px;color:var(--text-secondary)">
-      Showing <strong style="color:var(--text-primary)">${_whItemPage*_WH_PAGE_SIZE+1}–${Math.min((_whItemPage+1)*_WH_PAGE_SIZE,totalFiltered)}</strong> of <strong style="color:var(--text-primary)">${totalFiltered}</strong> items
+      Showing <strong style="color:var(--text-primary)">${_whItemPageSize===0?totalFiltered:Math.min(_whItemPage*ps+1,totalFiltered)}–${_whItemPageSize===0?totalFiltered:Math.min((_whItemPage+1)*ps,totalFiltered)}</strong> of <strong style="color:var(--text-primary)">${totalFiltered}</strong> items
       · Total value: <strong style="color:var(--accent-green)">₱${fmtNum(_whItems().reduce((s,i)=>{const q=_whCalcQty(i.id);return s+(q.qtyOnHand*(i.unitCost||0));},0))}</strong>
     </div>
-    ${totalPages>1?`<div style="display:flex;align-items:center;gap:4px">
+    ${totalPages>1&&_whItemPageSize!==0?`<div style="display:flex;align-items:center;gap:4px">
       <button class="btn btn-secondary btn-sm" style="padding:3px 10px" ${_whItemPage===0?'disabled':''} onclick="_whItemPage=0;_whRenderTab()"><i class="fas fa-angle-double-left"></i></button>
       <button class="btn btn-secondary btn-sm" style="padding:3px 10px" ${_whItemPage===0?'disabled':''} onclick="_whItemPage--;_whRenderTab()"><i class="fas fa-angle-left"></i></button>
       <span style="font-size:12px;color:var(--text-secondary);padding:0 6px">Page ${_whItemPage+1} / ${totalPages}</span>
@@ -21383,9 +21410,12 @@ function _whRcvLinesHTML(){
     return`
   <tr>
     <td style="padding:5px 4px">
-      <select class="form-control" style="font-size:12px;width:100%" onchange="_whRcvLines[${idx}].itemId=this.value;_whRcvAutoFillCost(${idx})">
-        <option value="">— Select Item —</option>${itemOpts.replace(`value="${ln.itemId}"`,`value="${ln.itemId}" selected`)}
-      </select>
+      <div style="display:flex;gap:4px;align-items:center">
+        <select class="form-control" style="font-size:12px;flex:1" onchange="_whRcvLines[${idx}].itemId=this.value;_whRcvAutoFillCost(${idx})">
+          <option value="">— Select Item —</option>${itemOpts.replace(`value="${ln.itemId}"`,`value="${ln.itemId}" selected`)}
+        </select>
+        <button class="btn btn-secondary btn-sm" style="padding:3px 7px;flex-shrink:0" title="Scan barcode" onclick="_whScanBarcode(${idx})"><i class="fas fa-barcode"></i></button>
+      </div>
     </td>
     <td style="padding:5px 4px;width:75px">
       <input class="form-control" type="number" min="0.01" step="0.01" style="font-size:12px;width:100%" placeholder="0" value="${ln.qty||''}"
@@ -21451,6 +21481,99 @@ function _whUpdateRcvTotals(){
   });
   const el=$('#wh-rcv-grand');
   if(el)el.textContent=grand>0?'₱'+_whFmt(grand):'—';
+}
+
+// ── BARCODE SCANNER ──────────────────────────────────────────
+let _whScanStream=null;
+
+async function _whScanBarcode(lineIdx){
+  // Build modal
+  const modalHtml=`
+  <div class="modal-overlay open" data-dynamic="1" id="whBarcodeModal">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fas fa-barcode" style="color:var(--accent-blue);margin-right:8px"></i>Scan Barcode</div>
+        <button class="modal-close" onclick="_whStopScan()"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body" style="padding:16px">
+        <div id="wh-scan-status" style="font-size:12px;color:var(--text-muted);margin-bottom:10px;text-align:center">
+          Starting camera…
+        </div>
+        <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:4/3;margin-bottom:12px">
+          <video id="wh-scan-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+            <div style="width:60%;height:40%;border:2px solid rgba(56,139,253,.8);border-radius:6px;box-shadow:0 0 0 9999px rgba(0,0,0,.4)"></div>
+          </div>
+        </div>
+        <div style="text-align:center;margin-bottom:10px;font-size:11px;color:var(--text-muted)">— or enter barcode manually —</div>
+        <div style="display:flex;gap:6px">
+          <input id="wh-scan-manual" class="form-control" placeholder="Type or paste barcode…" style="flex:1"
+            onkeydown="if(event.key==='Enter')_whScanManual(${lineIdx})">
+          <button class="btn btn-primary btn-sm" onclick="_whScanManual(${lineIdx})">Find</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend',modalHtml);
+
+  // Try native BarcodeDetector (Chrome/Edge/Android)
+  const video=document.getElementById('wh-scan-video');
+  const status=document.getElementById('wh-scan-status');
+  if(!('BarcodeDetector' in window)){
+    status.textContent='Camera scanning not supported on this browser. Use manual entry below.';
+    status.style.color='var(--accent-amber)';
+    return;
+  }
+  try{
+    _whScanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    video.srcObject=_whScanStream;
+    status.textContent='Point camera at barcode…';
+    status.style.color='var(--accent-green)';
+    const detector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','qr_code','upc_a','upc_e','data_matrix']});
+    const scan=async()=>{
+      if(!document.getElementById('whBarcodeModal'))return; // modal closed
+      try{
+        const barcodes=await detector.detect(video);
+        if(barcodes.length){
+          const code=barcodes[0].rawValue;
+          _whStopScan();
+          _whApplyScan(lineIdx,code);
+          return;
+        }
+      }catch{}
+      requestAnimationFrame(scan);
+    };
+    video.onloadedmetadata=()=>requestAnimationFrame(scan);
+  }catch(e){
+    status.textContent='Camera access denied. Use manual entry below.';
+    status.style.color='var(--accent-red)';
+  }
+}
+
+function _whStopScan(){
+  if(_whScanStream){_whScanStream.getTracks().forEach(t=>t.stop());_whScanStream=null;}
+  const m=document.getElementById('whBarcodeModal');if(m)m.remove();
+}
+
+function _whScanManual(lineIdx){
+  const val=(document.getElementById('wh-scan-manual')?.value||'').trim();
+  if(!val){showToast('Enter a barcode value','warning');return;}
+  _whStopScan();
+  _whApplyScan(lineIdx,val);
+}
+
+function _whApplyScan(lineIdx,code){
+  // Match against item barcode field, then code field, then name
+  const items=_whItems();
+  const found=items.find(i=>i.barcode===code)||items.find(i=>i.code===code)||items.find(i=>i.name===code);
+  if(!found){
+    showToast(`No item found for barcode "${code}"`, 'warning', 5000);
+    return;
+  }
+  _whRcvLines[lineIdx].itemId=found.id;
+  _whRcvAutoFillCost(lineIdx);
+  _whRefreshRcv();
+  showToast(`Found: ${found.name}`,'success');
 }
 
 function _whRcvAutoFillCost(idx){
@@ -22804,6 +22927,10 @@ function _whShowAddItem(editId){
             <input class="form-control" id="wh-add-code" placeholder="MAT-001" value="${existing?.code||''}">
           </div>
           <div class="form-group">
+            <label class="form-label">Barcode / QR <span style="font-size:10px;color:var(--text-secondary)">(for scanner lookup)</span></label>
+            <input class="form-control" id="wh-add-barcode" placeholder="e.g. 4806512345678" value="${existing?.barcode||''}">
+          </div>
+          <div class="form-group">
             <label class="form-label">Category *</label>
             <select class="form-control" id="wh-add-cat">
               ${cats.map(c=>`<option ${(existing?.category||'Materials')===c?'selected':''}>${c}</option>`).join('')}
@@ -22863,6 +22990,7 @@ function _whSaveItem(editId){
     if(idx!==-1){
       Object.assign(AppState.data.warehouseItems[idx],{
         name,code:$('#wh-add-code')?.value.trim(),
+        barcode:$('#wh-add-barcode')?.value.trim(),
         category:$('#wh-add-cat')?.value,unit:$('#wh-add-unit')?.value.trim(),
         unitCost:parseFloat($('#wh-add-cost')?.value||0),
         minStock:parseFloat($('#wh-add-min')?.value||0),
@@ -22878,6 +23006,7 @@ function _whSaveItem(editId){
     const id=_whNextId('WH-',AppState.data.warehouseItems);
     AppState.data.warehouseItems.push({
       id,name,code:$('#wh-add-code')?.value.trim(),
+      barcode:$('#wh-add-barcode')?.value.trim(),
       category:$('#wh-add-cat')?.value,unit:$('#wh-add-unit')?.value.trim(),
       unitCost:parseFloat($('#wh-add-cost')?.value||0),
       minStock:parseFloat($('#wh-add-min')?.value||0),
