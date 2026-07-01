@@ -399,6 +399,7 @@ canvas{display:block}
     <div id="library" class="page"></div>
     <div id="progress" class="page"></div>
     <div id="kpi" class="page"></div>
+    <div id="analytics" class="page"></div>
     <div id="dailymeeting" class="page"></div>
 <div id="calendar" class="page"></div>
     <div id="reports" class="page"></div>
@@ -1002,6 +1003,7 @@ const NAV_ITEMS=[
 {id:'library',label:'Reference Library',icon:'fas fa-book',section:'Control'},
 {id:'progress',label:'Progress',icon:'fas fa-chart-line',section:'Control'},
 {id:'kpi',label:'KPI Analytics',icon:'fas fa-tachometer-alt',section:'Analytics'},
+{id:'analytics',label:'Advanced Analytics',icon:'fas fa-chart-bar',section:'Analytics'},
 {id:'dailymeeting',label:'Daily Meeting',icon:'fas fa-clipboard-check',section:'Analytics'},
 {id:'calendar',label:'Calendar',icon:'fas fa-calendar-alt',section:'Analytics'},
 {id:'reports',label:'Reports',icon:'fas fa-file-alt',section:'Analytics'},
@@ -1526,20 +1528,18 @@ setTimeout(()=>{t.style.opacity='0';t.style.transform='translateX(20px)';t.style
 
 function buildSidebar(){
 let html='',lastSec='';
-// Module access control — hide blocked modules for non-admin users
-const _blockedMods=(()=>{
-  const uid=typeof _currentUser!=='undefined'&&_currentUser?_currentUser.uid:null;
-  const profile=typeof _currentUserProfile!=='undefined'?_currentUserProfile:null;
-  if(!uid||!profile||profile.isAdmin)return[];
-  try{return JSON.parse(localStorage.getItem('shic_blocked_'+uid)||'[]');}catch{return[];}
-})();
+// Module access control — hide modules the user has no access to
+const _uid=typeof _currentUser!=='undefined'&&_currentUser?_currentUser.uid:null;
+const _profile=typeof _currentUserProfile!=='undefined'?_currentUserProfile:null;
+const _isAdm=_profile&&(_profile.isAdmin||_profile.role==='Admin');
+const _userPerms=(!_isAdm&&_uid&&typeof getModulePerms==='function')?getModulePerms(_uid):{};
 
 NAV_ITEMS.forEach(item=>{
 if(item.section!==lastSec){html+=`<div class="nav-section"><div class="nav-section-label">${item.section}</div></div>`;lastSec=item.section;}
 const badge={actions:(AppState.data.actions||[]).filter(a=>a.status==='overdue').length,
 qaqc:(AppState.data.qaqc||[]).filter(q=>q.type==='NCR'&&q.status==='open').length,
 risks:(AppState.data.risks||[]).filter(r=>r.status==='active').length}[item.id];
-if(_blockedMods.includes(item.id))return; // blocked by admin
+if(!_isAdm&&(_userPerms[item.id]==='none'))return; // no access
 html+=`<div class="nav-item ${AppState.currentPage===item.id?'active':''}" onclick="navigate('${item.id}')" id="nav-${item.id}">
 <span class="nav-icon"><i class="${item.icon}"></i></span><span class="nav-label">${item.label}</span>
 ${badge?`<span class="nav-badge">${badge}</span>`:''}</div>`;});
@@ -1691,7 +1691,7 @@ if (!window._snapshotCaptured) {
 const map={dashboard:renderDashboard,projects:renderProjects,tasks:renderTasks,gantt:renderGantt,
 resources:renderResources,manpower:renderManpower,materials:renderMaterials,procurement:renderProcurement,warehouse:renderWarehouse,
 costs:renderCosts,qaqc:renderQAQC,risks:renderRisks,actions:renderActions,documents:renderDocuments,
-progress:renderProgress,kpi:renderKPI,dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist,prospects:renderProspects,library:renderLibrary,
+progress:renderProgress,kpi:renderKPI,analytics:typeof renderAnalytics==='function'?renderAnalytics:null,dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist,prospects:renderProspects,library:renderLibrary,
 trash:typeof renderTrash==='function'?renderTrash:null,
 deletionRequests:typeof renderDeletionRequests==='function'?renderDeletionRequests:null};
 if(map[pid])map[pid]();}
@@ -7446,6 +7446,7 @@ setInterval(()=>{if(_m365LoggedIn)AppState.save();},30000);
    showPatchImport,applyPatch,removePatch,previewPatchFile,checkForUpdates,
    renderUserManagement,approveUser,rejectUser,suspendUser,toggleAdmin,
    deleteUser,restoreUser,showModuleAccess,saveModuleAccess,
+   hasModulePermission,getModulePermission,getModulePerms,setModulePerms,PERM_LEVELS,PERM_LABELS,PERM_COLORS,
    uploadDoc,showDocDetail,saveDocDetail,downloadDoc,viewDoc,deleteDoc,
    attachFileToDoc,renderDocTable,searchDocs,exportDocsCsv,
    showAddProcurement,showEditProcurement,saveProcurement,deleteProcurement,importProcurement,previewProcImport,executeProcImport,
@@ -19553,56 +19554,105 @@ const ALL_MODULES=[
   {id:'calendar',label:'Calendar',icon:'fa-calendar'},
   {id:'reports',label:'Reports',icon:'fa-file-alt'},
   {id:'masterlist',label:'Asset Masterlist',icon:'fa-clipboard-list'},
+  {id:'warehouse',label:'Warehouse',icon:'fa-warehouse'},
+  {id:'prospects',label:'Prospects',icon:'fa-binoculars'},
+  {id:'settings',label:'Settings',icon:'fa-cog'},
 ];
 
-function getBlockedModules(uid){
-  try{return JSON.parse(localStorage.getItem('shic_blocked_'+uid)||'[]');}catch{return[];}
+// Permission levels: none < view < edit < manage
+const PERM_LEVELS={none:0,view:1,edit:2,manage:3};
+const PERM_LABELS={none:'No Access',view:'View Only',edit:'Edit',manage:'Manage'};
+const PERM_COLORS={none:'var(--accent-red)',view:'var(--accent-amber)',edit:'var(--accent-blue)',manage:'var(--accent-green)'};
+
+function _getPermKey(uid){return'shic_perms_'+uid;}
+
+function getModulePerms(uid){
+  try{
+    const stored=JSON.parse(localStorage.getItem(_getPermKey(uid))||'null');
+    if(stored)return stored;
+    // Migrate from old block-list format
+    const blocked=JSON.parse(localStorage.getItem('shic_blocked_'+uid)||'[]');
+    const perms={};
+    ALL_MODULES.forEach(m=>{perms[m.id]=blocked.includes(m.id)?'none':'edit';});
+    return perms;
+  }catch{return{};}
 }
-function setBlockedModules(uid,list){
-  localStorage.setItem('shic_blocked_'+uid,JSON.stringify(list));
+
+function setModulePerms(uid,perms){
+  localStorage.setItem(_getPermKey(uid),JSON.stringify(perms));
+}
+
+// Returns the permission level string ('none','view','edit','manage') for the current user on a module
+function getModulePermission(moduleId){
+  const profile=typeof _currentUserProfile!=='undefined'?_currentUserProfile:null;
+  if(!profile)return'none';
+  if(profile.isAdmin||profile.role==='Admin')return'manage';
+  const uid=typeof _currentUser!=='undefined'&&_currentUser?_currentUser.uid:null;
+  if(!uid)return'none';
+  const perms=getModulePerms(uid);
+  return perms[moduleId]||'edit'; // default: edit access for unlisted modules
+}
+
+// Returns true if current user has at least `minLevel` permission for `moduleId`
+function hasModulePermission(moduleId,minLevel='edit'){
+  const level=getModulePermission(moduleId);
+  return(PERM_LEVELS[level]||0)>=(PERM_LEVELS[minLevel]||0);
+}
+
+// Keep backward compat
+function getBlockedModules(uid){
+  const perms=getModulePerms(uid);
+  return Object.entries(perms).filter(([,v])=>v==='none').map(([k])=>k);
 }
 
 function showModuleAccess(uid,userName){
-  const blocked=getBlockedModules(uid);
-  const loadAndShow=(fbBlocked)=>{
-    const effective=fbBlocked||blocked;
-    $('#genericModalTitle').textContent='Module Access — '+userName;
-    $('#genericModalBody').innerHTML=`
-    <div style="padding:8px 12px;background:rgba(248,81,73,.08);border-radius:7px;margin-bottom:14px;font-size:11px;border-left:3px solid var(--accent-red)">
-      <i class="fas fa-lock" style="color:var(--accent-red);margin-right:6px"></i>
-      <strong>Checked = BLOCKED.</strong> The user will not see blocked modules in their sidebar.
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-      ${ALL_MODULES.map(m=>`
-      <label style="display:flex;align-items:center;gap:8px;padding:9px;background:var(--bg-hover);border-radius:7px;cursor:pointer;font-size:12px;border:1px solid ${effective.includes(m.id)?'rgba(248,81,73,.3)':'var(--border)'}">
-        <input type="checkbox" class="mod-access-chk" value="${m.id}" ${effective.includes(m.id)?'checked':''} style="width:14px;height:14px;cursor:pointer" onchange="this.closest('label').style.border='1px solid '+(this.checked?'rgba(248,81,73,.3)':'var(--border)')">
-        <i class="fas fa-${m.icon||'circle'}" style="color:${effective.includes(m.id)?'var(--accent-red)':'var(--text-muted)'};font-size:11px;width:14px"></i>
-        ${m.label}
-      </label>`).join('')}
-    </div>
-    <div style="margin-top:12px;font-size:11px;color:var(--text-secondary)">
-      <i class="fas fa-info-circle" style="margin-right:5px"></i>
-      Changes apply immediately when the user next loads the sidebar.
-      Admins always see all modules.
-    </div>`;
-    $('#genericModalFooter').innerHTML=`
-      <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
-      <button class="btn btn-danger" onclick="saveModuleAccess('${uid}',true)"><i class="fas fa-lock-open"></i> Allow All</button>
-      <button class="btn btn-primary" onclick="saveModuleAccess('${uid}')"><i class="fas fa-save"></i> Save Access</button>`;
-    openModal('genericModal');
-  };
-  loadAndShow(null);
+  const perms=getModulePerms(uid);
+  $('#genericModalTitle').textContent='Module Permissions — '+userName;
+  $('#genericModalBody').innerHTML=`
+  <div style="padding:8px 12px;background:rgba(56,139,253,.08);border-radius:7px;margin-bottom:14px;font-size:11px;border-left:3px solid var(--accent-blue)">
+    <i class="fas fa-shield-alt" style="color:var(--accent-blue);margin-right:6px"></i>
+    Set the permission level per module. <strong>Manage</strong> = full control (approve, delete, configure).
+    <strong>Edit</strong> = create &amp; edit. <strong>View</strong> = read-only. <strong>No Access</strong> = hidden.
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    ${ALL_MODULES.map(m=>{
+      const cur=perms[m.id]||'edit';
+      return`<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg-hover);border-radius:7px;border:1px solid var(--border)">
+        <i class="fas ${m.icon}" style="color:${PERM_COLORS[cur]};font-size:11px;width:14px;flex-shrink:0"></i>
+        <span style="font-size:11px;flex:1;font-weight:500">${m.label}</span>
+        <select class="mod-perm-sel" data-mod="${m.id}" style="font-size:10px;padding:2px 4px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:${PERM_COLORS[cur]}" onchange="(function(s){s.style.color=PERM_COLORS[s.value]||'inherit'})(this)">
+          ${Object.keys(PERM_LEVELS).map(l=>`<option value="${l}" ${cur===l?'selected':''}>${PERM_LABELS[l]}</option>`).join('')}
+        </select>
+      </div>`;
+    }).join('')}
+  </div>
+  <div style="margin-top:10px;font-size:10px;color:var(--text-muted)">
+    <i class="fas fa-info-circle" style="margin-right:4px"></i>Changes take effect on the user's next page load. Admins always have Manage on all modules.
+  </div>`;
+  $('#genericModalFooter').innerHTML=`
+    <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+    <button class="btn btn-warning btn-sm" onclick="saveModuleAccess('${uid}',false,true)"><i class="fas fa-eye"></i> Set All View</button>
+    <button class="btn btn-danger btn-sm" onclick="saveModuleAccess('${uid}',true)"><i class="fas fa-lock-open"></i> Set All Edit</button>
+    <button class="btn btn-primary" onclick="saveModuleAccess('${uid}')"><i class="fas fa-save"></i> Save</button>`;
+  openModal('genericModal');
 }
 
-function saveModuleAccess(uid,allowAll=false){
-  const blocked=[];
-  if(!allowAll){
-    document.querySelectorAll('.mod-access-chk:checked').forEach(cb=>blocked.push(cb.value));
+function saveModuleAccess(uid,setAll=false,setView=false){
+  const perms={};
+  if(setAll){
+    ALL_MODULES.forEach(m=>{perms[m.id]='edit';});
+  } else if(setView){
+    ALL_MODULES.forEach(m=>{perms[m.id]='view';});
+  } else {
+    document.querySelectorAll('.mod-perm-sel').forEach(sel=>{
+      perms[sel.dataset.mod]=sel.value;
+    });
   }
-  setBlockedModules(uid,blocked);
+  setModulePerms(uid,perms);
   closeModal('genericModal');
-  buildSidebar(); // refresh sidebar for current user if it's themselves
-  showToast(allowAll?'All modules unlocked for user':'Module access updated','success');
+  buildSidebar();
+  showToast('Module permissions updated for '+uid,'success');
+  if(typeof auditLog==='function')auditLog('permissions_update','Users','Module Permissions',uid,null,perms,'Admin updated module permissions');
 }
 
 
@@ -21715,9 +21765,10 @@ function _whRequestsHTML(){
     const displayCat=item?.category||r.resourceType||'—';
     const q=isStock?_whCalcQty(r.itemId):{qtyOnHand:0,qtyAvailable:0};
     const hasStock=isStock&&q.qtyAvailable>=r.qty;
-    const canApprove=isAdminUser()&&r.status==='pending';
-    const canRelease=isAdminUser()&&r.status==='approved'&&isStock&&hasStock;
-    const canStartPR=isAdminUser()&&(r.status==='pending'||r.status==='approved')&&!r.prId;
+    const _whCanManage=typeof hasModulePermission==='function'?hasModulePermission('warehouse','manage'):isAdminUser();
+    const canApprove=_whCanManage&&r.status==='pending';
+    const canRelease=_whCanManage&&r.status==='approved'&&isStock&&hasStock;
+    const canStartPR=_whCanManage&&(r.status==='pending'||r.status==='approved')&&!r.prId;
     const sc=statusColor[r.status]||'#555';
     return`<tr>
       <td style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)">
@@ -22242,6 +22293,7 @@ function _whRcvImportExecute(){
 
 // ── SAVE HELPERS ─────────────────────────────────────────────
 async function _whSaveReceive(){
+  if(typeof hasModulePermission==='function'&&!hasModulePermission('warehouse','edit')){showToast('You have view-only access to Warehouse','warning');return;}
   const date=$('#wh-rcv-date')?.value||new Date().toISOString().slice(0,10);
   const ref=$('#wh-rcv-ref')?.value.trim();
   const vendor=$('#wh-rcv-vendor')?.value.trim();
@@ -22297,6 +22349,7 @@ async function _whSaveReceive(){
 }
 
 function _whSaveIssue(){
+  if(typeof hasModulePermission==='function'&&!hasModulePermission('warehouse','edit')){showToast('You have view-only access to Warehouse','warning');return;}
   const type=$('#wh-iss-type')?.value||'issue';
   const bu=$('#wh-iss-bu')?.value||'SHIC';
   const projId=$('#wh-iss-proj')?.value;
@@ -22800,6 +22853,7 @@ function _whShowAddItem(editId){
 }
 
 function _whSaveItem(editId){
+  if(typeof hasModulePermission==='function'&&!hasModulePermission('warehouse','edit')){showToast('You have view-only access to Warehouse','warning');return;}
   const name=$('#wh-add-name')?.value.trim();
   if(!name){showToast('Item name required','error');return;}
   if(!AppState.data.warehouseItems)AppState.data.warehouseItems=[];
@@ -22845,6 +22899,7 @@ function _whSaveItem(editId){
 function _whEditItem(id){_whShowAddItem(id);}
 
 function _whDeleteItem(id){
+  if(typeof hasModulePermission==='function'&&!hasModulePermission('warehouse','manage')){showToast('Only Warehouse Managers can delete items','warning');return;}
   if(!confirm('Delete this warehouse item? This will not delete its transaction history.'))return;
   const idx=(AppState.data.warehouseItems||[]).findIndex(i=>i.id===id);
   if(idx!==-1){
