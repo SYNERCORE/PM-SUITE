@@ -24997,25 +24997,32 @@ setTimeout(_ensureVersionBanner, 500);
 const PRESYNC_KEY = 'shic_presync_backup';
 function _savePreSyncSnapshot() {
   try {
+    // Only snapshot the arrays needed for corruption detection — not full AppState
+    // This keeps the backup small enough to avoid localStorage quota errors
+    const keys = ['projects','tasks','equipment','tools','vehicles','consumables','manpower'];
+    const slim = {};
+    keys.forEach(k => { if (AppState.data[k]?.length) slim[k] = AppState.data[k].length; });
     const snap = {
       ts: Date.now(),
       iso: new Date().toISOString(),
-      data: AppState.data,
+      counts: slim, // store counts only, not full arrays
       version: HARDENING_VERSION,
     };
     localStorage.setItem(PRESYNC_KEY, JSON.stringify(snap));
   } catch(e) {
-    // Quota error — silently skip (don't break sync)
-    console.warn('[Snapshot] Could not save pre-sync snapshot:', e.message);
+    // Quota exceeded — silently skip, sync continues normally
   }
 }
 function _detectDataCorruption() {
   // Heuristic: if previously had data and now everything is empty
   try {
     const snap = JSON.parse(localStorage.getItem(PRESYNC_KEY) || 'null');
-    if (!snap || !snap.data) return null;
+    if (!snap) return null;
     const arrays = ['projects','tasks','equipment','tools','vehicles','consumables','manpower'];
-    const prevTotal = arrays.reduce((s, k) => s + (snap.data[k]?.length || 0), 0);
+    // Support both slim (counts only) and legacy (full data) snapshot formats
+    const prevTotal = snap.counts
+      ? Object.values(snap.counts).reduce((s, v) => s + v, 0)
+      : arrays.reduce((s, k) => s + (snap.data?.[k]?.length || 0), 0);
     const currTotal = arrays.reduce((s, k) => s + (AppState.data[k]?.length || 0), 0);
     // Skip check if SP is connected — data lives in SP lists and may not be in local AppState yet
     if (typeof _spConnected !== 'undefined' && _spConnected) return null;
