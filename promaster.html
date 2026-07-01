@@ -242,6 +242,71 @@ canvas{display:block}
   /* Reorder banner — stack cards */
   #wh-undo-toast{width:90vw;min-width:0;left:5vw;transform:none}
 }
+
+/* ── Skeleton loading screens (Phase D1) ──────────────────── */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+.skeleton-line, .skeleton-card {
+  background: linear-gradient(90deg, var(--bg-hover) 25%, var(--bg-tertiary,#21262d) 50%, var(--bg-hover) 75%);
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.4s infinite linear;
+  border-radius: 5px;
+}
+.skeleton-line { height: 14px; margin-bottom: 8px; }
+.skeleton-wrap { pointer-events: none; }
+
+/* ── Consistent empty states (Phase D2) ──────────────────── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-secondary);
+  min-height: 180px;
+}
+.empty-state .empty-icon {
+  font-size: 36px;
+  margin-bottom: 14px;
+  opacity: 0.35;
+  display: block;
+}
+.empty-state .empty-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.empty-state .empty-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+/* ── Field validation (Phase D4) ──────────────────────────── */
+.field-error {
+  color: var(--accent-red);
+  font-size: 10px;
+  margin-top: 3px;
+}
+[data-field]:focus { outline: none; }
+[data-field].field-invalid { border-color: var(--accent-red) !important; }
+
+/* ── Keyboard shortcut badge ──────────────────────────────── */
+kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--bg-hover);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
 </style>
   <!-- PWA / Offline support -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -1516,6 +1581,246 @@ window.applyPalette = applyPalette;
 window.PALETTES = PALETTES;
 window._renderPalettePicker = _renderPalettePicker;
 
+// ── UTILITY: debounce ─────────────────────────────────────────
+function debounce(fn, ms = 250) {
+  let timer;
+  return function(...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), ms);
+  };
+}
+window.debounce = debounce;
+
+// ── UTILITY: getQtyOnHand / getWAC (Phase A1) ────────────────
+// Single source of truth for warehouse stock calculations.
+// Replaces duplicate reduce loops in dashboard.js / analytics.js / warehouse.js.
+function getQtyOnHand(itemId) {
+  const tx = (AppState.data.whTransactions || AppState.data.stockTransactions || []);
+  return tx.filter(t => !t._deleted).reduce((q, t) => {
+    const lines = t.lines || (t.itemId === itemId ? [t] : []);
+    lines.forEach(l => {
+      if ((l.itemId || t.itemId) !== itemId) return;
+      const qty = parseFloat(l.qty || t.qty || 0);
+      if (t.type === 'receive') q += qty;
+      else if (t.type === 'issue' || t.type === 'issue-shop' || t.type === 'issue-enduser') q -= qty;
+      else if (t.type === 'return') q += qty;
+      else if (t.type === 'adjust') q += qty;
+    });
+    return q;
+  }, 0);
+}
+
+function getWAC(itemId) {
+  const tx = (AppState.data.whTransactions || AppState.data.stockTransactions || []);
+  let totalQty = 0, totalCost = 0;
+  tx.filter(t => !t._deleted && t.type === 'receive').forEach(t => {
+    const lines = t.lines || (t.itemId === itemId ? [t] : []);
+    lines.forEach(l => {
+      if ((l.itemId || t.itemId) !== itemId) return;
+      const qty = parseFloat(l.qty || t.qty || 0);
+      const cost = parseFloat(l.unitCost || t.unitCost || 0);
+      totalQty += qty;
+      totalCost += qty * cost;
+    });
+  });
+  return totalQty > 0 ? totalCost / totalQty : 0;
+}
+
+window.getQtyOnHand = getQtyOnHand;
+window.getWAC = getWAC;
+
+// ── EVENT BUS (Phase C1) ──────────────────────────────────────
+// Lightweight pub/sub for decoupled module communication.
+// Usage: AppEvent.on('warehouse:saved', fn) / AppEvent.emit('warehouse:saved', data)
+const AppEvent = (() => {
+  const _listeners = {};
+  return {
+    on(event, fn) {
+      if (!_listeners[event]) _listeners[event] = [];
+      _listeners[event].push(fn);
+      return () => this.off(event, fn);
+    },
+    off(event, fn) {
+      if (_listeners[event]) _listeners[event] = _listeners[event].filter(f => f !== fn);
+    },
+    emit(event, data) {
+      (_listeners[event] || []).forEach(fn => { try { fn(data); } catch(e) { console.warn('[AppEvent]', event, e); } });
+    },
+    once(event, fn) {
+      const unsub = this.on(event, d => { fn(d); unsub(); });
+    },
+  };
+})();
+window.AppEvent = AppEvent;
+
+// ── MODULE REGISTRY (Phase C4) ───────────────────────────────
+// Modules self-register instead of needing manual switch-case in renderPage().
+// Usage: AppModules.register('warehouse', { render: renderWarehouse, onMount: fn })
+const AppModules = (() => {
+  const _mods = {};
+  return {
+    register(id, def) { _mods[id] = def; },
+    get(id) { return _mods[id] || null; },
+    has(id) { return !!_mods[id]; },
+    ids() { return Object.keys(_mods); },
+  };
+})();
+window.AppModules = AppModules;
+
+// ── AppState.mutate() (Phase C2) ─────────────────────────────
+// Centralized data mutation: validates, marks dirty, saves, and emits an event.
+// Usage: AppState.mutate('projects', arr => [...arr, newProject])
+AppState.mutate = function(key, fn) {
+  if (!this.data) this.ensureData();
+  const prev = this.data[key];
+  const next = fn(Array.isArray(prev) ? prev : []);
+  this.data[key] = next;
+  this.save();
+  AppEvent.emit('data:changed', { key, prev, next });
+  return next;
+};
+
+// ── FORM VALIDATION (Phase D4) ───────────────────────────────
+// Usage: const { valid, errors } = validateForm({ name: '', age: '5' }, { name: 'required', age: 'required|number|min:0' })
+function validateForm(fields, rules) {
+  const errors = {};
+  Object.entries(rules).forEach(([field, ruleStr]) => {
+    const val = (fields[field] === undefined || fields[field] === null) ? '' : String(fields[field]).trim();
+    const parts = ruleStr.split('|');
+    for (const rule of parts) {
+      const [name, arg] = rule.split(':');
+      if (name === 'required' && !val) { errors[field] = 'This field is required'; break; }
+      if (name === 'number' && val && isNaN(Number(val))) { errors[field] = 'Must be a number'; break; }
+      if (name === 'min' && val && Number(val) < Number(arg)) { errors[field] = `Minimum value is ${arg}`; break; }
+      if (name === 'max' && val && Number(val) > Number(arg)) { errors[field] = `Maximum value is ${arg}`; break; }
+      if (name === 'minlen' && val && val.length < Number(arg)) { errors[field] = `Minimum ${arg} characters`; break; }
+      if (name === 'email' && val && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) { errors[field] = 'Invalid email address'; break; }
+      if (name === 'date' && val && isNaN(new Date(val).getTime())) { errors[field] = 'Invalid date'; break; }
+    }
+  });
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
+// Apply validation errors to form fields — red border + message below each field
+function applyFormErrors(errors) {
+  // Clear previous
+  document.querySelectorAll('.field-error').forEach(el => el.remove());
+  document.querySelectorAll('[data-field]').forEach(el => el.style.borderColor = '');
+  Object.entries(errors).forEach(([field, msg]) => {
+    const el = document.querySelector(`[data-field="${field}"]`);
+    if (!el) return;
+    el.style.borderColor = 'var(--accent-red)';
+    const err = document.createElement('div');
+    err.className = 'field-error';
+    err.style.cssText = 'color:var(--accent-red);font-size:10px;margin-top:3px';
+    err.textContent = msg;
+    el.parentNode.insertBefore(err, el.nextSibling);
+    el.addEventListener('input', () => { el.style.borderColor = ''; err.remove(); }, { once: true });
+  });
+}
+
+window.validateForm = validateForm;
+window.applyFormErrors = applyFormErrors;
+
+</script>
+<script>
+// ── SHARED UI TEMPLATE HELPERS (Phase C3) ────────────────────
+// Named, readable replacements for cryptic one-letter helpers.
+// All functions return HTML strings for use in innerHTML assignments.
+
+// ── Empty state ──────────────────────────────────────────────
+// icon: FontAwesome class e.g. 'fas fa-boxes'
+// title: main heading
+// desc: supporting sentence
+// cta: optional { label, onclick } for a primary action button
+function tEmptyState(icon, title, desc, cta) {
+  return `<div class="empty-state">
+    <i class="${icon} empty-icon"></i>
+    <div class="empty-title">${title}</div>
+    <div class="empty-desc">${desc}</div>
+    ${cta ? `<button class="btn btn-primary btn-sm" onclick="${cta.onclick}">${cta.label}</button>` : ''}
+  </div>`;
+}
+
+// ── KPI stat card ────────────────────────────────────────────
+function tStatCard(icon, label, value, sub, color, bg, onclick) {
+  const clickAttr = onclick ? `onclick="${onclick}" title="Click to view"` : '';
+  return `<div class="stat-card" ${clickAttr} style="${onclick ? 'cursor:pointer' : ''}">
+    <div class="stat-icon" style="background:${bg}"><i class="${icon}" style="color:${color}"></i></div>
+    <div class="stat-info">
+      <div class="label">${label}</div>
+      <div class="value" style="color:${color}">${value}</div>
+      <div class="change">${sub}</div>
+    </div>
+  </div>`;
+}
+
+// ── Badge ────────────────────────────────────────────────────
+function tBadge(status) {
+  const map = {
+    active:      ['badge-blue','Active'],    completed:  ['badge-green','Completed'],
+    planned:     ['badge-purple','Planned'], done:       ['badge-green','Done'],
+    inprogress:  ['badge-blue','In Progress'], todo:     ['badge-gray','To Do'],
+    blocked:     ['badge-red','Blocked'],    approved:   ['badge-green','Approved'],
+    pending:     ['badge-amber','Pending'],  review:     ['badge-blue','In Review'],
+    issued:      ['badge-cyan','Issued'],    open:       ['badge-amber','Open'],
+    closed:      ['badge-green','Closed'],   mitigated:  ['badge-purple','Mitigated'],
+    overdue:     ['badge-red','Overdue'],    partial:    ['badge-amber','Partial'],
+    ordered:     ['badge-blue','Ordered'],   delivered:  ['badge-green','Delivered'],
+    'on-hold':   ['badge-gray','On Hold'],
+  };
+  const [cls, label] = map[status] || ['badge-gray', status || '—'];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+// ── Priority badge ───────────────────────────────────────────
+function tPriorityBadge(priority) {
+  const map = {
+    critical: ['badge-red','Critical'], high:   ['badge-amber','High'],
+    medium:   ['badge-blue','Medium'],  low:    ['badge-green','Low'],
+  };
+  const [cls, label] = map[priority] || ['badge-gray', priority || '—'];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+// ── Progress bar ─────────────────────────────────────────────
+function tProgressBar(pct, height = 6) {
+  const color = pct >= 80 ? 'var(--accent-green)' : pct >= 50 ? 'var(--accent-blue)' : pct >= 30 ? 'var(--accent-amber)' : 'var(--accent-red)';
+  return `<div style="display:flex;align-items:center;gap:6px">
+    <div class="progress-bar" style="flex:1;height:${height}px">
+      <div class="progress-fill" style="width:${Math.min(100,Math.max(0,pct))}%;background:${color}"></div>
+    </div>
+    <span style="font-size:10px;font-family:var(--font-mono);min-width:28px;text-align:right">${pct}%</span>
+  </div>`;
+}
+
+// ── Table wrapper with optional empty state ──────────────────
+function tTable(headers, rows, emptyMsg) {
+  if (!rows || !rows.length) {
+    return tEmptyState('fas fa-table', 'No records found', emptyMsg || 'Add entries to see them here.');
+  }
+  return `<div class="table-wrap"><table>
+    <thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+    <tbody>${rows.join('')}</tbody>
+  </table></div>`;
+}
+
+// ── Section header ───────────────────────────────────────────
+function tSectionHeader(title, icon, rightContent) {
+  return `<div class="section-header">
+    <div class="section-title"><i class="${icon}" style="margin-right:7px;color:var(--accent-blue)"></i>${title}</div>
+    ${rightContent || ''}
+  </div>`;
+}
+
+window.tEmptyState     = tEmptyState;
+window.tStatCard       = tStatCard;
+window.tBadge          = tBadge;
+window.tPriorityBadge  = tPriorityBadge;
+window.tProgressBar    = tProgressBar;
+window.tTable          = tTable;
+window.tSectionHeader  = tSectionHeader;
+
 </script>
 <script>
 function showToast(msg,type='info',dur=3500){
@@ -1550,11 +1855,83 @@ AppState.currentPage=pid;
 $$('.nav-item').forEach(e=>e.classList.remove('active'));
 const n=$(`#nav-${pid}`);if(n)n.classList.add('active');
 $$('.page').forEach(e=>e.classList.remove('active'));
-const p=$(`#${pid}`);if(p)p.classList.add('active');
+const p=$(`#${pid}`);if(p){p.classList.add('active');_showSkeleton(p);}
 const ni=NAV_ITEMS.find(n=>n.id===pid);
 $('#topbarTitle').textContent=ni?ni.label:'Settings';
 renderPage(pid);
 if(window.innerWidth<768)_closeMobileSidebar();}
+
+// ── Skeleton loading screen ───────────────────────────────────
+function _showSkeleton(container) {
+  if (!container || container.innerHTML.trim()) return;
+  container.innerHTML = `<div class="skeleton-wrap" style="padding:20px">
+    <div class="skeleton-line" style="width:40%;height:22px;margin-bottom:16px"></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:20px">
+      ${[1,2,3,4].map(()=>'<div class="skeleton-card" style="height:80px;border-radius:10px"></div>').join('')}
+    </div>
+    <div class="skeleton-line" style="width:100%;height:200px;border-radius:10px"></div>
+  </div>`;
+}
+
+// ── Global keyboard shortcuts (Phase D3) ─────────────────────
+(function _initKeyboardShortcuts() {
+  const _NAV_SHORTCUT_MAP = {};
+  // Alt+1…Alt+9 → first 9 nav items
+  NAV_ITEMS.slice(0, 9).forEach((item, i) => { _NAV_SHORTCUT_MAP['Alt+' + (i + 1)] = item.id; });
+
+  document.addEventListener('keydown', e => {
+    // Escape → close any open modal
+    if (e.key === 'Escape') {
+      const open = document.querySelector('.modal.open');
+      if (open) { closeModal(open.id); return; }
+    }
+    // Ctrl+K / Cmd+K → global search focus
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      const gs = $('#globalSearchInput');
+      if (gs) { gs.focus(); gs.select(); return; }
+      showToast('Use the search bar on each page (Ctrl+K)', 'info', 2000);
+      return;
+    }
+    // ? → show shortcut cheatsheet
+    if (e.key === '?' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+      _showShortcutHelp();
+      return;
+    }
+    // Alt+1…Alt+9 navigation
+    const combo = (e.altKey ? 'Alt+' : '') + e.key;
+    if (_NAV_SHORTCUT_MAP[combo] && document.activeElement.tagName !== 'INPUT') {
+      e.preventDefault();
+      navigate(_NAV_SHORTCUT_MAP[combo]);
+    }
+  });
+})();
+
+function _showShortcutHelp() {
+  const shortcuts = [
+    ['Escape', 'Close modal'],
+    ['Ctrl+K', 'Focus search'],
+    ['?', 'Show shortcuts'],
+    ['Alt+1', 'Dashboard'],
+    ['Alt+2', 'Projects'],
+    ['Alt+3', 'Prospects'],
+    ['Alt+4', 'Tasks'],
+    ['Alt+5', 'Gantt Chart'],
+    ['Alt+6', 'Resources'],
+    ['Alt+7', 'Manpower'],
+    ['Alt+8', 'Materials'],
+    ['Alt+9', 'Procurement'],
+  ];
+  const body = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:12px">
+    ${shortcuts.map(([k, d]) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px solid var(--border)">
+      <kbd style="font-family:var(--font-mono);font-size:11px;background:var(--bg-hover);padding:2px 8px;border-radius:4px;border:1px solid var(--border)">${k}</kbd>
+      <span style="color:var(--text-secondary)">${d}</span>
+    </div>`).join('')}
+  </div>`;
+  $('#genericModalTitle').textContent = 'Keyboard Shortcuts';
+  $('#genericModalBody').innerHTML = body;
+  openModal('genericModal');
+}
 
 
 // ── Pagination utility ──────────────────────────────────────────────────────
@@ -1694,7 +2071,22 @@ costs:renderCosts,qaqc:renderQAQC,risks:renderRisks,actions:renderActions,docume
 progress:renderProgress,kpi:renderKPI,analytics:()=>{if(typeof renderAnalytics==='function')renderAnalytics();else{const el=$('#analytics');if(el)el.innerHTML='<div class="empty-state"><p>Analytics module not loaded.</p></div>';}},dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist,prospects:renderProspects,library:renderLibrary,
 trash:typeof renderTrash==='function'?renderTrash:null,
 deletionRequests:typeof renderDeletionRequests==='function'?renderDeletionRequests:null};
-if(map[pid])map[pid]();}
+// ── Global error boundary (Phase A4) ─────────────────────────
+if (map[pid]) {
+  try {
+    map[pid]();
+  } catch(e) {
+    console.error('[renderPage]', pid, e);
+    const el = $(`#${pid}`);
+    if (el) el.innerHTML = `<div class="empty-state" style="padding:40px">
+      <i class="fas fa-exclamation-triangle" style="font-size:28px;color:var(--accent-red);display:block;margin-bottom:12px"></i>
+      <div style="font-weight:700;font-size:14px;margin-bottom:6px">Something went wrong</div>
+      <div style="color:var(--accent-red);font-size:12px;font-family:var(--font-mono);margin-bottom:16px">${e.message}</div>
+      <button class="btn btn-secondary btn-sm" onclick="renderPage('${pid}')">Try Again</button>
+    </div>`;
+    showToast(`Error loading ${pid}: ${e.message}`, 'error', 5000);
+  }
+}}
 
 function toggleSidebar(){
 const s=$('#sidebar');
@@ -7582,7 +7974,7 @@ ${(()=>{
 <div class="card"><div class="section-header"><div class="section-title">Active Projects</div><button class="btn btn-secondary btn-sm" onclick="navigate('projects')">View All</button></div>
 <div class="table-wrap"><table><thead><tr><th>Project</th><th>PM</th><th>Progress</th><th>Status</th></tr></thead><tbody>
 ${projects.filter(p=>p.status==='active').slice(0,4).map(p=>`<tr>
-<td><div style="font-size:12px;font-weight:500">${p.name.substring(0,26)}...</div><div style="font-size:10px;color:var(--text-secondary)">${p.id}</div></td>
+<td><div style="font-size:12px;font-weight:500">${(p.name||p.id||'').substring(0,26)}${(p.name||'').length>26?'…':''}</div><div style="font-size:10px;color:var(--text-secondary)">${p.id}</div></td>
 <td style="font-size:11px">${p.pm.split(' ')[0]}</td>
 <td><div style="display:flex;align-items:center;gap:6px"><div class="progress-bar" style="width:60px;height:5px"><div class="progress-fill" style="width:${p.progress}%;background:${pColor(p.progress)}"></div></div><span style="font-size:10px;font-family:var(--font-mono)">${p.progress}%</span></div></td>
 <td>${sBadge(p.status)}</td></tr>`).join('')}
@@ -7626,7 +8018,15 @@ drawDonut('donutMain',[active,completed,planned,Math.max(0,delayed)],['#388bfd',
 const bC=$('#budgetChartMain');if(bC){bC.width=bC.parentElement.offsetWidth-30;drawBudgetBars();}
 _renderDashWacChart();
 },50);
-let clockInterval=setInterval(()=>{const cl=$('#dashClock');if(cl&&AppState.currentPage==='dashboard')cl.textContent=new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});else clearInterval(clockInterval);},1000);}
+// Clock tick is separate from full re-render — only updates #dashClock, no data reads
+if (!window._dashClockInterval) {
+  window._dashClockInterval = setInterval(() => {
+    const cl = $('#dashClock');
+    if (cl && AppState.currentPage === 'dashboard') {
+      cl.textContent = new Date().toLocaleTimeString('en', {hour:'2-digit', minute:'2-digit'});
+    }
+  }, 1000);
+}}
 
 // ── Warehouse KPI section for Dashboard ──────────────────────
 function _renderWarehouseDashSection(){
@@ -19613,12 +20013,89 @@ function _aPieList(entries, total) {
 }
 
 function _analyticsExportCSV() {
-  const rows = [['Tab', _analyticsTab]];
-  const text = rows.map(r => r.join(',')).join('\n');
+  let rows = [];
+  const esc = v => {
+    const s = String(v === null || v === undefined ? '' : v);
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g,'""')}"` : s;
+  };
+  const row = cols => cols.map(esc).join(',');
+
+  if (_analyticsTab === 'spend') {
+    const tx = (AppState.data.whTransactions || []).filter(t => !t._deleted && t.type === 'receive');
+    rows.push(row(['Month', 'Vendor', 'Item', 'Category', 'Qty', 'Unit Cost', 'Total Cost']));
+    tx.forEach(t => {
+      const mo = (t.date || t.postedAt || '').slice(0, 7);
+      (t.lines || []).forEach(l => {
+        const item = (AppState.data.warehouseItems || []).find(i => i.id === l.itemId);
+        const cost = (parseFloat(l.qty) || 0) * (parseFloat(l.unitCost) || 0);
+        rows.push(row([mo, t.vendor || '', item?.name || l.itemId || '', item?.category || '', l.qty || 0, l.unitCost || 0, cost.toFixed(2)]));
+      });
+    });
+
+  } else if (_analyticsTab === 'suppliers') {
+    const tx = (AppState.data.whTransactions || []).filter(t => !t._deleted && t.type === 'receive' && t.vendor);
+    const byVendor = {};
+    tx.forEach(t => {
+      if (!byVendor[t.vendor]) byVendor[t.vendor] = { deliveries: 0, items: 0, spend: 0, lastDate: '' };
+      const v = byVendor[t.vendor];
+      v.deliveries++;
+      (t.lines || []).forEach(l => { v.items += parseFloat(l.qty) || 0; v.spend += (parseFloat(l.qty)||0)*(parseFloat(l.unitCost)||0); });
+      if ((t.date||'') > v.lastDate) v.lastDate = t.date||'';
+    });
+    rows.push(row(['Supplier', 'Deliveries', 'Units Received', 'Total Spend', 'Last Delivery']));
+    Object.entries(byVendor).sort((a,b)=>b[1].spend-a[1].spend).forEach(([vendor,v]) =>
+      rows.push(row([vendor, v.deliveries, v.items, v.spend.toFixed(2), v.lastDate])));
+
+  } else if (_analyticsTab === 'turnover') {
+    const items = typeof _whItems === 'function' ? _whItems() : (AppState.data.warehouseItems||[]).filter(i=>!i._deleted);
+    rows.push(row(['Item', 'Code', 'Category', 'On Hand', 'WAC', 'Inv. Value', 'YTD Issued', 'MTD Issued', 'Turnover']));
+    const ytdStart = new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0,10);
+    const mtdStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0,10);
+    items.forEach(it => {
+      const onHand = typeof getQtyOnHand === 'function' ? getQtyOnHand(it.id) : 0;
+      const wac = typeof getWAC === 'function' ? getWAC(it.id) : 0;
+      const txAll = (AppState.data.whTransactions||[]).filter(t=>!t._deleted && t.type!=='receive');
+      const ytd = txAll.filter(t=>(t.date||t.postedAt||'')>=ytdStart).reduce((s,t)=>s+(t.lines||[]).filter(l=>l.itemId===it.id).reduce((a,l)=>a+(parseFloat(l.qty)||0),0),0);
+      const mtd = txAll.filter(t=>(t.date||t.postedAt||'')>=mtdStart).reduce((s,t)=>s+(t.lines||[]).filter(l=>l.itemId===it.id).reduce((a,l)=>a+(parseFloat(l.qty)||0),0),0);
+      const invVal = onHand * wac;
+      const turnover = invVal > 0 ? (ytd * wac / invVal).toFixed(2) : '0.00';
+      rows.push(row([it.name, it.code||'', it.category||'', onHand, wac.toFixed(2), invVal.toFixed(2), ytd, mtd, turnover]));
+    });
+
+  } else if (_analyticsTab === 'procurement') {
+    const items = (AppState.data.procurement||[]).filter(p=>!p._deleted);
+    rows.push(row(['ID', 'Description', 'Supplier', 'Stage', 'Amount', 'Created', 'Updated']));
+    items.forEach(p => rows.push(row([p.id||'', p.description||'', p.supplier||'', p.stage||'', parseFloat(p.amount||0).toFixed(2), p.createdAt||'', p.updatedAt||''])));
+
+  } else if (_analyticsTab === 'manpower') {
+    const records = (AppState.data.manpower||[]).filter(r=>!r._deleted);
+    rows.push(row(['ID', 'Project', 'Trade/Discipline', 'Date', 'Mandays', 'Total Cost']));
+    records.forEach(r => rows.push(row([r.id||'', r.projectId||r.project||'', r.discipline||r.position||r.trade||'', r.date||r.weekStart||'', r.mandays||r.headcount||0, parseFloat(r.totalCost||r.cost||0).toFixed(2)])));
+
+  } else if (_analyticsTab === 'projects') {
+    const projects = (AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='prospect');
+    rows.push(row(['Project', 'Status', 'Progress%', 'Budget', 'Spent', 'EAC', 'Variance', 'CPI']));
+    projects.forEach(p => {
+      const budget = parseFloat(p.budget||p.contractValue||0);
+      const spent = parseFloat(p.actualCost||p.costToDate||0);
+      const progress = parseFloat(p.progress||p.completion||0);
+      const eac = progress > 0 ? (spent / (progress/100)) : budget;
+      const variance = budget - eac;
+      const cpi = spent > 0 && progress > 0 ? (progress/100*budget)/spent : 1;
+      rows.push(row([p.name||p.id, p.status, progress.toFixed(0), budget.toFixed(2), spent.toFixed(2), eac.toFixed(2), variance.toFixed(2), cpi.toFixed(2)]));
+    });
+  }
+
+  if (!rows.length) { showToast('No data to export for this tab', 'warning'); return; }
+  const csv = rows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = 'data:text/csv,' + encodeURIComponent('Analytics Export\n' + new Date().toISOString() + '\n\nSee individual tabs for data.');
+  a.href = url;
   a.download = 'analytics_' + _analyticsTab + '_' + new Date().toISOString().slice(0, 10) + '.csv';
   a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  showToast(`Exported ${rows.length - 1} rows`, 'success');
 }
 
 </script>
@@ -21478,7 +21955,7 @@ function _whItemsHTML(){
   <!-- Search & filter -->
   <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
     <input class="form-control" style="flex:1;min-width:200px" placeholder="Search name, code, barcode, category, location…" value="${_whItemSearch}"
-      oninput="_whItemSearch=this.value;_whItemPage=0;_whRenderTab()">
+      oninput="(window._whSearchDebounced||(window._whSearchDebounced=debounce(v=>{_whItemSearch=v;_whItemPage=0;_whRenderTab();},250)))(this.value)">
     <select class="form-control" style="width:160px" onchange="_whItemCat=this.value;_whItemPage=0;_whRenderTab()">
       ${cats.map(c=>`<option value="${c}" ${_whItemCat===c?'selected':''}>${c==='all'?'All Categories':c}</option>`).join('')}
     </select>
@@ -23698,7 +24175,7 @@ function renderMasterlist(){
   </div>
 
   <div class="filters-bar" style="margin-bottom:12px">
-    <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="mlSearchInput" placeholder="Search name, ID, category, project, supplier..." value="${mlSearch}" oninput="_resetPage('ml_personnel');_resetPage('ml_equipment');_resetPage('ml_tools');_resetPage('ml_vehicles');mlSearch=this.value;renderMlTab()"></div>
+    <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="mlSearchInput" placeholder="Search name, ID, category, project, supplier..." value="${mlSearch}" oninput="(window._mlSearchDebounced||(window._mlSearchDebounced=debounce(v=>{mlSearch=v;_resetPage('ml_personnel');_resetPage('ml_equipment');_resetPage('ml_tools');_resetPage('ml_vehicles');renderMlTab();},250)))(this.value)"></div>
     <select class="form-select" style="height:32px;width:150px" onchange="mlStatusFilter=this.value;renderMlTab()">
       <option value="all" ${mlStatusFilter==='all'?'selected':''}>All Statuses</option>
       <option value="available" ${mlStatusFilter==='available'?'selected':''}>Available</option>
