@@ -21410,12 +21410,12 @@ function _whRcvLinesHTML(){
     return`
   <tr>
     <td style="padding:5px 4px">
-      <div style="display:flex;gap:4px;align-items:center">
-        <select class="form-control" style="font-size:12px;flex:1" onchange="_whRcvLines[${idx}].itemId=this.value;_whRcvAutoFillCost(${idx})">
-          <option value="">— Select Item —</option>${itemOpts.replace(`value="${ln.itemId}"`,`value="${ln.itemId}" selected`)}
-        </select>
-        <button class="btn btn-secondary btn-sm" style="padding:3px 7px;flex-shrink:0" title="Scan barcode" onclick="_whScanBarcode(${idx})"><i class="fas fa-barcode"></i></button>
-      </div>
+      <select class="form-control" style="font-size:12px;width:100%" onchange="_whRcvLines[${idx}].itemId=this.value;_whRcvAutoFillCost(${idx})">
+        <option value="">— Select Item —</option>${itemOpts.replace(`value="${ln.itemId}"`,`value="${ln.itemId}" selected`)}
+      </select>
+    </td>
+    <td style="padding:5px 4px;width:36px;text-align:center">
+      <button class="btn btn-secondary btn-sm" style="padding:3px 7px;width:100%" title="Scan barcode" onclick="_whScanBarcode(${idx})"><i class="fas fa-barcode"></i></button>
     </td>
     <td style="padding:5px 4px;width:75px">
       <input class="form-control" type="number" min="0.01" step="0.01" style="font-size:12px;width:100%" placeholder="0" value="${ln.qty||''}"
@@ -21708,6 +21708,7 @@ function _whReceiveHTML(){
             <thead>
               <tr style="background:var(--bg-tertiary)">
                 <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left">Item</th>
+                <th style="padding:7px 8px;width:36px" title="Scan barcode"><i class="fas fa-barcode" style="color:var(--text-muted);font-size:11px"></i></th>
                 <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:75px">Qty</th>
                 <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:100px">Unit Cost (₱)</th>
                 <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--accent-green);text-align:left;width:105px">Line Total (₱) <i class="fas fa-pencil-alt" style="font-size:9px;opacity:.7" title="Enter total — unit cost auto-calculates"></i></th>
