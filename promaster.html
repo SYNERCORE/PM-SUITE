@@ -1722,6 +1722,19 @@ function applyFormErrors(errors) {
 window.validateForm = validateForm;
 window.applyFormErrors = applyFormErrors;
 
+// Lightweight required-field guard — highlights empty fields red, returns false if any empty
+function _req(ids) {
+  let ok = true;
+  ids.forEach(id => {
+    const el = document.getElementById(id); if (!el) return;
+    const empty = !String(el.value||'').trim();
+    el.style.borderColor = empty ? 'var(--accent-red)' : '';
+    if (empty) { ok = false; el.addEventListener('input',()=>el.style.borderColor='',{once:true}); }
+  });
+  return ok;
+}
+window._req = _req;
+
 </script>
 <script>
 // ── SHARED UI TEMPLATE HELPERS (Phase C3) ────────────────────
@@ -2222,8 +2235,21 @@ ${all.length?all.map(n=>`<div class="notif-item ${n.read?'':'unread'}" ${n.oncli
 $('#notifDot').style.display=unread?'':'none';}
 
 function markAllRead(){(AppState.data.notifications||[]).forEach(n=>n.read=true);renderNotifPanel();}
-function openModal(id){$(`#${id}`).classList.add('open');if(typeof _ssm!=='undefined')_ssm.startEdit();}
-function closeModal(id){const el=document.getElementById(id);if(!el)return;el.classList.remove('open');if(el.dataset.dynamic)el.remove();if(typeof _ssm!=='undefined')_ssm.endEdit();}
+let _modalOpener = null;
+function openModal(id){
+  const el=$(`#${id}`);if(!el)return;
+  _modalOpener = document.activeElement;
+  el.setAttribute('role','dialog');el.setAttribute('aria-modal','true');
+  el.classList.add('open');
+  const first=el.querySelector('input:not([type=hidden]),select,textarea,button:not([disabled])');
+  if(first)setTimeout(()=>first.focus(),50);
+  if(typeof _ssm!=='undefined')_ssm.startEdit();}
+function closeModal(id){
+  const el=document.getElementById(id);if(!el)return;
+  el.classList.remove('open');if(el.dataset.dynamic)el.remove();
+  if(_modalOpener&&_modalOpener.focus)try{_modalOpener.focus();}catch(_){}
+  _modalOpener=null;
+  if(typeof _ssm!=='undefined')_ssm.endEdit();}
 // Backdrop click intentionally disabled — accidental clicks outside a form panel
 // no longer close it. Use the ✕ button or Cancel to dismiss modals.
 
@@ -2238,16 +2264,17 @@ else if(type==='inspection')showAddInspection();
 else if(type==='po')showAddPO();
 else showToast('Use page-specific Add button','info');}
 
-function drawDonut(cid,vals,cols){
+const _ric=window.requestIdleCallback||(f=>setTimeout(f,16));
+function drawDonut(cid,vals,cols){_ric(()=>{
 const c=$(`#${cid}`);if(!c)return;
 const ctx=c.getContext('2d'),cx=c.width/2,cy=c.height/2,r=Math.min(cx,cy)-6,ir=r*.58,tot=vals.reduce((a,b)=>a+b,0)||1;
 ctx.clearRect(0,0,c.width,c.height);let ang=-Math.PI/2;
 vals.forEach((v,i)=>{const sl=(v/tot)*Math.PI*2;ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,ang,ang+sl);ctx.closePath();ctx.fillStyle=cols[i];ctx.fill();ang+=sl;});
 ctx.beginPath();ctx.arc(cx,cy,ir,0,Math.PI*2);
 const bg=getComputedStyle(document.documentElement).getPropertyValue('--bg-card').trim()||'#1c2333';
-ctx.fillStyle=bg;ctx.fill();}
+ctx.fillStyle=bg;ctx.fill();});}
 
-function drawBar(cid,labels,vals,col='#388bfd'){
+function drawBar(cid,labels,vals,col='#388bfd'){_ric(()=>{
 const c=$(`#${cid}`);if(!c)return;
 const ctx=c.getContext('2d'),W=c.width,H=c.height,pd={t:8,r:8,b:22,l:8};
 const cH=H-pd.t-pd.b,cW=W-pd.l-pd.r;
@@ -2258,9 +2285,9 @@ const bH=Math.max(0,(sv/mx)*cH),x=pd.l+i*(cW/vals.length)+2,y=pd.t+cH-bH;
 const g=ctx.createLinearGradient(x,y,x,y+Math.max(1,bH));g.addColorStop(0,col);g.addColorStop(1,col+'55');
 ctx.fillStyle=g;ctx.fillRect(x,y,bW,bH);
 ctx.fillStyle='#8b949e';ctx.font='9px Outfit,sans-serif';ctx.textAlign='center';
-ctx.fillText((labels[i]||'').substring(0,6),x+bW/2,H-4);});}
+ctx.fillText((labels[i]||'').substring(0,6),x+bW/2,H-4);});})}
 
-function drawLine(cid,datasets){
+function drawLine(cid,datasets){_ric(()=>{
 const c=$(`#${cid}`);if(!c)return;
 const ctx=c.getContext('2d'),W=c.width,H=c.height,pd={t:12,r:12,b:20,l:28};
 ctx.clearRect(0,0,W,H);
@@ -2276,9 +2303,9 @@ ctx.strokeStyle=ds.color;ctx.lineWidth=2;ctx.beginPath();let first=true;
 ds.data.forEach((v,i)=>{if(v===null)return;const x=pd.l+(i/(pts-1||1))*(W-pd.l-pd.r),y=pd.t+(1-v/mx)*(H-pd.t-pd.b);first?(ctx.moveTo(x,y),first=false):ctx.lineTo(x,y);});ctx.stroke();
 ctx.beginPath();first=true;
 ds.data.forEach((v,i)=>{if(v===null)return;const x=pd.l+(i/(pts-1||1))*(W-pd.l-pd.r),y=pd.t+(1-v/mx)*(H-pd.t-pd.b);first?(ctx.moveTo(x,y),first=false):ctx.lineTo(x,y);});
-ctx.lineTo(W-pd.r,H-pd.b);ctx.lineTo(pd.l,H-pd.b);ctx.closePath();ctx.fillStyle=ds.color+'18';ctx.fill();});}
+ctx.lineTo(W-pd.r,H-pd.b);ctx.lineTo(pd.l,H-pd.b);ctx.closePath();ctx.fillStyle=ds.color+'18';ctx.fill();});})}
 
-function drawGrouped(cid,labels,d1,d2){
+function drawGrouped(cid,labels,d1,d2){_ric(()=>{
 const c=$(`#${cid}`);if(!c)return;
 const ctx=c.getContext('2d'),W=c.width,H=c.height,pd={t:8,r:8,b:22,l:8};
 const cH=H-pd.t-pd.b,cW=W-pd.l-pd.r;
@@ -2287,7 +2314,7 @@ labels.forEach((l,i)=>{
 const x=pd.l+i*gW+gW*.1;
 ctx.fillStyle='rgba(56,139,253,0.25)';const h1=(d1[i]/mx)*cH;ctx.fillRect(x,pd.t+cH-h1,bW,h1);
 ctx.fillStyle='#388bfd';const h2=(d2[i]/mx)*cH;ctx.fillRect(x+bW+2,pd.t+cH-h2,bW,h2);
-ctx.fillStyle='#8b949e';ctx.font='9px Outfit';ctx.textAlign='center';ctx.fillText(l.replace('PRJ-','P'),x+bW,H-4);});}
+ctx.fillStyle='#8b949e';ctx.font='9px Outfit';ctx.textAlign='center';ctx.fillText(l.replace('PRJ-','P'),x+bW,H-4);});});}
 
 function sc(icon,label,value,sub,color,bg,onclick){
 const clickStyle=onclick?'cursor:pointer;transition:transform .12s,box-shadow .12s'+'':' ';
@@ -7918,6 +7945,14 @@ const dateStr=now.toLocaleDateString('en',{weekday:'long',year:'numeric',month:'
 const isAdm=typeof isAdminUser==='function'&&isAdminUser();
 const _budgetDisplay=isAdm?fmtNum(totalSpent):'●●●●●';
 const _budgetSub=isAdm?`${isNaN(budgetUtil)?0:budgetUtil}% of ${fmtNum(totalBudget)}`:'Admin only';
+// KPI trend arrows — compare to snapshot from previous render (resets on page reload)
+const _prev=window._dashKPISnap||{};
+window._dashKPISnap={projects:projects.length,avgProg,openRisks,openActions,totalMP,openNCR,delayed};
+const _tr=(now,prev,goodUp=true)=>{
+  if(prev===undefined)return'';const d=now-prev;if(!d)return'';
+  const good=(goodUp&&d>0)||(!goodUp&&d<0);
+  return` <span style="font-size:9px;font-weight:700;color:${good?'var(--accent-green)':'var(--accent-red)'}">${d>0?'↑':'↓'}${Math.abs(d)}</span>`;
+};
 
 $('#dashboard').innerHTML=`
 <div class="welcome-banner">
@@ -7929,16 +7964,16 @@ ${_renderRecentStrip()}
   <button onclick="setDashFilter('${v}')" style="padding:5px 14px;border-radius:20px;border:1px solid ${_dashDateFilter===v?'var(--accent-blue)':'var(--border)'};background:${_dashDateFilter===v?'rgba(56,139,253,.15)':'var(--bg-hover)'};color:${_dashDateFilter===v?'var(--accent-blue)':'var(--text-secondary)'};font-size:11px;font-weight:${_dashDateFilter===v?'700':'400'};cursor:pointer;transition:all .15s">${l}</button>`).join('')}
 </div>
 <div class="grid grid-4" style="margin-bottom:14px">
-${sc('fas fa-briefcase','Total Projects',projects.length,`${active} active`,'#388bfd','rgba(56,139,253,.15)',"navigate('projects')")}
-${sc('fas fa-chart-line','Avg Progress',avgProg+'%',`${completed} completed`,'#3fb950','rgba(63,185,80,.15)',"navigate('projects')")}
+${sc('fas fa-briefcase','Total Projects',projects.length+_tr(projects.length,_prev.projects),`${active} active`,'#388bfd','rgba(56,139,253,.15)',"navigate('projects')")}
+${sc('fas fa-chart-line','Avg Progress',avgProg+'%'+_tr(avgProg,_prev.avgProg),`${completed} completed`,'#3fb950','rgba(63,185,80,.15)',"navigate('projects')")}
 ${sc('fas fa-dollar-sign','Budget Used',_budgetDisplay,_budgetSub,'#f0a450','rgba(240,164,80,.15)',isAdm?"navigate('costs')":null)}
-${sc('fas fa-exclamation-triangle','Open Risks',openRisks,`${overdueAct} overdue actions`,'#f85149','rgba(248,81,73,.15)',"navigate('risks')")}
+${sc('fas fa-exclamation-triangle','Open Risks',openRisks+_tr(openRisks,_prev.openRisks,false),`${overdueAct} overdue actions`,'#f85149','rgba(248,81,73,.15)',"navigate('risks')")}
 </div>
 <div class="grid grid-4" style="margin-bottom:14px">
-${sc('fas fa-tasks','Action Items',openActions,`${overdueAct} overdue`,'#bc8cff','rgba(188,140,255,.15)',"navigate('actions')")}
-${sc('fas fa-hard-hat','Manpower Today',totalMP,'Across all sites','#39d3f2','rgba(57,211,242,.15)',"navigate('manpower')")}
-${sc('fas fa-check-double','Open NCRs',openNCR,'QA/QC tracking','#fb8f44','rgba(251,143,68,.15)',"navigate('qaqc')")}
-${sc('fas fa-flag','At Risk',delayed,`of ${active} active projects`,'#f85149','rgba(248,81,73,.15)',"navigate('projects')")}
+${sc('fas fa-tasks','Action Items',openActions+_tr(openActions,_prev.openActions,false),`${overdueAct} overdue`,'#bc8cff','rgba(188,140,255,.15)',"navigate('actions')")}
+${sc('fas fa-hard-hat','Manpower Today',totalMP+_tr(totalMP,_prev.totalMP),`Across all sites`,'#39d3f2','rgba(57,211,242,.15)',"navigate('manpower')")}
+${sc('fas fa-check-double','Open NCRs',openNCR+_tr(openNCR,_prev.openNCR,false),'QA/QC tracking','#fb8f44','rgba(251,143,68,.15)',"navigate('qaqc')")}
+${sc('fas fa-flag','At Risk',delayed+_tr(delayed,_prev.delayed,false),`of ${active} active projects`,'#f85149','rgba(248,81,73,.15)',"navigate('projects')")}
 </div>
 <div class="grid grid-3" style="margin-bottom:14px">
 <div class="card"><div class="card-title">Project Status Distribution</div>
@@ -16158,8 +16193,8 @@ $('#genericModalFooter').innerHTML=`<button class="btn btn-secondary" onclick="c
 openModal('genericModal');}
 
 function saveMpRecord(){
+if(!_req(['mpTrade','mpWeek'])){showToast('Fill in required fields','error');return;}
 const rec={id:'MP-'+((AppState.data.manpower||[]).length+1).toString().padStart(3,'0'),projectId:$('#mpProj').value,trade:$('#mpTrade').value,week:$('#mpWeek').value,planned:parseInt($('#mpPlan').value)||0,actual:parseInt($('#mpAct').value)||0,cost:parseFloat($('#mpCost').value)||0,shift:$('#mpShift').value,overtime:parseInt($('#mpOT').value)||0};
-if(!rec.trade){showToast('Trade/Discipline required','error');return;}
 if(!AppState.data.manpower)AppState.data.manpower=[];
 AppState.data.manpower.push(rec);AppState.save();closeModal('genericModal');renderManpower();showToast('Manpower record added','success');}
 
@@ -17436,6 +17471,8 @@ function saveProcurement(id){
     });
   }
 
+  if(typeof fireWebhook==='function'&&newStatus==='po_issued'&&oldStatus!==newStatus)
+    fireWebhook('po_approved',{poNumber:rec.poNumber||rec.id,vendor:rec.vendor,projectId:rec.projectId,amount:rec.amount,description:rec.description});
   closeModal('genericModal');
   renderProcurement();
   showToast(id?'Record updated':'Request created — REQ: '+rec.requestNumber,'success');
@@ -17563,8 +17600,8 @@ $('#genericModalFooter').innerHTML=`<button class="btn btn-secondary" onclick="c
 openModal('genericModal');}
 
 function saveInspection(){
+if(!_req(['gDesc','gInsp','gDate'])){showToast('Fill in required fields','error');return;}
 const item={id:'IR-'+((AppState.data.qaqc||[]).length+1).toString().padStart(3,'0'),projectId:$('#gProj').value,type:$('#gType').value,description:$('#gDesc').value,inspector:$('#gInsp').value,date:$('#gDate').value,discipline:$('#gDisc').value,result:$('#gRes').value,status:'pending'};
-if(!item.description){showToast('Description required','error');return;}
 AppState.data.qaqc.push(item);AppState.save();closeModal('genericModal');renderQAQC();showToast('IR created','success');buildSidebar();}
 
 
@@ -17637,8 +17674,8 @@ $('#genericModalFooter').innerHTML=`<button class="btn btn-secondary" onclick="c
 openModal('genericModal');}
 
 function saveRisk(){
+if(!_req(['gDesc','gOwner','gDate'])){showToast('Fill in required fields','error');return;}
 const r={id:'RSK-'+((AppState.data.risks||[]).length+1).toString().padStart(3,'0'),projectId:$('#gProj').value,description:$('#gDesc').value,category:$('#gCat').value,probability:parseInt($('#gProb').value)||3,impact:parseInt($('#gImp').value)||3,mitigation:$('#gMit').value,owner:$('#gOwner').value,dueDate:$('#gDate').value,status:'active'};
-if(!r.description){showToast('Description required','error');return;}
 AppState.data.risks.push(r);AppState.save();closeModal('genericModal');renderRisks();showToast('Risk added','success');buildSidebar();}
 
 </script>
@@ -17682,8 +17719,8 @@ $('#genericModalFooter').innerHTML=`<button class="btn btn-secondary" onclick="c
 openModal('genericModal');}
 
 function saveAction(){
+if(!_req(['gDesc','gAss','gDate'])){showToast('Fill in required fields','error');return;}
 const a={id:'ACT-'+((AppState.data.actions||[]).length+1).toString().padStart(3,'0'),projectId:$('#gProj').value,description:$('#gDesc').value,assignee:$('#gAss').value,source:$('#gSrc').value,dueDate:$('#gDate').value,priority:$('#gPri').value,status:'open'};
-if(!a.description){showToast('Description required','error');return;}
 AppState.data.actions.push(a);AppState.save();closeModal('genericModal');renderActions();showToast('Action created','success');buildSidebar();}
 
 function closeAction(id){const a=(AppState.data.actions||[]).find(a=>a.id===id);if(a){a.status='closed';AppState.save();renderActions();showToast('Action closed','success');buildSidebar();}}
@@ -20758,6 +20795,13 @@ ${renderSpPanel()}
       <div class="settings-item-info"><div class="title">${t}</div><div class="desc">${d}</div></div>
       <label class="toggle"><input type="checkbox" checked><span class="toggle-slider"></span></label>
     </div>`).join('')}
+    <div class="settings-item" style="flex-direction:column;align-items:flex-start;gap:8px">
+      <div class="settings-item-info"><div class="title"><i class="fas fa-bolt" style="color:var(--accent-blue);margin-right:5px"></i>Power Automate Webhook</div><div class="desc">POST to this URL on key events (low stock, PO approved, stock received). Leave blank to disable.</div></div>
+      <div style="display:flex;gap:8px;width:100%">
+        <input class="form-input" id="sWebhookUrl" placeholder="https://prod-xx.westus.logic.azure.com/workflows/…" value="${settings.webhookUrl||''}" style="flex:1;font-size:11px;font-family:var(--font-mono)">
+        <button class="btn btn-secondary btn-sm" onclick="_testWebhook()"><i class="fas fa-paper-plane"></i> Test</button>
+      </div>
+    </div>
   </div>
   <div class="card" style="grid-column:1/-1">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
@@ -20782,7 +20826,7 @@ ${renderSpPanel()}
         <div style="font-size:10px;color:var(--accent-amber);padding:6px 10px;background:rgba(248,81,73,.07);border-radius:6px;border-left:3px solid var(--accent-amber)">
           <i class="fas fa-shield-alt" style="margin-right:5px"></i><strong>Admin Only</strong> — affects all team members
         </div>
-        <button class="btn btn-secondary" onclick="showAuditLogPanel()"><i class="fas fa-history" style="margin-right:6px;color:var(--accent-blue)"></i> View SharePoint Audit Log</button>
+        <button class="btn btn-secondary" onclick="showAuditLogPanel()"><i class="fas fa-history" style="margin-right:6px;color:var(--accent-blue)"></i> Audit Trail</button>
         <button class="btn btn-secondary" onclick="showDropdownManager()"><i class="fas fa-list-ul" style="margin-right:6px;color:var(--accent-blue)"></i> Manage Dropdown Options</button>
       </div>
     </div>
@@ -20853,38 +20897,41 @@ ${renderSpPanel()}
 </div>`;
 }
 
-async function showAuditLogPanel(){
-  if(!isAdminUser()){showToast('Admins only','error');return;}
-  $('#genericModalTitle').textContent='SharePoint Audit Log';
-  $('#genericModalBody').innerHTML='<div style="padding:20px;text-align:center;color:var(--text-muted)"><i class="fas fa-spinner fa-spin" style="font-size:20px;display:block;margin-bottom:8px"></i>Loading audit log from SharePoint...</div>';
-  openModal('genericModal');
-  try{
-    const logs=typeof spReadAuditLog==='function'?await spReadAuditLog(200):[];
-    if(!logs.length){
-      $('#genericModalBody').innerHTML='<div class="empty-state"><i class="fas fa-history"></i><p>No audit events yet, or SharePoint is not connected.<br><small>Events are written when users log in, or admins approve/reject deletion requests.</small></p></div>';
-      return;
-    }
-    const actionColor={login:'#3fb950',delete_approved:'#f85149',delete_rejected:'#f0a450',_ping:'#8b949e'};
-    $('#genericModalBody').innerHTML=`
-    <div style="margin-bottom:10px;font-size:11px;color:var(--text-secondary)">${logs.length} event${logs.length!==1?'s':''} — most recent first · Stored in SharePoint (immutable)</div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Timestamp</th><th>Action</th><th>Type</th><th>Record</th><th>User</th><th>Details</th></tr></thead>
-      <tbody>${logs.map(l=>{
-        const c=actionColor[l.action]||'#388bfd';
-        return`<tr>
-          <td style="font-size:10px;font-family:var(--font-mono);white-space:nowrap">${l.timestamp?new Date(l.timestamp).toLocaleString():''}</td>
-          <td><span class="badge" style="background:${c}22;color:${c};font-size:9px">${l.action}</span></td>
-          <td style="font-size:11px">${l.entityType||'—'}</td>
-          <td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis">${l.entityName||l.entityId||'—'}</td>
-          <td style="font-size:11px">${l.userName||l.userEmail||'—'}</td>
-          <td style="font-size:10px;color:var(--text-muted);max-width:180px;overflow:hidden;text-overflow:ellipsis">${l.details||''}</td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table></div>`;
-  }catch(e){
-    $('#genericModalBody').innerHTML=`<div class="empty-state"><p>Error loading audit log: ${e.message}</p></div>`;
+function showAuditLogPanel(){
+  const localLogs=(()=>{try{return JSON.parse(localStorage.getItem('shic_audit_log')||'[]');}catch(e){return[];}})().slice().reverse();
+  const _catCol={error:'#f85149',CREATE:'#3fb950',UPDATE:'#388bfd',DELETE:'#f85149',delete:'#f85149',delete_request:'#f0a450',convert:'#3fb950',sync:'#bc8cff',backup:'#3fb950',restore:'#f0a450',collision:'#f0a450',reset:'#f85149',boot:'#8b949e',auth:'#39d3f2',permissions_update:'#388bfd',status_lock:'#f0a450'};
+  const _catIco={error:'fa-exclamation-triangle',CREATE:'fa-plus-circle',UPDATE:'fa-edit',DELETE:'fa-trash',delete:'fa-trash',delete_request:'fa-trash',convert:'fa-exchange-alt',sync:'fa-sync',backup:'fa-cloud-upload-alt',restore:'fa-undo',collision:'fa-exclamation-circle',reset:'fa-redo',boot:'fa-power-off',auth:'fa-sign-in-alt',permissions_update:'fa-shield-alt',status_lock:'fa-lock'};
+  const _DATA_CATS=['CREATE','UPDATE','DELETE','delete','delete_request','convert','permissions_update','status_lock'];
+  const _SYNC_CATS=['sync','backup','restore','collision','reset'];
+  function _render(filter){
+    const rows=localLogs.filter(l=>filter==='all'||filter==='error'&&l.category==='error'||filter==='data'&&_DATA_CATS.includes(l.category)||filter==='sync'&&_SYNC_CATS.includes(l.category)||filter==='auth'&&['boot','auth'].includes(l.category));
+    if(!rows.length)return`<div class="empty-state" style="padding:24px"><i class="fas fa-clipboard-list empty-icon"></i><div class="empty-title">No events</div></div>`;
+    return`<div style="max-height:400px;overflow-y:auto">${rows.slice(0,200).map(l=>{
+      const c=_catCol[l.category]||'#8b949e',ic=_catIco[l.category]||'fa-circle';
+      const t=l.iso?new Date(l.iso).toLocaleString():l.ts?new Date(l.ts).toLocaleString():'—';
+      const usr=l.user&&l.user!=='unknown'?`<span style="font-size:10px;color:var(--accent-blue)">${l.user}</span>`:'';
+      const det=l.details?`<div style="font-size:10px;color:var(--text-muted);margin-top:2px;font-family:var(--font-mono);word-break:break-all">${(typeof l.details==='object'?JSON.stringify(l.details):String(l.details)).substring(0,140)}</div>`:'';
+      return`<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+        <div style="width:28px;height:28px;border-radius:6px;background:${c}22;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas ${ic}" style="color:${c};font-size:10px"></i></div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px">
+            <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:${c}22;color:${c};font-weight:700">${l.category}</span>
+            <span style="font-size:11px;font-weight:500">${l.message||'—'}</span>${usr}</div>
+          ${det}<div style="font-size:9px;color:var(--text-muted)">${t}${l.page?` · page: ${l.page}`:''}</div>
+        </div></div>`;
+    }).join('')}</div>`;
   }
-  $('#genericModalFooter').innerHTML='<button class="btn btn-secondary" onclick="closeModal(\'genericModal\')">Close</button>';
+  const cnt=(f)=>f==='all'?localLogs.length:localLogs.filter(l=>f==='error'?l.category==='error':f==='data'?_DATA_CATS.includes(l.category):f==='sync'?_SYNC_CATS.includes(l.category):['boot','auth'].includes(l.category)).length;
+  const _tabs=[['all','All'],['data','Data Changes'],['error','Errors'],['sync','Sync & Backup'],['auth','Auth']];
+  $('#genericModalTitle').innerHTML='<i class="fas fa-history" style="margin-right:7px;color:var(--accent-blue)"></i>Audit Trail';
+  $('#genericModalBody').innerHTML=`<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">
+    ${_tabs.map(([id,lbl])=>`<button id="_at_${id}" class="btn btn-secondary btn-sm${id==='all'?' active':''}" onclick="_atTab('${id}')" style="font-size:11px">${lbl} <span style="opacity:.55">(${cnt(id)})</span></button>`).join('')}
+    <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="_atExport()"><i class="fas fa-download"></i></button>
+  </div><div id="_atBody">${_render('all')}</div>`;
+  window._atTab=function(f){$$('[id^="_at_"]').forEach(b=>b.classList.remove('active'));$('#_at_'+f)?.classList.add('active');$('#_atBody').innerHTML=_render(f);};
+  window._atExport=function(){const b=new Blob([JSON.stringify(localLogs,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`audit-${new Date().toISOString().slice(0,10)}.json`;a.click();showToast('Exported','success');};
+  $('#genericModalFooter').innerHTML=`<span style="font-size:10px;color:var(--text-muted)">${localLogs.length} events · last 500 kept · local only</span><button class="btn btn-secondary" onclick="closeModal('genericModal')" style="margin-left:auto">Close</button>`;
+  openModal('genericModal');
 }
 
 // ── DROPDOWN MANAGER ─────────────────────────────────────────
@@ -21069,10 +21116,23 @@ AppState.data.settings.companyName=$('#sCompany').value;
 AppState.data.settings.currency=$('#sCurrency').value;
 AppState.data.settings.autoBackup=!!document.getElementById('sAutoBackup')?.checked;
 AppState.data.settings.sessionTimeout=parseInt(document.getElementById('sSessionTimeout')?.value??'30')||0;
+AppState.data.settings.webhookUrl=(document.getElementById('sWebhookUrl')?.value||'').trim();
 AppState.save();
-// Restart session timer with new timeout
 if(typeof _startSessionTimer==='function')_startSessionTimer();
 showToast('Settings saved','success');}
+
+function _testWebhook(){
+  const url=(document.getElementById('sWebhookUrl')?.value||'').trim();
+  if(!url){showToast('Enter a webhook URL first','warning');return;}
+  fireWebhook('test',{message:'Test from PROCMASTER',app:'SHIC PM Suite',ts:new Date().toISOString()});
+  showToast('Test payload sent — check your flow','info',4000);}
+
+function fireWebhook(event, payload){
+  const url=AppState.data?.settings?.webhookUrl||'';
+  if(!url)return;
+  fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event,ts:new Date().toISOString(),app:'SHIC PM Suite',...payload})}).catch(()=>{});
+}
+window.fireWebhook=fireWebhook;
 
 // ── BUSINESS UNIT FUNCTIONS ───────────────────────────────
 const BU_COLORS=['#388bfd','#3fb950','#f0a450','#bc8cff','#39d3f2','#f85149','#fb8f44','#ff6b9d'];
@@ -23388,6 +23448,9 @@ async function _whSaveReceive(){
   });
   AppState.save();
   auditLog('CREATE','Warehouse','StockTransaction',batchRef,null,{type:'receive',items:valid.length,vendor,ref,date},'Receive Goods');
+  if(typeof fireWebhook==='function')fireWebhook('stock_received',{vendor,ref,date,itemCount:valid.length,items:valid.map(l=>({itemId:l.itemId,qty:l.qty}))});
+  // Check for low stock after receiving (edge case: item still below min)
+  valid.forEach(ln=>{const it=_whItems().find(i=>i.id===ln.itemId);if(it){const q=_whCalcQty(ln.itemId);if(it.minStock&&q.qtyOnHand<=parseFloat(it.minStock))if(typeof fireWebhook==='function')fireWebhook('low_stock',{itemId:it.id,itemName:it.name,qtyOnHand:q.qtyOnHand,minStock:it.minStock});}});
   const _rcvBatchRef=batchRef;
   _whRcvLines=[{itemId:'',qty:'',unitCost:''}];
   _whRcvAttachments=[];
@@ -23457,6 +23520,8 @@ function _whSaveIssue(){
   });
   AppState.save();
   auditLog('CREATE','Warehouse','StockTransaction',postedAt,null,{type,items:valid.length,projId,date,by},'Issue/Return');
+  if(type==='issue'||type==='issue-shop'||type==='issue-enduser')if(typeof fireWebhook==='function')fireWebhook('stock_issued',{type,projId,date,issuedBy:by,itemCount:valid.length});
+  valid.forEach(ln=>{const it=_whItems().find(i=>i.id===ln.itemId);if(it){const q=_whCalcQty(ln.itemId);if(it.minStock&&q.qtyOnHand<=parseFloat(it.minStock))if(typeof fireWebhook==='function')fireWebhook('low_stock',{itemId:it.id,itemName:it.name,qtyOnHand:q.qtyOnHand,minStock:it.minStock,projId});}});
   const _issBatchTs=postedAt;
   // Capture slip data before clearing
   const slipItems=valid.map(ln=>{
