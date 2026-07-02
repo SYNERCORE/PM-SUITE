@@ -62,7 +62,7 @@ function showActionUpdates(id){
 const a=(AppState.data.actions||[]).find(x=>x.id===id);
 if(!a)return;
 if(!a.updates)a.updates=[];
-const user=AppState.currentUser?.displayName||AppState.currentUser?.email||'Me';
+const user=(typeof _currentUserProfile!=='undefined'&&(_currentUserProfile?.name||_currentUserProfile?.email))||(typeof _spAccount!=='undefined'&&_spAccount?.username)||'Unknown';
 function _renderUpdates(){
   const rows=a.updates.length?[...a.updates].reverse().map(u=>`
     <div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
@@ -115,7 +115,7 @@ if(!text&&!newStatus){showToast('Type an update or change the status first','war
 const a=(AppState.data.actions||[]).find(x=>x.id===id);
 if(!a)return;
 if(!a.updates)a.updates=[];
-const user=AppState.currentUser?.displayName||AppState.currentUser?.email||'Me';
+const user=(typeof _currentUserProfile!=='undefined'&&(_currentUserProfile?.name||_currentUserProfile?.email))||(typeof _spAccount!=='undefined'&&_spAccount?.username)||'Unknown';
 if(newStatus&&newStatus!==a.status){
   const oldStatus=a.status;
   a.status=newStatus;
