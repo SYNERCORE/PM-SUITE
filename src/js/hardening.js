@@ -71,6 +71,6 @@ setInterval(()=>{if(_m365LoggedIn)AppState.save();},30000);
    showAddPO,showAddTeamMember,saveTeamMember,removeTeamMember,
    showAddCost,saveCostItem,showAddQAQC,saveQAQCItem,
    ganttQuickRange,renderGantt,
-   resetDemo,toggleTheme,buildSidebar,navigate,
+   toggleTheme,buildSidebar,navigate,
   ].forEach(fn=>{try{if(fn&&fn.name)window[fn.name]=fn;}catch(e){}});
 }

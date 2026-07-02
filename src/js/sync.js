@@ -1962,6 +1962,7 @@ async function connectSharePoint() {
             _spDataHash = _spHash(cleanData) + _ts;
             AppState.data = Object.assign(getDefaultData(), cleanData);
             if (typeof migrateData === 'function') migrateData();
+            if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
             AppState.save();
             _spOfflineQueue = false;
             localStorage.removeItem('shic_sp_offlinequeue');
@@ -2207,14 +2208,18 @@ function _spMergeArrays(localArr, remoteArr, localEdited, arrayKey) {
   remoteArr.forEach(remoteRec => {
     if (arrayKey && _spWasDeleted(arrayKey, remoteRec.id)) return;
     const localRec = localMap.get(remoteRec.id);
-    if (localRec && localEdited) {
-      // Local field edits win — but also union append-only sub-arrays from remote
-      // so that updates logged by OTHER users are not lost
-      result.push(_spMergeAppendArrays(localRec, remoteRec));
-    } else if (localRec) {
-      // Remote wins for fields — but union append-only sub-arrays from local
-      // so that updates logged by THIS user are not lost
-      result.push(_spMergeAppendArrays(remoteRec, localRec));
+    if (localRec) {
+      // When BOTH copies carry a modified timestamp, the NEWER edit wins the fields.
+      // Falls back to the localEdited flag when timestamps are missing (old records).
+      let localWins;
+      if (localRec._mAt && remoteRec._mAt) localWins = localRec._mAt > remoteRec._mAt;
+      else if (localRec._mAt && !remoteRec._mAt) localWins = true;
+      else if (!localRec._mAt && remoteRec._mAt) localWins = false;
+      else localWins = !!localEdited;
+      // Winner's fields + union of append-only sub-arrays so no updates are lost
+      result.push(localWins
+        ? _spMergeAppendArrays(localRec, remoteRec)
+        : _spMergeAppendArrays(remoteRec, localRec));
     } else {
       result.push(remoteRec);
     }
@@ -2297,6 +2302,7 @@ function _spApplyRemote(data, _ts, _by) {
     }
     AppState.data = Object.assign(getDefaultData(), merged);
     if (typeof migrateData === 'function') migrateData();
+    if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
     AppState.save();
     setTimeout(() => {
       try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
@@ -2334,6 +2340,7 @@ function _spApplyRemote(data, _ts, _by) {
       AppState.data = Object.assign(getDefaultData(), merged);
     }
     if (typeof migrateData === 'function') migrateData();
+    if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
     AppState.save();
     setTimeout(() => {
       try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
@@ -3138,6 +3145,7 @@ async function spPushData(silent = false) {
         merged.settings.dropdowns = Object.assign({}, _rSet.dropdowns || {});
       }
       AppState.data = Object.assign(getDefaultData(), merged);
+      if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
       _spLastWriteTs = _ts;
       _spDataHash = _spHash(remoteData) + _ts;
       if (!silent) showToast('Merged remote changes before push', 'info', 2500);
@@ -3529,30 +3537,20 @@ async function _spPollRemote() {
         });
 
         // 2. Add ALL remote records that aren't preserved locally.
-        //    For records that exist both locally AND remotely, union any append-only
-        //    sub-arrays (updates, comments, attachments) so neither side loses entries.
+        //    When the record exists on both sides: the copy with the NEWER _mAt wins
+        //    the fields, and append-only sub-arrays (updates etc.) are unioned so
+        //    neither side loses entries.
         remoteList.forEach(r => {
           if (!r || !r.id || seen.has(r.id)) return;
           const local = localById[r.id];
-          if (local) {
-            // Merge append-only arrays: combine local + remote, dedupe by 'at' timestamp
-            const appendArrays = ['updates','comments','attachments','notes'];
-            appendArrays.forEach(field => {
-              const remArr = Array.isArray(r[field]) ? r[field] : [];
-              const locArr = Array.isArray(local[field]) ? local[field] : [];
-              if (locArr.length === 0) return; // nothing local to preserve
-              // Build a set of remote timestamps to detect missing local entries
-              const remoteAts = new Set(remArr.map(u => u && u.at).filter(Boolean));
-              const localOnly = locArr.filter(u => u && u.at && !remoteAts.has(u.at));
-              if (localOnly.length > 0) {
-                // Local has entries the remote doesn't — union and sort by time
-                r = Object.assign({}, r, {
-                  [field]: [...remArr, ...localOnly].sort((a,b)=>((a&&a.at||'') < (b&&b.at||'') ? -1 : 1))
-                });
-              }
-            });
+          if (local && local._mAt && (!r._mAt || local._mAt > r._mAt)) {
+            // Local edit is newer than the remote copy — keep local (next push sends it)
+            merged.push(_spMergeAppendArrays(local, r));
+          } else if (local) {
+            merged.push(_spMergeAppendArrays(r, local));
+          } else {
+            merged.push(r);
           }
-          merged.push(r);
           seen.add(r.id);
         });
 
@@ -3575,6 +3573,7 @@ async function _spPollRemote() {
 
     // Save merged sub-lists immediately (they preserved local unsynced + deleted markers)
     if (subListsChanged) {
+      if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes(); // remote records are not "local edits"
       AppState.save();
       // Only re-render if the user is not mid-form — prevents wiping typed text
       if (!_isUserActivelyEditing()) _refreshCurrentView();

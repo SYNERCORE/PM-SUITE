@@ -196,7 +196,6 @@ ${renderSpPanel()}
     <div style="display:flex;flex-direction:column;gap:8px">
       <button class="btn btn-secondary" onclick="exportAllData()"><i class="fas fa-download"></i> Export All Data (JSON backup)</button>
       <button class="btn btn-secondary" onclick="importData()"><i class="fas fa-upload"></i> Import Data from JSON</button>
-      <button class="btn btn-warning" onclick="resetDemo()"><i class="fas fa-redo"></i> Reset to Demo Data</button>
       <button class="btn btn-danger" onclick="clearAllData()"><i class="fas fa-trash"></i> Clear All Data</button>
       <button class="btn btn-secondary" onclick="showPatchImport()"><i class="fas fa-bolt"></i> Apply Update Patch</button>
       <button class="btn btn-secondary" onclick="cleanUpStorage()" style="border-color:var(--accent-amber);color:var(--accent-amber)" title="Remove soft-deleted records from local storage to free up space"><i class="fas fa-broom"></i> Clean Up Storage</button>
@@ -726,19 +725,6 @@ function _storageUsageHTML(){
       <div style="height:4px;border-radius:2px;background:${color};width:${pct}%"></div>
     </div>
   </div>`;
-}
-
-function resetDemo(){
-  if(typeof _spConnected!=='undefined'&&_spConnected){
-    showToast('Disconnect from SharePoint first — resetting to demo data while connected would push demo records to the whole team.','error',7000);
-    return;
-  }
-  if(!confirm('Reset to demo data? Current data will be lost.'))return;
-  AppState.data=getDemoData();
-  AppState.save();
-  navigate('dashboard');
-  buildSidebar();
-  showToast('Demo data restored','success');
 }
 
 function exportCSV(rows,headers,filename){

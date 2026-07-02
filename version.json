@@ -1,1 +1,1 @@
-{"version":"2.2.0","note":"Sync fixes: updates never lost on merge, storage cleanup, status change in updates modal","released":"2026-07-02 15:36"}
+{"version":"2.3.0","note":"Newest edit now wins sync conflicts, critical sync data-loss fixes, demo data removed","released":"2026-07-02 15:58"}
