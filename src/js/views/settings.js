@@ -160,8 +160,8 @@ ${renderSpPanel()}
     </div>
     <div class="form-group" style="grid-column:1/-1">
       <label class="form-label" style="display:flex;align-items:center;gap:10px">
-        <label class="toggle" style="width:38px;height:20px"><input type="checkbox" id="sAutoBackup" ${settings.autoBackup?'checked':''}><span class="toggle-slider"></span></label>
-        Auto-backup to Downloads after each SharePoint sync
+        <label class="toggle" style="width:38px;height:20px"><input type="checkbox" id="sAutoBackup" ${settings.autoBackup!==false?'checked':''}><span class="toggle-slider"></span></label>
+        Daily auto-backup to Downloads (default on)
         <span style="font-size:10px;color:var(--text-muted)">(once per day — saves a JSON file to your Downloads folder)</span>
       </label>
     </div>
@@ -200,6 +200,7 @@ ${renderSpPanel()}
       <button class="btn btn-secondary" onclick="showPatchImport()"><i class="fas fa-bolt"></i> Apply Update Patch</button>
       <button class="btn btn-secondary" onclick="cleanUpStorage()" style="border-color:var(--accent-amber);color:var(--accent-amber)" title="Remove soft-deleted records from local storage to free up space"><i class="fas fa-broom"></i> Clean Up Storage</button>
       <button class="btn btn-secondary" onclick="restorePreSyncSnapshot()" title="Undo the last SharePoint sync merge — restores your data to the state just before it"><i class="fas fa-clock-rotate-left"></i> Restore Pre-Sync Snapshot</button>
+      <button class="btn btn-secondary" onclick="showSnapshotRestore()" title="Restore data from one of the last 3 automatic local snapshots"><i class="fas fa-history"></i> Restore from Snapshot</button>
       <div id="storageUsageBar" style="margin-top:4px"></div>
       <button class="btn btn-secondary" onclick="clearDemoData()" style="border-color:var(--accent-amber);color:var(--accent-amber)"><i class="fas fa-broom" style="margin-right:6px"></i> Clear Demo Data &amp; Start Fresh</button>
       <div id="adminOnlyBtns" style="display:none;flex-direction:column;gap:8px">
@@ -684,6 +685,50 @@ function clearDemoData(){
   // Navigate to fresh dashboard
   navigate('dashboard');
   buildSidebar();
+}
+
+// ── Snapshot restore UI (IndexedDB rolling snapshots) ──────
+async function showSnapshotRestore(){
+  const snaps=await _idbListSnapshots();
+  if(!snaps.length){showToast('No snapshots yet — they are created automatically as you work (one per 10 minutes)','info',5000);return;}
+  $('#genericModalTitle').textContent='Restore from Snapshot';
+  $('#genericModalBody').innerHTML=`
+    <div style="padding:10px 12px;background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.25);border-radius:8px;margin-bottom:12px;font-size:11px;color:var(--text-secondary)">
+      Snapshots are taken automatically while you work (max one per 10 minutes, last ${snaps.length} kept).
+      Restoring replaces your current local data — a snapshot of the current state is saved first, so you can switch back.
+    </div>
+    ${snaps.map((s,i)=>`
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;margin-bottom:7px">
+        <i class="fas fa-camera" style="color:var(--accent-blue)"></i>
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:600">${new Date(s.ts).toLocaleString()}</div>
+          <div style="font-size:10px;color:var(--text-muted)">${s.count||0} records ${s.plain===undefined?'· <i class="fas fa-lock" style="font-size:9px"></i> encrypted':''} ${i===0?'· newest':''}</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="restoreSnapshot(${s.ts})"><i class="fas fa-undo"></i> Restore</button>
+      </div>`).join('')}`;
+  $('#genericModalFooter').innerHTML=`<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
+  openModal('genericModal');
+}
+
+async function restoreSnapshot(ts){
+  const snaps=await _idbListSnapshots();
+  const snap=snaps.find(s=>s.ts===ts);
+  if(!snap){showToast('Snapshot not found','error');return;}
+  if(!confirm('Restore data from '+new Date(ts).toLocaleString()+'?\n\nYour current state will be snapshotted first so you can switch back.'))return;
+  try{
+    const json=await _snapDecrypt(snap);
+    const parsed=JSON.parse(json);
+    // Save current state as a new snapshot (forced, bypasses throttle) before replacing
+    await _idbSaveSnapshot(JSON.stringify(AppState.data),typeof _dataRecordCount==='function'?_dataRecordCount(AppState.data):0,true);
+    AppState.data=Object.assign(getDefaultData(),parsed);
+    if(typeof migrateData==='function')migrateData();
+    if(typeof _rebaselineMAtHashes==='function')_rebaselineMAtHashes();
+    AppState.save();
+    closeModal('genericModal');
+    try{renderPage(AppState.currentPage||'dashboard');}catch(e){}
+    try{buildSidebar();}catch(e){}
+    showToast('Restored snapshot from '+new Date(ts).toLocaleString()+' — review, then Sync Now to push','success',7000);
+  }catch(e){showToast('Restore failed: '+e.message,'error',6000);}
 }
 
 function cleanUpStorage(){

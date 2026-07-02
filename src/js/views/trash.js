@@ -132,7 +132,7 @@ function _trashBatchPurge(){
   if(!ids.length)return;
   if(!confirm(`Permanently delete ${ids.length} item${ids.length!==1?'s':''}?\n\nThis CANNOT be undone.`))return;
   let count=0;
-  ids.forEach(id=>{if(purgeFromTrash(window._trashKey,id))count++;});
+  ids.forEach(id=>{if(purgeFromTrash(window._trashKey,id)){count++;_auditPurge(window._trashKey,id,'');}});
   AppState.save();
   showToast(`Purged ${count} item${count!==1?'s':''}`, 'warning');
   showTrashFor(window._trashKey, window._trashLabel);
@@ -147,6 +147,14 @@ function _restoreItem(arrayKey, id, label) {
   }
 }
 
+// Write an immutable audit entry for every permanent purge (who/what/when)
+function _auditPurge(arrayKey, id, label) {
+  try {
+    if (typeof spWriteAuditLog === 'function')
+      spWriteAuditLog('purge', arrayKey, id, label || id, { by: _currentUserProfile?.name || _currentUserProfile?.email || 'unknown', at: new Date().toISOString() });
+  } catch(e) {}
+}
+
 function _purgeItem(arrayKey, id, label) {
   if (typeof isAdminUser === 'function' && !isAdminUser()) {
     showToast('Only admins can permanently delete records', 'warning', 4000);
@@ -154,6 +162,7 @@ function _purgeItem(arrayKey, id, label) {
   }
   if (!confirm('Permanently delete this ' + label + '?\n\nThis CANNOT be undone.')) return;
   if (purgeFromTrash(arrayKey, id)) {
+    _auditPurge(arrayKey, id, label);
     AppState.save();
     showToast('Permanently deleted', 'warning');
     showTrashFor(arrayKey, label); // refresh
@@ -165,11 +174,17 @@ function purgeAllTrash() {
     showToast('Only admins can permanently delete records', 'warning', 4000);
     return;
   }
-  if (!confirm('Permanently delete ALL items in trash?\n\nThis CANNOT be undone.')) return;
   const arrays = ['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
     'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs',
     'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
     'assetHistory','assetUtilization'];
+  // Build a per-type breakdown so the admin sees exactly what will be destroyed
+  const breakdown = arrays
+    .map(k => ({ k, n: (AppState.data[k]||[]).filter(r => r && r._deleted && !r._purged).length }))
+    .filter(x => x.n > 0);
+  if (!breakdown.length) { showToast('Trash is empty', 'info'); return; }
+  const summary = breakdown.map(x => `  ${x.k}: ${x.n}`).join('\n');
+  if (!confirm('Permanently delete ALL items in trash?\n\n' + summary + '\n\nThis CANNOT be undone.')) return;
   let purged = 0;
   const now = new Date().toISOString();
   arrays.forEach(k => {
@@ -177,6 +192,7 @@ function purgeAllTrash() {
     AppState.data[k].forEach(r => {
       if (!r || !r._deleted || r._purged) return;
       r._purged = true; r._purgedAt = now; purged++;
+      _auditPurge(k, r.id, r.description || r.name || r.title || r.id);
     });
   });
   AppState.save();

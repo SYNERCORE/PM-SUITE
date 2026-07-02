@@ -778,11 +778,11 @@ async function spReadAuditLog(limit) {
 
 // ── Auto-backup helper ────────────────────────────────────────
 function _maybeAutoBackup() {
-  if (!AppState.data?.settings?.autoBackup) return;
+  // Default ON — only an explicit false disables it
+  if (AppState.data?.settings?.autoBackup === false) return;
   const today = new Date().toISOString().slice(0, 10);
   const lastKey = 'shic_autobackup_last';
   if (localStorage.getItem(lastKey) === today) return; // already ran today
-  localStorage.setItem(lastKey, today);
   try {
     const backup = {
       version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '?',
@@ -795,9 +795,15 @@ function _maybeAutoBackup() {
     a.href = URL.createObjectURL(blob);
     a.download = `shic_autobackup_${today}.json`;
     a.click();
+    // Mark done ONLY after the download was triggered successfully —
+    // a failure earlier keeps it eligible to retry on the next cycle
+    localStorage.setItem(lastKey, today);
     console.log('[SHIC] Auto-backup saved for', today);
-  } catch(e) { console.warn('[SHIC] Auto-backup failed:', e.message); }
+  } catch(e) { console.warn('[SHIC] Auto-backup failed — will retry:', e.message); }
 }
+// Run hourly too, not only on successful SP push — offline days still get a backup
+setInterval(() => { try { _maybeAutoBackup(); } catch(e) {} }, 60 * 60 * 1000);
+setTimeout(() => { try { _maybeAutoBackup(); } catch(e) {} }, 90 * 1000);
 
 // ── 3. SAVE INDICATOR ───────────────────────────────────────
 let _saveIndicatorTimer = null;

@@ -823,11 +823,28 @@ function importData(){
         const backup=JSON.parse(re.target.result);
         const importVersion=backup.version||'unknown';
         const isBackup=!!backup.data;
+        const data=isBackup?backup.data:backup;
+        // ── Validate structure: must be an object with at least one known data array ──
+        const KNOWN=['projects','tasks','actions','procurement','warehouseItems','stockTransactions','costs','risks','qaqc','documents','manpower','equipment','materials','dailyMeetingLogs'];
+        if(!data||typeof data!=='object'||Array.isArray(data)||!KNOWN.some(k=>Array.isArray(data[k]))){
+          showToast('Not a valid ProMaster backup — no recognizable data found in this file','error',6000);
+          return;
+        }
+        // ── Show record-count diff so the user sees exactly what will change ──
+        const diffLines=KNOWN
+          .filter(k=>Array.isArray(data[k])||(AppState.data[k]||[]).length)
+          .map(k=>{
+            const cur=(AppState.data[k]||[]).length;
+            const inc=Array.isArray(data[k])?data[k].length:cur;
+            const marker=Array.isArray(data[k])&&inc<cur?'  ⚠ FEWER':'';
+            return `${k}: ${cur} → ${inc}${marker}`;
+          }).join('\n');
         const confirmed=confirm(
-          `Import data backup?\n\nBackup version: ${importVersion}\nExported: ${backup.exportedAt||'unknown'}\n\nThis will REPLACE all current data.\nMake sure you export your current data first.`
+          `Import data backup?\n\nBackup version: ${importVersion}\nExported: ${backup.exportedAt||'unknown'}\n\nRecord counts (current → after import):\n${diffLines}\n\nArrays present in the file REPLACE your current ones.`
         );
         if(!confirmed)return;
-        const data=isBackup?backup.data:backup;
+        // ── Snapshot current data first so the import is reversible ──
+        try{if(typeof _idbSaveSnapshot==='function')_idbSaveSnapshot(JSON.stringify(AppState.data),typeof _dataRecordCount==='function'?_dataRecordCount(AppState.data):0,true);}catch(e){}
         AppState.data={...AppState.data,...data};
         migrateData();
         runVersionedMigrations();
@@ -847,16 +864,19 @@ function importData(){
 }
 
 function clearAllData(){
-  if(!confirm('⚠ CLEAR ALL DATA?\n\nThis will permanently delete everything.\nExport a backup first!'))return;
-  if(!confirm('Are you absolutely sure? This CANNOT be undone.'))return;
+  if(!confirm('⚠ CLEAR ALL DATA?\n\nThis will permanently delete everything on this device.'))return;
+  // Force a backup download BEFORE anything is deleted
+  try{exportAllData();}catch(e){}
+  const typed=prompt('A backup file was just downloaded to your Downloads folder.\n\nTo confirm permanent deletion, type DELETE (in capitals):');
+  if(typed!=='DELETE'){showToast('Cancelled — nothing was deleted','info',4000);return;}
+  // Keep one final IndexedDB snapshot as a last-resort safety net
+  try{if(typeof _idbSaveSnapshot==='function')_idbSaveSnapshot(JSON.stringify(AppState.data),typeof _dataRecordCount==='function'?_dataRecordCount(AppState.data):0,true);}catch(e){}
   // Sign out first so login shows cleanly after reload
   try{if(_auth)_auth.signOut();}catch(e){}
   ['pm_data','pm_theme','shic_data_version','shic_applied_patches',
-   PERSISTENT_PATCHES_KEY,'shic_offline_queue','shic_offline_data',
+   PERSISTENT_PATCHES_KEY,'shic_offline_queue','shic_offline_data','shic_data_backup',
    'shic_sp_lastwritets','shic_sp_offlinequeue','shic_sp_lastsync','shic_sp_itemid',
   ].forEach(k=>{try{localStorage.removeItem(k);}catch{} });
-  localStorage.removeItem('pm_data');
-  localStorage.removeItem('shic_data_version');
   location.reload();
 }
 

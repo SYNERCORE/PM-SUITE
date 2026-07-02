@@ -1,8 +1,8 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.3.0';
-const APP_BUILD='20260702b';
+const APP_VERSION='2.4.0';
+const APP_BUILD='20260702c';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Newest edit now wins sync conflicts, critical sync data-loss fixes, demo data removed';
+const APP_RELEASE_NOTE='Data protection: automatic local snapshots with restore, safer delete and import, reliable daily backup';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
@@ -157,6 +157,9 @@ async function _encryptAndStore(json) {
     const ctB64 = btoa(bin);
     const enc = JSON.stringify({__enc:1,iv:ivHex,ct:ctB64});
     localStorage.setItem('pm_data', enc);
+    // Encryption is active — remove any stale PLAINTEXT copies of the data
+    try{const b=localStorage.getItem('shic_data_backup');if(b&&b.indexOf('"__enc"')<0)localStorage.removeItem('shic_data_backup');}catch(e){}
+    try{const o=localStorage.getItem('shic_offline_data');if(o&&o.indexOf('"__enc"')<0)localStorage.removeItem('shic_offline_data');}catch(e){}
     return true;
   } catch(e) { console.warn('[SHIC] Encrypt failed:', e.message); return false; }
 }
@@ -228,24 +231,42 @@ save(){
     }else{
       try{localStorage.setItem('pm_data',json);}catch(qe){_handleStorageFull(qe,json);}
     }
+    // Rolling IndexedDB snapshot (throttled to one per 10 min, keeps last 3)
+    try{_idbSaveSnapshot(json,typeof _dataRecordCount==='function'?_dataRecordCount(this.data):0);}catch(e){}
   }catch(e){console.warn('[SHIC] Save error:',e.message);}
 },
 load(){
+  let parsed=null,corrupt=false;
   try{
     const s=localStorage.getItem('pm_data');
-    if(s){
-      const p=JSON.parse(s);
-      if(p.__enc){
-        // Encrypted — cannot decode synchronously before login; start with defaults.
-        // _decryptFromStorage() + AppState.data reassignment happens in doM365Login().
-        this.data=getDefaultData();
-      }else{
-        this.data=p;
+    if(s){try{parsed=JSON.parse(s);}catch(pe){corrupt=true;console.warn('[SHIC] pm_data is corrupted:',pe.message);}}
+  }catch(e){}
+  if(parsed&&parsed.__enc){
+    // Encrypted — cannot decode synchronously before login; start with defaults.
+    // _decryptFromStorage() + AppState.data reassignment happens in doM365Login().
+    this.data=getDefaultData();
+  }else if(parsed){
+    this.data=parsed;
+  }else{
+    // pm_data missing or corrupt — try the backup key before giving up
+    let recovered=false;
+    try{
+      const b=localStorage.getItem('shic_data_backup');
+      if(b){
+        const bp=JSON.parse(b);
+        if(bp&&!bp.__enc){this.data=bp;recovered=true;console.warn('[SHIC] Recovered data from shic_data_backup');}
       }
-    }else{
-      this.data=getDefaultData();
+    }catch(e){}
+    if(!recovered)this.data=getDefaultData();
+    if(corrupt){
+      // Tell the user instead of silently starting empty — snapshots may hold their data
+      setTimeout(()=>{
+        try{showToast(recovered
+          ?'Local data was corrupted — recovered from backup. Verify your records.'
+          :'Local data was corrupted and could not be read. Go to Settings → Restore from Snapshot, or Pull from SharePoint.','warning',10000);}catch(e){}
+      },1500);
     }
-  }catch(e){this.data=getDefaultData();}
+  }
   if(!this.data)this.data=getDefaultData();
 },
 ensureData(){if(!this.data)this.load();if(!this.data)this.data=getDefaultData();return this.data;}};
@@ -276,6 +297,60 @@ function _handleStorageFull(err,json){
     const msg='⚠️ Local storage is full. Your latest changes could not be saved locally.\n\nGo to Settings → Storage → Clean Up to free space, or export a backup.';
     setTimeout(()=>{if(typeof showToast==='function')showToast('Storage full — changes not saved locally. Go to Settings → Storage to clean up.','error',8000);else alert(msg);},200);
   }
+}
+
+// ── ROLLING LOCAL SNAPSHOTS (IndexedDB) ──────────────────────
+// Keeps the last 3 saves outside localStorage (no quota impact).
+// Snapshots are AES-encrypted when the user key is available.
+const _SNAP_DB='shic_snapshots',_SNAP_STORE='snaps',_SNAP_KEEP=3,_SNAP_MIN_GAP=10*60*1000;
+let _snapLastTs=0;
+function _idbOpen(){
+  return new Promise((res,rej)=>{
+    if(!window.indexedDB)return rej(new Error('IndexedDB unavailable'));
+    const q=indexedDB.open(_SNAP_DB,1);
+    q.onupgradeneeded=()=>{q.result.createObjectStore(_SNAP_STORE,{keyPath:'ts'});};
+    q.onsuccess=()=>res(q.result);
+    q.onerror=()=>rej(q.error);
+  });
+}
+async function _snapEncrypt(json){
+  if(!_cryptoKey)return{plain:json};
+  try{
+    const iv=crypto.getRandomValues(new Uint8Array(12));
+    const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},_cryptoKey,new TextEncoder().encode(json));
+    return{iv:Array.from(iv),ct:new Uint8Array(ct)};
+  }catch(e){return{plain:json};}
+}
+async function _snapDecrypt(rec){
+  if(rec.plain!==undefined)return rec.plain;
+  if(!_cryptoKey)throw new Error('Snapshot is encrypted — sign in first, then retry');
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(rec.iv)},_cryptoKey,rec.ct);
+  return new TextDecoder().decode(pt);
+}
+async function _idbSaveSnapshot(json,recordCount,force){
+  if(!force&&Date.now()-_snapLastTs<_SNAP_MIN_GAP)return;
+  _snapLastTs=Date.now();
+  try{
+    const db=await _idbOpen();
+    const payload=await _snapEncrypt(json);
+    const tx=db.transaction(_SNAP_STORE,'readwrite');
+    const st=tx.objectStore(_SNAP_STORE);
+    st.put(Object.assign({ts:Date.now(),count:recordCount||0},payload));
+    const kq=st.getAllKeys();
+    kq.onsuccess=()=>{const keys=(kq.result||[]).sort((a,b)=>b-a);keys.slice(_SNAP_KEEP).forEach(k=>st.delete(k));};
+    tx.oncomplete=()=>db.close();
+  }catch(e){/* IDB unavailable — non-fatal */}
+}
+async function _idbListSnapshots(){
+  try{
+    const db=await _idbOpen();
+    return await new Promise(res=>{
+      const st=db.transaction(_SNAP_STORE,'readonly').objectStore(_SNAP_STORE);
+      const q=st.getAll();
+      q.onsuccess=()=>{db.close();res((q.result||[]).sort((a,b)=>b.ts-a.ts));};
+      q.onerror=()=>{db.close();res([]);};
+    });
+  }catch(e){return[];}
 }
 
 // ── UPDATE NOTIFICATION ──────────────────────────────────────

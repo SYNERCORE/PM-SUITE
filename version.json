@@ -1,1 +1,1 @@
-{"version":"2.3.0","note":"Newest edit now wins sync conflicts, critical sync data-loss fixes, demo data removed","released":"2026-07-02 16:05"}
+{"version":"2.4.0","note":"Data protection: automatic local snapshots with restore, safer delete and import, reliable daily backup","released":"2026-07-02 16:19"}

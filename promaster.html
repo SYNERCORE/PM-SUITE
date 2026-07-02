@@ -533,10 +533,10 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.3.0';
-const APP_BUILD='20260702b';
+const APP_VERSION='2.4.0';
+const APP_BUILD='20260702c';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Newest edit now wins sync conflicts, critical sync data-loss fixes, demo data removed';
+const APP_RELEASE_NOTE='Data protection: automatic local snapshots with restore, safer delete and import, reliable daily backup';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
@@ -691,6 +691,9 @@ async function _encryptAndStore(json) {
     const ctB64 = btoa(bin);
     const enc = JSON.stringify({__enc:1,iv:ivHex,ct:ctB64});
     localStorage.setItem('pm_data', enc);
+    // Encryption is active — remove any stale PLAINTEXT copies of the data
+    try{const b=localStorage.getItem('shic_data_backup');if(b&&b.indexOf('"__enc"')<0)localStorage.removeItem('shic_data_backup');}catch(e){}
+    try{const o=localStorage.getItem('shic_offline_data');if(o&&o.indexOf('"__enc"')<0)localStorage.removeItem('shic_offline_data');}catch(e){}
     return true;
   } catch(e) { console.warn('[SHIC] Encrypt failed:', e.message); return false; }
 }
@@ -762,24 +765,42 @@ save(){
     }else{
       try{localStorage.setItem('pm_data',json);}catch(qe){_handleStorageFull(qe,json);}
     }
+    // Rolling IndexedDB snapshot (throttled to one per 10 min, keeps last 3)
+    try{_idbSaveSnapshot(json,typeof _dataRecordCount==='function'?_dataRecordCount(this.data):0);}catch(e){}
   }catch(e){console.warn('[SHIC] Save error:',e.message);}
 },
 load(){
+  let parsed=null,corrupt=false;
   try{
     const s=localStorage.getItem('pm_data');
-    if(s){
-      const p=JSON.parse(s);
-      if(p.__enc){
-        // Encrypted — cannot decode synchronously before login; start with defaults.
-        // _decryptFromStorage() + AppState.data reassignment happens in doM365Login().
-        this.data=getDefaultData();
-      }else{
-        this.data=p;
+    if(s){try{parsed=JSON.parse(s);}catch(pe){corrupt=true;console.warn('[SHIC] pm_data is corrupted:',pe.message);}}
+  }catch(e){}
+  if(parsed&&parsed.__enc){
+    // Encrypted — cannot decode synchronously before login; start with defaults.
+    // _decryptFromStorage() + AppState.data reassignment happens in doM365Login().
+    this.data=getDefaultData();
+  }else if(parsed){
+    this.data=parsed;
+  }else{
+    // pm_data missing or corrupt — try the backup key before giving up
+    let recovered=false;
+    try{
+      const b=localStorage.getItem('shic_data_backup');
+      if(b){
+        const bp=JSON.parse(b);
+        if(bp&&!bp.__enc){this.data=bp;recovered=true;console.warn('[SHIC] Recovered data from shic_data_backup');}
       }
-    }else{
-      this.data=getDefaultData();
+    }catch(e){}
+    if(!recovered)this.data=getDefaultData();
+    if(corrupt){
+      // Tell the user instead of silently starting empty — snapshots may hold their data
+      setTimeout(()=>{
+        try{showToast(recovered
+          ?'Local data was corrupted — recovered from backup. Verify your records.'
+          :'Local data was corrupted and could not be read. Go to Settings → Restore from Snapshot, or Pull from SharePoint.','warning',10000);}catch(e){}
+      },1500);
     }
-  }catch(e){this.data=getDefaultData();}
+  }
   if(!this.data)this.data=getDefaultData();
 },
 ensureData(){if(!this.data)this.load();if(!this.data)this.data=getDefaultData();return this.data;}};
@@ -810,6 +831,60 @@ function _handleStorageFull(err,json){
     const msg='⚠️ Local storage is full. Your latest changes could not be saved locally.\n\nGo to Settings → Storage → Clean Up to free space, or export a backup.';
     setTimeout(()=>{if(typeof showToast==='function')showToast('Storage full — changes not saved locally. Go to Settings → Storage to clean up.','error',8000);else alert(msg);},200);
   }
+}
+
+// ── ROLLING LOCAL SNAPSHOTS (IndexedDB) ──────────────────────
+// Keeps the last 3 saves outside localStorage (no quota impact).
+// Snapshots are AES-encrypted when the user key is available.
+const _SNAP_DB='shic_snapshots',_SNAP_STORE='snaps',_SNAP_KEEP=3,_SNAP_MIN_GAP=10*60*1000;
+let _snapLastTs=0;
+function _idbOpen(){
+  return new Promise((res,rej)=>{
+    if(!window.indexedDB)return rej(new Error('IndexedDB unavailable'));
+    const q=indexedDB.open(_SNAP_DB,1);
+    q.onupgradeneeded=()=>{q.result.createObjectStore(_SNAP_STORE,{keyPath:'ts'});};
+    q.onsuccess=()=>res(q.result);
+    q.onerror=()=>rej(q.error);
+  });
+}
+async function _snapEncrypt(json){
+  if(!_cryptoKey)return{plain:json};
+  try{
+    const iv=crypto.getRandomValues(new Uint8Array(12));
+    const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},_cryptoKey,new TextEncoder().encode(json));
+    return{iv:Array.from(iv),ct:new Uint8Array(ct)};
+  }catch(e){return{plain:json};}
+}
+async function _snapDecrypt(rec){
+  if(rec.plain!==undefined)return rec.plain;
+  if(!_cryptoKey)throw new Error('Snapshot is encrypted — sign in first, then retry');
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(rec.iv)},_cryptoKey,rec.ct);
+  return new TextDecoder().decode(pt);
+}
+async function _idbSaveSnapshot(json,recordCount,force){
+  if(!force&&Date.now()-_snapLastTs<_SNAP_MIN_GAP)return;
+  _snapLastTs=Date.now();
+  try{
+    const db=await _idbOpen();
+    const payload=await _snapEncrypt(json);
+    const tx=db.transaction(_SNAP_STORE,'readwrite');
+    const st=tx.objectStore(_SNAP_STORE);
+    st.put(Object.assign({ts:Date.now(),count:recordCount||0},payload));
+    const kq=st.getAllKeys();
+    kq.onsuccess=()=>{const keys=(kq.result||[]).sort((a,b)=>b-a);keys.slice(_SNAP_KEEP).forEach(k=>st.delete(k));};
+    tx.oncomplete=()=>db.close();
+  }catch(e){/* IDB unavailable — non-fatal */}
+}
+async function _idbListSnapshots(){
+  try{
+    const db=await _idbOpen();
+    return await new Promise(res=>{
+      const st=db.transaction(_SNAP_STORE,'readonly').objectStore(_SNAP_STORE);
+      const q=st.getAll();
+      q.onsuccess=()=>{db.close();res((q.result||[]).sort((a,b)=>b.ts-a.ts));};
+      q.onerror=()=>{db.close();res([]);};
+    });
+  }catch(e){return[];}
 }
 
 // ── UPDATE NOTIFICATION ──────────────────────────────────────
@@ -3102,11 +3177,28 @@ function importData(){
         const backup=JSON.parse(re.target.result);
         const importVersion=backup.version||'unknown';
         const isBackup=!!backup.data;
+        const data=isBackup?backup.data:backup;
+        // ── Validate structure: must be an object with at least one known data array ──
+        const KNOWN=['projects','tasks','actions','procurement','warehouseItems','stockTransactions','costs','risks','qaqc','documents','manpower','equipment','materials','dailyMeetingLogs'];
+        if(!data||typeof data!=='object'||Array.isArray(data)||!KNOWN.some(k=>Array.isArray(data[k]))){
+          showToast('Not a valid ProMaster backup — no recognizable data found in this file','error',6000);
+          return;
+        }
+        // ── Show record-count diff so the user sees exactly what will change ──
+        const diffLines=KNOWN
+          .filter(k=>Array.isArray(data[k])||(AppState.data[k]||[]).length)
+          .map(k=>{
+            const cur=(AppState.data[k]||[]).length;
+            const inc=Array.isArray(data[k])?data[k].length:cur;
+            const marker=Array.isArray(data[k])&&inc<cur?'  ⚠ FEWER':'';
+            return `${k}: ${cur} → ${inc}${marker}`;
+          }).join('\n');
         const confirmed=confirm(
-          `Import data backup?\n\nBackup version: ${importVersion}\nExported: ${backup.exportedAt||'unknown'}\n\nThis will REPLACE all current data.\nMake sure you export your current data first.`
+          `Import data backup?\n\nBackup version: ${importVersion}\nExported: ${backup.exportedAt||'unknown'}\n\nRecord counts (current → after import):\n${diffLines}\n\nArrays present in the file REPLACE your current ones.`
         );
         if(!confirmed)return;
-        const data=isBackup?backup.data:backup;
+        // ── Snapshot current data first so the import is reversible ──
+        try{if(typeof _idbSaveSnapshot==='function')_idbSaveSnapshot(JSON.stringify(AppState.data),typeof _dataRecordCount==='function'?_dataRecordCount(AppState.data):0,true);}catch(e){}
         AppState.data={...AppState.data,...data};
         migrateData();
         runVersionedMigrations();
@@ -3126,16 +3218,19 @@ function importData(){
 }
 
 function clearAllData(){
-  if(!confirm('⚠ CLEAR ALL DATA?\n\nThis will permanently delete everything.\nExport a backup first!'))return;
-  if(!confirm('Are you absolutely sure? This CANNOT be undone.'))return;
+  if(!confirm('⚠ CLEAR ALL DATA?\n\nThis will permanently delete everything on this device.'))return;
+  // Force a backup download BEFORE anything is deleted
+  try{exportAllData();}catch(e){}
+  const typed=prompt('A backup file was just downloaded to your Downloads folder.\n\nTo confirm permanent deletion, type DELETE (in capitals):');
+  if(typed!=='DELETE'){showToast('Cancelled — nothing was deleted','info',4000);return;}
+  // Keep one final IndexedDB snapshot as a last-resort safety net
+  try{if(typeof _idbSaveSnapshot==='function')_idbSaveSnapshot(JSON.stringify(AppState.data),typeof _dataRecordCount==='function'?_dataRecordCount(AppState.data):0,true);}catch(e){}
   // Sign out first so login shows cleanly after reload
   try{if(_auth)_auth.signOut();}catch(e){}
   ['pm_data','pm_theme','shic_data_version','shic_applied_patches',
-   PERSISTENT_PATCHES_KEY,'shic_offline_queue','shic_offline_data',
+   PERSISTENT_PATCHES_KEY,'shic_offline_queue','shic_offline_data','shic_data_backup',
    'shic_sp_lastwritets','shic_sp_offlinequeue','shic_sp_lastsync','shic_sp_itemid',
   ].forEach(k=>{try{localStorage.removeItem(k);}catch{} });
-  localStorage.removeItem('pm_data');
-  localStorage.removeItem('shic_data_version');
   location.reload();
 }
 
@@ -4166,11 +4261,11 @@ async function spReadAuditLog(limit) {
 
 // ── Auto-backup helper ────────────────────────────────────────
 function _maybeAutoBackup() {
-  if (!AppState.data?.settings?.autoBackup) return;
+  // Default ON — only an explicit false disables it
+  if (AppState.data?.settings?.autoBackup === false) return;
   const today = new Date().toISOString().slice(0, 10);
   const lastKey = 'shic_autobackup_last';
   if (localStorage.getItem(lastKey) === today) return; // already ran today
-  localStorage.setItem(lastKey, today);
   try {
     const backup = {
       version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '?',
@@ -4183,9 +4278,15 @@ function _maybeAutoBackup() {
     a.href = URL.createObjectURL(blob);
     a.download = `shic_autobackup_${today}.json`;
     a.click();
+    // Mark done ONLY after the download was triggered successfully —
+    // a failure earlier keeps it eligible to retry on the next cycle
+    localStorage.setItem(lastKey, today);
     console.log('[SHIC] Auto-backup saved for', today);
-  } catch(e) { console.warn('[SHIC] Auto-backup failed:', e.message); }
+  } catch(e) { console.warn('[SHIC] Auto-backup failed — will retry:', e.message); }
 }
+// Run hourly too, not only on successful SP push — offline days still get a backup
+setInterval(() => { try { _maybeAutoBackup(); } catch(e) {} }, 60 * 60 * 1000);
+setTimeout(() => { try { _maybeAutoBackup(); } catch(e) {} }, 90 * 1000);
 
 // ── 3. SAVE INDICATOR ───────────────────────────────────────
 let _saveIndicatorTimer = null;
@@ -20940,8 +21041,8 @@ ${renderSpPanel()}
     </div>
     <div class="form-group" style="grid-column:1/-1">
       <label class="form-label" style="display:flex;align-items:center;gap:10px">
-        <label class="toggle" style="width:38px;height:20px"><input type="checkbox" id="sAutoBackup" ${settings.autoBackup?'checked':''}><span class="toggle-slider"></span></label>
-        Auto-backup to Downloads after each SharePoint sync
+        <label class="toggle" style="width:38px;height:20px"><input type="checkbox" id="sAutoBackup" ${settings.autoBackup!==false?'checked':''}><span class="toggle-slider"></span></label>
+        Daily auto-backup to Downloads (default on)
         <span style="font-size:10px;color:var(--text-muted)">(once per day — saves a JSON file to your Downloads folder)</span>
       </label>
     </div>
@@ -20980,6 +21081,7 @@ ${renderSpPanel()}
       <button class="btn btn-secondary" onclick="showPatchImport()"><i class="fas fa-bolt"></i> Apply Update Patch</button>
       <button class="btn btn-secondary" onclick="cleanUpStorage()" style="border-color:var(--accent-amber);color:var(--accent-amber)" title="Remove soft-deleted records from local storage to free up space"><i class="fas fa-broom"></i> Clean Up Storage</button>
       <button class="btn btn-secondary" onclick="restorePreSyncSnapshot()" title="Undo the last SharePoint sync merge — restores your data to the state just before it"><i class="fas fa-clock-rotate-left"></i> Restore Pre-Sync Snapshot</button>
+      <button class="btn btn-secondary" onclick="showSnapshotRestore()" title="Restore data from one of the last 3 automatic local snapshots"><i class="fas fa-history"></i> Restore from Snapshot</button>
       <div id="storageUsageBar" style="margin-top:4px"></div>
       <button class="btn btn-secondary" onclick="clearDemoData()" style="border-color:var(--accent-amber);color:var(--accent-amber)"><i class="fas fa-broom" style="margin-right:6px"></i> Clear Demo Data &amp; Start Fresh</button>
       <div id="adminOnlyBtns" style="display:none;flex-direction:column;gap:8px">
@@ -21464,6 +21566,50 @@ function clearDemoData(){
   // Navigate to fresh dashboard
   navigate('dashboard');
   buildSidebar();
+}
+
+// ── Snapshot restore UI (IndexedDB rolling snapshots) ──────
+async function showSnapshotRestore(){
+  const snaps=await _idbListSnapshots();
+  if(!snaps.length){showToast('No snapshots yet — they are created automatically as you work (one per 10 minutes)','info',5000);return;}
+  $('#genericModalTitle').textContent='Restore from Snapshot';
+  $('#genericModalBody').innerHTML=`
+    <div style="padding:10px 12px;background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.25);border-radius:8px;margin-bottom:12px;font-size:11px;color:var(--text-secondary)">
+      Snapshots are taken automatically while you work (max one per 10 minutes, last ${snaps.length} kept).
+      Restoring replaces your current local data — a snapshot of the current state is saved first, so you can switch back.
+    </div>
+    ${snaps.map((s,i)=>`
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;margin-bottom:7px">
+        <i class="fas fa-camera" style="color:var(--accent-blue)"></i>
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:600">${new Date(s.ts).toLocaleString()}</div>
+          <div style="font-size:10px;color:var(--text-muted)">${s.count||0} records ${s.plain===undefined?'· <i class="fas fa-lock" style="font-size:9px"></i> encrypted':''} ${i===0?'· newest':''}</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="restoreSnapshot(${s.ts})"><i class="fas fa-undo"></i> Restore</button>
+      </div>`).join('')}`;
+  $('#genericModalFooter').innerHTML=`<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
+  openModal('genericModal');
+}
+
+async function restoreSnapshot(ts){
+  const snaps=await _idbListSnapshots();
+  const snap=snaps.find(s=>s.ts===ts);
+  if(!snap){showToast('Snapshot not found','error');return;}
+  if(!confirm('Restore data from '+new Date(ts).toLocaleString()+'?\n\nYour current state will be snapshotted first so you can switch back.'))return;
+  try{
+    const json=await _snapDecrypt(snap);
+    const parsed=JSON.parse(json);
+    // Save current state as a new snapshot (forced, bypasses throttle) before replacing
+    await _idbSaveSnapshot(JSON.stringify(AppState.data),typeof _dataRecordCount==='function'?_dataRecordCount(AppState.data):0,true);
+    AppState.data=Object.assign(getDefaultData(),parsed);
+    if(typeof migrateData==='function')migrateData();
+    if(typeof _rebaselineMAtHashes==='function')_rebaselineMAtHashes();
+    AppState.save();
+    closeModal('genericModal');
+    try{renderPage(AppState.currentPage||'dashboard');}catch(e){}
+    try{buildSidebar();}catch(e){}
+    showToast('Restored snapshot from '+new Date(ts).toLocaleString()+' — review, then Sync Now to push','success',7000);
+  }catch(e){showToast('Restore failed: '+e.message,'error',6000);}
 }
 
 function cleanUpStorage(){
@@ -26818,7 +26964,7 @@ function _trashBatchPurge(){
   if(!ids.length)return;
   if(!confirm(`Permanently delete ${ids.length} item${ids.length!==1?'s':''}?\n\nThis CANNOT be undone.`))return;
   let count=0;
-  ids.forEach(id=>{if(purgeFromTrash(window._trashKey,id))count++;});
+  ids.forEach(id=>{if(purgeFromTrash(window._trashKey,id)){count++;_auditPurge(window._trashKey,id,'');}});
   AppState.save();
   showToast(`Purged ${count} item${count!==1?'s':''}`, 'warning');
   showTrashFor(window._trashKey, window._trashLabel);
@@ -26833,6 +26979,14 @@ function _restoreItem(arrayKey, id, label) {
   }
 }
 
+// Write an immutable audit entry for every permanent purge (who/what/when)
+function _auditPurge(arrayKey, id, label) {
+  try {
+    if (typeof spWriteAuditLog === 'function')
+      spWriteAuditLog('purge', arrayKey, id, label || id, { by: _currentUserProfile?.name || _currentUserProfile?.email || 'unknown', at: new Date().toISOString() });
+  } catch(e) {}
+}
+
 function _purgeItem(arrayKey, id, label) {
   if (typeof isAdminUser === 'function' && !isAdminUser()) {
     showToast('Only admins can permanently delete records', 'warning', 4000);
@@ -26840,6 +26994,7 @@ function _purgeItem(arrayKey, id, label) {
   }
   if (!confirm('Permanently delete this ' + label + '?\n\nThis CANNOT be undone.')) return;
   if (purgeFromTrash(arrayKey, id)) {
+    _auditPurge(arrayKey, id, label);
     AppState.save();
     showToast('Permanently deleted', 'warning');
     showTrashFor(arrayKey, label); // refresh
@@ -26851,11 +27006,17 @@ function purgeAllTrash() {
     showToast('Only admins can permanently delete records', 'warning', 4000);
     return;
   }
-  if (!confirm('Permanently delete ALL items in trash?\n\nThis CANNOT be undone.')) return;
   const arrays = ['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
     'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs',
     'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
     'assetHistory','assetUtilization'];
+  // Build a per-type breakdown so the admin sees exactly what will be destroyed
+  const breakdown = arrays
+    .map(k => ({ k, n: (AppState.data[k]||[]).filter(r => r && r._deleted && !r._purged).length }))
+    .filter(x => x.n > 0);
+  if (!breakdown.length) { showToast('Trash is empty', 'info'); return; }
+  const summary = breakdown.map(x => `  ${x.k}: ${x.n}`).join('\n');
+  if (!confirm('Permanently delete ALL items in trash?\n\n' + summary + '\n\nThis CANNOT be undone.')) return;
   let purged = 0;
   const now = new Date().toISOString();
   arrays.forEach(k => {
@@ -26863,6 +27024,7 @@ function purgeAllTrash() {
     AppState.data[k].forEach(r => {
       if (!r || !r._deleted || r._purged) return;
       r._purged = true; r._purgedAt = now; purged++;
+      _auditPurge(k, r.id, r.description || r.name || r.title || r.id);
     });
   });
   AppState.save();
