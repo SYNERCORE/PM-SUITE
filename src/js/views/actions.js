@@ -1,23 +1,9 @@
-function renderActions(){
-const actions=(AppState.data.actions||[]).filter(a=>!a._deleted);
-$('#actions').innerHTML=`<div class="section-header" style="margin-bottom:14px">
-<div class="section-title">Action Items Tracker</div>
-<button class="btn btn-primary btn-sm" onclick="showAddAction(detailProjectId)"><i class="fas fa-plus"></i> New Action</button></div>
-<div class="grid grid-4" style="margin-bottom:14px">
-${sc('fas fa-clipboard-list','Total Actions',actions.length,'All items','#388bfd','rgba(56,139,253,.15)')}
-${sc('fas fa-exclamation-circle','Overdue',actions.filter(a=>a.status==='overdue').length,'Past due','#f85149','rgba(248,81,73,.15)')}
-${sc('fas fa-spinner','In Progress',actions.filter(a=>a.status==='inprogress').length,'Being worked on','#f0a450','rgba(240,164,80,.15)')}
-${sc('fas fa-check','Completed',actions.filter(a=>a.status==='closed').length,'Resolved','#3fb950','rgba(63,185,80,.15)')}
-</div>
-<div class="card"><div class="table-wrap"><table>
-<thead><tr><th>ID</th><th>Project</th><th>Action</th><th>Assignee</th><th>Due Date</th><th>Priority</th><th>Status</th><th>Latest Update</th><th></th></tr></thead>
-<tbody>${_pgSlice("actions",actions).map(a=>{
+function _actRowHTML(a){
 const updates=a.updates||[];
 const last=updates[updates.length-1];
 const lastText=last?`<div style="font-size:11px;color:var(--text-primary);line-height:1.4">${last.text.length>60?last.text.substring(0,60)+'…':last.text}</div><div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${last.by||'—'} · ${last.at?last.at.slice(0,10):'—'}</div>`:`<span style="font-size:11px;color:var(--text-muted)">No updates yet</span>`;
 return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${a.id}</td>
-<td><span class="badge badge-blue">${a.projectId}</span></td>
 <td style="font-size:12px;font-weight:500;max-width:180px">${a.description}</td>
 <td><div style="display:flex;align-items:center;gap:5px">${avatarH(a.assignee)}<span style="font-size:11px">${a.assignee.split(' ')[0]}</span></div></td>
 <td style="font-size:11px;font-family:var(--font-mono);color:${a.status==='overdue'?'var(--accent-red)':isOverdue(a.dueDate)?'var(--accent-amber)':'inherit'}">${a.dueDate}</td>
@@ -29,7 +15,48 @@ return`<tr>
   </button>
   <button class="btn btn-success btn-sm btn-icon" onclick="closeAction('${a.id}')" title="Mark closed"><i class="fas fa-check"></i></button>
 </div></td>
-</tr>`;}).join('')}</tbody></table>${_pgNav("actions",actions,typeof renderActions==="function"?renderActions:null)}</div></div>`;}
+</tr>`;}
+
+const _actThead=`<thead><tr><th>ID</th><th>Action</th><th>Assignee</th><th>Due Date</th><th>Priority</th><th>Status</th><th>Latest Update</th><th></th></tr></thead>`;
+
+function renderActions(){
+const actions=(AppState.data.actions||[]).filter(a=>!a._deleted);
+// Group by project
+const groups={};
+actions.forEach(a=>{const k=a.projectId||'—';if(!groups[k])groups[k]=[];groups[k].push(a);});
+const projectMap=Object.fromEntries((AppState.data.projects||[]).map(p=>[p.id,p]));
+const groupHTML=Object.entries(groups).map(([pid,grp])=>{
+const proj=projectMap[pid];
+const projName=proj?`${pid} — ${proj.name||''}`:pid;
+const open=grp.filter(a=>a.status!=='closed').length;
+const closed=grp.filter(a=>a.status==='closed').length;
+const overdue=grp.filter(a=>a.status==='overdue'||isOverdue(a.dueDate)).length;
+return`<div class="card" style="margin-bottom:12px">
+<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);background:linear-gradient(90deg,rgba(56,139,253,.08),transparent);cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none';this.querySelector('.act-chevron').style.transform=this.nextElementSibling.style.display===''?'':'rotate(-90deg)'">
+  <div style="display:flex;align-items:center;gap:10px">
+    <i class="fas fa-chevron-down act-chevron" style="font-size:10px;color:var(--accent-blue);transition:.2s"></i>
+    <span style="font-size:12px;font-weight:700;color:var(--accent-blue)">${projName}</span>
+  </div>
+  <div style="display:flex;gap:6px;align-items:center">
+    <span class="badge badge-blue" style="font-size:10px">${grp.length} action${grp.length!==1?'s':''}</span>
+    ${open?`<span class="badge badge-amber" style="font-size:10px">${open} open</span>`:''}
+    ${overdue?`<span class="badge badge-red" style="font-size:10px">${overdue} overdue</span>`:''}
+    ${closed?`<span class="badge badge-green" style="font-size:10px">${closed} closed</span>`:''}
+    <button class="btn btn-primary btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();showAddAction('${pid}')"><i class="fas fa-plus"></i> Add</button>
+  </div>
+</div>
+<div><div class="table-wrap"><table>${_actThead}<tbody>${grp.map(a=>_actRowHTML(a)).join('')}</tbody></table></div></div>
+</div>`;}).join('');
+$('#actions').innerHTML=`<div class="section-header" style="margin-bottom:14px">
+<div class="section-title">Action Items Tracker</div>
+<button class="btn btn-primary btn-sm" onclick="showAddAction(detailProjectId)"><i class="fas fa-plus"></i> New Action</button></div>
+<div class="grid grid-4" style="margin-bottom:14px">
+${sc('fas fa-clipboard-list','Total Actions',actions.length,'All items','#388bfd','rgba(56,139,253,.15)')}
+${sc('fas fa-exclamation-circle','Overdue',actions.filter(a=>a.status==='overdue').length,'Past due','#f85149','rgba(248,81,73,.15)')}
+${sc('fas fa-spinner','In Progress',actions.filter(a=>a.status==='inprogress').length,'Being worked on','#f0a450','rgba(240,164,80,.15)')}
+${sc('fas fa-check','Completed',actions.filter(a=>a.status==='closed').length,'Resolved','#3fb950','rgba(63,185,80,.15)')}
+</div>
+${groupHTML||'<div class="empty-state"><i class="fas fa-clipboard-list"></i><p>No action items yet.</p></div>'}`;}
 
 function showActionUpdates(id){
 const a=(AppState.data.actions||[]).find(x=>x.id===id);
