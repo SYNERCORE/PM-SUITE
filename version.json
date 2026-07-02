@@ -1,1 +1,1 @@
-{"version":"2.4.0","note":"Data protection: automatic local snapshots with restore, safer delete and import, reliable daily backup","released":"2026-07-02 16:19"}
+{"version":"2.4.1","note":"Update refresh now loads the new version immediately (cache fix)","released":"2026-07-02 16:44"}

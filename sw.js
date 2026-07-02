@@ -1,6 +1,7 @@
 // SHIC PM Suite — Service Worker
-// Provides offline caching of the app shell so the app opens without network.
-const CACHE = 'shic-v3';
+// Offline caching of the app shell. The HTML itself is NETWORK-FIRST so
+// updates are picked up on the next reload; cache is the offline fallback.
+const CACHE = 'shic-v4';
 const APP_SHELL = ['./promaster.html'];
 
 self.addEventListener('install', (e) => {
@@ -35,7 +36,26 @@ self.addEventListener('fetch', (e) => {
     return; // default network behavior
   }
 
-  // App shell + CDN assets: cache-first with background refresh
+  const isAppShell = e.request.mode === 'navigate' || url.includes('promaster.html');
+
+  if (isAppShell) {
+    // NETWORK-FIRST for the app itself: reload = latest version.
+    // no-cache forces revalidation past the browser HTTP cache.
+    e.respondWith(
+      fetch(e.request, { cache: 'no-cache' })
+        .then((res) => {
+          if (res && res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE).then((c) => c.put(e.request, clone)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match(e.request)) // offline → cached copy
+    );
+    return;
+  }
+
+  // CDN assets etc.: cache-first with background refresh
   e.respondWith(
     caches.match(e.request).then((cached) => {
       const fresh = fetch(e.request)

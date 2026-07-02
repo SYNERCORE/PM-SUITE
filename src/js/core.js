@@ -1,8 +1,8 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.4.0';
-const APP_BUILD='20260702c';
+const APP_VERSION='2.4.1';
+const APP_BUILD='20260702d';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Data protection: automatic local snapshots with restore, safer delete and import, reliable daily backup';
+const APP_RELEASE_NOTE='Update refresh now loads the new version immediately (cache fix)';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
@@ -395,13 +395,18 @@ function _showUpdateBanner(v){
 }
 
 function _applyAppUpdate(){
-  // Save current data first, then hard-reload past the service worker cache
+  // Save current data first
   try{AppState.save();}catch(e){}
-  // Ask the service worker to drop cached copies so the new file is fetched
-  if('serviceWorker' in navigator&&navigator.serviceWorker.controller){
-    try{caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k)))).finally(()=>location.reload(true));return;}catch(e){}
-  }
-  location.reload(true);
+  // Bust EVERY cache layer: SW caches, SW registration, browser HTTP cache,
+  // and the GitHub Pages CDN (unique ?v= query = different cache key)
+  const bust=()=>{location.replace(location.origin+location.pathname+'?v='+Date.now());};
+  try{
+    const jobs=[];
+    if(window.caches)jobs.push(caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k)))));
+    if('serviceWorker' in navigator)jobs.push(navigator.serviceWorker.getRegistrations().then(regs=>Promise.all(regs.map(r=>r.unregister()))));
+    Promise.all(jobs).finally(bust);
+    setTimeout(bust,4000); // failsafe if a promise hangs
+  }catch(e){bust();}
 }
 
 // Check shortly after load, then every 30 minutes
