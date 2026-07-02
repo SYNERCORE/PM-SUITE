@@ -2194,11 +2194,16 @@ function _spMergeArrays(localArr, remoteArr, localEdited, arrayKey) {
   const result = [];
   // Start with remote as the base, skipping records we deleted locally
   remoteArr.forEach(remoteRec => {
-    // Skip if we locally deleted this record
     if (arrayKey && _spWasDeleted(arrayKey, remoteRec.id)) return;
     const localRec = localMap.get(remoteRec.id);
     if (localRec && localEdited) {
-      result.push(localRec); // preserve local field edits
+      // Local field edits win — but also union append-only sub-arrays from remote
+      // so that updates logged by OTHER users are not lost
+      result.push(_spMergeAppendArrays(localRec, remoteRec));
+    } else if (localRec) {
+      // Remote wins for fields — but union append-only sub-arrays from local
+      // so that updates logged by THIS user are not lost
+      result.push(_spMergeAppendArrays(remoteRec, localRec));
     } else {
       result.push(remoteRec);
     }
@@ -2210,6 +2215,27 @@ function _spMergeArrays(localArr, remoteArr, localEdited, arrayKey) {
     }
   });
   return result;
+}
+
+// Union append-only sub-arrays (updates, comments, attachments) from donor into base.
+// Deduplicates by 'at' timestamp — safe for arrays where each entry is immutable once added.
+function _spMergeAppendArrays(base, donor) {
+  if (!donor) return base;
+  const APPEND_FIELDS = ['updates','comments','attachments','notes'];
+  let merged = base;
+  APPEND_FIELDS.forEach(field => {
+    const baseArr = Array.isArray(base[field]) ? base[field] : [];
+    const donorArr = Array.isArray(donor[field]) ? donor[field] : [];
+    if (donorArr.length === 0) return;
+    const baseAts = new Set(baseArr.map(u => u && u.at).filter(Boolean));
+    const extra = donorArr.filter(u => u && u.at && !baseAts.has(u.at));
+    if (extra.length > 0) {
+      merged = Object.assign({}, merged, {
+        [field]: [...baseArr, ...extra].sort((a,b)=>((a&&a.at||'')<(b&&b.at||'')?-1:1))
+      });
+    }
+  });
+  return merged;
 }
 
 // ── True when local changes haven't been confirmed on SharePoint ──
@@ -3447,9 +3473,30 @@ async function _spPollRemote() {
           }
         });
 
-        // 2. Add ALL remote records that aren't preserved locally
+        // 2. Add ALL remote records that aren't preserved locally.
+        //    For records that exist both locally AND remotely, union any append-only
+        //    sub-arrays (updates, comments, attachments) so neither side loses entries.
         remoteList.forEach(r => {
           if (!r || !r.id || seen.has(r.id)) return;
+          const local = localById[r.id];
+          if (local) {
+            // Merge append-only arrays: combine local + remote, dedupe by 'at' timestamp
+            const appendArrays = ['updates','comments','attachments','notes'];
+            appendArrays.forEach(field => {
+              const remArr = Array.isArray(r[field]) ? r[field] : [];
+              const locArr = Array.isArray(local[field]) ? local[field] : [];
+              if (locArr.length === 0) return; // nothing local to preserve
+              // Build a set of remote timestamps to detect missing local entries
+              const remoteAts = new Set(remArr.map(u => u && u.at).filter(Boolean));
+              const localOnly = locArr.filter(u => u && u.at && !remoteAts.has(u.at));
+              if (localOnly.length > 0) {
+                // Local has entries the remote doesn't — union and sort by time
+                r = Object.assign({}, r, {
+                  [field]: [...remArr, ...localOnly].sort((a,b)=>((a&&a.at||'') < (b&&b.at||'') ? -1 : 1))
+                });
+              }
+            });
+          }
           merged.push(r);
           seen.add(r.id);
         });
