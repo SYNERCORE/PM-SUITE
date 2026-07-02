@@ -9,11 +9,11 @@ function renderMasterlist(){
   const thirdParty=getActive('thirdParty');
 
   const totFleet=equipment.reduce((s,r)=>s+r.dailyRate*30,0)+tools.reduce((s,r)=>s+r.dailyRate*30,0)+vehicles.reduce((s,r)=>s+r.dailyRate*30,0);
-  const totStock=consumables.reduce((s,c)=>s+c.qtyOnHand*c.unitCost,0)+materials.reduce((s,m)=>s+m.qty*m.unitCost,0);
+  const totStock=(AppState.data.warehouseItems||[]).filter(i=>!i._deleted).reduce((s,i)=>{const q=typeof _whCalcQty==='function'?_whCalcQty(i.id):{qtyOnHand:0};return s+(q.qtyOnHand*(i.unitCost||0));},0);
   const totalItems=personnel.length+equipment.length+tools.length+vehicles.length+consumables.length+materials.length+thirdParty.length;
   const inUse=equipment.filter(e=>e.status==='in-use').length+tools.filter(t=>t.status==='in-use').length+vehicles.filter(v=>v.status==='in-use').length;
   const underMaint=equipment.filter(e=>e.status==='maintenance').length+tools.filter(t=>t.status==='maintenance').length+vehicles.filter(v=>v.status==='maintenance').length;
-  const lowStock=consumables.filter(c=>c.qtyOnHand<=c.minStock).length+materials.filter(m=>m.status==='pending').length;
+  const lowStock=(AppState.data.warehouseItems||[]).filter(i=>!i._deleted&&i.minStock>0&&(typeof _whCalcQty==='function'?_whCalcQty(i.id).qtyOnHand:0)<=i.minStock).length;
 
   const tabs=[
     {id:'all',label:'All Assets',icon:'fa-th-list',count:totalItems},
@@ -481,28 +481,20 @@ function renderMlWarehouse(){
       </div>
     </div>
     <div class="table-wrap"><table>
-    <thead><tr><th>ID</th><th>Item Name</th><th>Category</th><th>Unit</th><th>Qty on Hand</th><th>Min Stock</th><th>Stock Bar</th><th>Unit Cost (₱)</th><th>Value (₱)</th><th>Project</th><th>Supplier</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>ID</th><th>Item Name</th><th>Category</th><th>Unit</th><th>Supplier</th><th>Notes</th><th></th></tr></thead>
     <tbody>${_pgSliceN('wh_cons',cons,20).length?_pgSliceN('wh_cons',cons,20).map(c=>{
-      const low=c.qtyOnHand<=c.minStock;
-      const pct=Math.min(100,Math.round((c.qtyOnHand/Math.max(c.minStock*2,1))*100));
       const isPPE=c.category&&c.category.toLowerCase()==='ppe';
-      return '<tr data-rowid="'+c.id+'" style="'+(low?'background:rgba(248,81,73,.04)':'')+'">'
+      return '<tr data-rowid="'+c.id+'">'
       +'<td style="font-size:10px;font-family:var(--font-mono);font-weight:700">'+c.id+'</td>'
       +'<td style="font-weight:500;font-size:12px;min-width:160px">'+c.name+'</td>'
       +'<td>'+(isPPE?'<span class="badge badge-amber" style="font-size:9px">PPE</span>':'<span class="badge badge-gray">'+c.category+'</span>')+'</td>'
       +'<td><span class="badge badge-blue">'+c.unit+'</span></td>'
-      +'<td><input class="form-input" type="number" value="'+c.qtyOnHand+'" style="width:80px;height:26px;font-family:var(--font-mono);font-size:11px;'+(low?'border-color:var(--accent-red);color:var(--accent-red);font-weight:700':'')+'" onchange="mlSaveConsumable(\''+c.id+'\',\'qtyOnHand\',+this.value);setTimeout(renderMlWarehouse,700)"></td>'
-      +'<td><input class="form-input" type="number" value="'+c.minStock+'" style="width:75px;height:26px;font-family:var(--font-mono);font-size:11px" onchange="mlSaveConsumable(\''+c.id+'\',\'minStock\',+this.value)"></td>'
-      +'<td><div style="display:flex;align-items:center;gap:5px;min-width:100px"><div class="progress-bar" style="flex:1;height:6px"><div class="progress-fill" style="width:'+pct+'%;background:'+(low?'var(--accent-red)':'var(--accent-green)')+'"></div></div><span style="font-size:9px;font-weight:700;color:'+(low?'var(--accent-red)':'var(--accent-green)')+'">'+pct+'%</span></div>'+(low?'<div><span class="badge badge-red" style="font-size:9px">Reorder!</span></div>':'')+'</td>'
-      +'<td><input class="form-input" type="number" value="'+c.unitCost+'" style="width:85px;height:26px;font-family:var(--font-mono);font-size:11px" onchange="mlSaveConsumable(\''+c.id+'\',\'unitCost\',+this.value);setTimeout(renderMlWarehouse,700)"></td>'
-      +'<td style="font-family:var(--font-mono);font-size:11px;font-weight:600">₱'+(c.qtyOnHand*c.unitCost).toLocaleString()+'</td>'
-      +'<td><select class="form-select" style="height:30px;font-size:11px;min-width:80px" onchange="mlSaveConsumable(\''+c.id+'\',\'projectId\',this.value)">'+projOpts(c.projectId)+'</select></td>'
       +'<td>'+mlInput(c.id,'consumables','supplier',c.supplier||'','min-width:110px')+'</td>'
-      +'<td>'+mlSB(low?'low-stock':'in-stock')+'</td>'
-      +'<td><div style="display:flex;flex-direction:column;gap:3px">'
+      +'<td style="font-size:11px;color:var(--text-secondary);max-width:160px">'+(c.notes||'—')+'</td>'
+      +'<td><div style="display:flex;gap:3px">'
         +_imEnrollBtn(c.id,'consumables')
         +'<button class="btn btn-secondary btn-sm btn-icon" onclick="showEditConsumable(\''+c.id+'\')" title="Edit"><i class="fas fa-edit"></i></button>'
-        +'<button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail(\''+c.id+'\',\'consumables\')" title="View attachments" style="position:relative"><i class="fas fa-paperclip"></i>'+(c.attachments&&c.attachments.length?'<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">'+c.attachments.length+'</span>':'')+'</button> '
+        +'<button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail(\''+c.id+'\',\'consumables\')" title="View attachments" style="position:relative"><i class="fas fa-paperclip"></i>'+(c.attachments&&c.attachments.length?'<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">'+c.attachments.length+'</span>':'')+'</button>'
         +'<button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlConsumable(\''+c.id+'\')"><i class="fas fa-trash"></i></button>'
       +'</div></td>'
       +'</tr>';
@@ -521,22 +513,17 @@ function renderMlWarehouse(){
       </div>
     </div>
     <div class="table-wrap"><table>
-    <thead><tr><th>ID</th><th>Material Name</th><th>Project</th><th>Qty</th><th>Unit</th><th>Unit Cost (₱)</th><th>Total Value (₱)</th><th>Supplier</th><th>Delivery Date</th><th>Status</th><th>Critical</th><th></th></tr></thead>
+    <thead><tr><th>ID</th><th>Material Name</th><th>Unit</th><th>Supplier</th><th>Delivery Date</th><th>Critical</th><th></th></tr></thead>
     <tbody>${_pgSliceN('wh_mats',mats,20).length?_pgSliceN('wh_mats',mats,20).map(m=>'<tr data-rowid="'+m.id+'" style="'+(m.critical?'border-left:3px solid var(--accent-amber)':'')+'">'
       +'<td style="font-size:10px;font-family:var(--font-mono);font-weight:700">'+m.id+'</td>'
       +'<td style="font-weight:500;font-size:12px;min-width:180px">'+m.name+'</td>'
-      +'<td><select class="form-select" style="height:30px;font-size:11px;min-width:80px" onchange="mlSaveMaterial(\''+m.id+'\',\'projectId\',this.value)">'+projOpts(m.projectId)+'</select></td>'
-      +'<td><input class="form-input" type="number" value="'+m.qty+'" style="width:80px;height:26px;font-family:var(--font-mono);font-size:11px" onchange="mlSaveMaterial(\''+m.id+'\',\'qty\',+this.value);setTimeout(renderMlWarehouse,700)"></td>'
       +'<td><span class="badge badge-blue">'+m.unit+'</span></td>'
-      +'<td><input class="form-input" type="number" value="'+m.unitCost+'" style="width:90px;height:26px;font-family:var(--font-mono);font-size:11px" onchange="mlSaveMaterial(\''+m.id+'\',\'unitCost\',+this.value);setTimeout(renderMlWarehouse,700)"></td>'
-      +'<td style="font-family:var(--font-mono);font-size:11px;font-weight:600">₱'+(m.qty*m.unitCost).toLocaleString()+'</td>'
       +'<td><input class="form-input" value="'+(m.supplier||'')+'" style="min-width:120px;height:26px;font-size:11px" onchange="mlSaveMaterial(\''+m.id+'\',\'supplier\',this.value)"></td>'
       +'<td><input class="form-input" type="date" value="'+(m.deliveryDate||'')+'" style="height:26px;font-size:11px;'+(isOverdue(m.deliveryDate)&&m.status!=='delivered'?'border-color:var(--accent-red);color:var(--accent-red)':'')+'" onchange="mlSaveMaterial(\''+m.id+'\',\'deliveryDate\',this.value)"></td>'
-      +'<td><select class="form-select" style="height:30px;font-size:11px;min-width:90px" onchange="mlSaveMaterial(\''+m.id+'\',\'status\',this.value);setTimeout(renderMlWarehouse,700)">'+statOpts(m.status,_getDropdown('material_status'))+'</select></td>'
-      +'<td><label class="toggle" style="width:36px;height:18px"><input type="checkbox" '+(m.critical?'checked':'')+' onchange="mlSaveMaterial(\''+m.id+'\',\'critical\',this.checked)"><span class="toggle-slider"></span></label> '+(m.critical?'<span class="badge badge-amber" style="font-size:9px">Critical</span>':'')+'</td>'
-      +'<td><div style="display:flex;gap:3px;position:relative;flex-wrap:wrap">'
+      +'<td><label class="toggle" style="width:36px;height:18px"><input type="checkbox" '+(m.critical?'checked':'')+' onchange="mlSaveMaterial(\''+m.id+'\',\'critical\',this.checked)"><span class="toggle-slider"></span></label>'+(m.critical?' <span class="badge badge-amber" style="font-size:9px">Critical</span>':'')+'</td>'
+      +'<td><div style="display:flex;gap:3px">'
       +_imEnrollBtn(m.id,'materials')
-      +'<button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail(\''+m.id+'\',\'materials\')" title="View attachments"><i class="fas fa-paperclip"></i>'+(m.attachments&&m.attachments.length?'<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">'+m.attachments.length+'</span>':'')+'</button>'
+      +'<button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail(\''+m.id+'\',\'materials\')" title="View attachments" style="position:relative"><i class="fas fa-paperclip"></i>'+(m.attachments&&m.attachments.length?'<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">'+m.attachments.length+'</span>':'')+'</button>'
       +'<button class="btn btn-danger btn-sm btn-icon" onclick="deleteMlMaterial(\''+m.id+'\')"><i class="fas fa-trash"></i></button>'
       +'</div></td>'
       +'</tr>').join(''):mlEmpty('materials')}

@@ -10,17 +10,86 @@ ${sc('fas fa-spinner','In Progress',actions.filter(a=>a.status==='inprogress').l
 ${sc('fas fa-check','Completed',actions.filter(a=>a.status==='closed').length,'Resolved','#3fb950','rgba(63,185,80,.15)')}
 </div>
 <div class="card"><div class="table-wrap"><table>
-<thead><tr><th>ID</th><th>Project</th><th>Action</th><th>Assignee</th><th>Source</th><th>Due Date</th><th>Priority</th><th>Status</th><th></th></tr></thead>
-<tbody>${_pgSlice("actions",actions).map(a=>`<tr>
+<thead><tr><th>ID</th><th>Project</th><th>Action</th><th>Assignee</th><th>Due Date</th><th>Priority</th><th>Status</th><th>Latest Update</th><th></th></tr></thead>
+<tbody>${_pgSlice("actions",actions).map(a=>{
+const updates=a.updates||[];
+const last=updates[updates.length-1];
+const lastText=last?`<div style="font-size:11px;color:var(--text-primary);line-height:1.4">${last.text.length>60?last.text.substring(0,60)+'…':last.text}</div><div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${last.by||'—'} · ${last.at?last.at.slice(0,10):'—'}</div>`:`<span style="font-size:11px;color:var(--text-muted)">No updates yet</span>`;
+return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${a.id}</td>
 <td><span class="badge badge-blue">${a.projectId}</span></td>
-<td style="font-size:12px;font-weight:500;max-width:200px">${a.description}</td>
+<td style="font-size:12px;font-weight:500;max-width:180px">${a.description}</td>
 <td><div style="display:flex;align-items:center;gap:5px">${avatarH(a.assignee)}<span style="font-size:11px">${a.assignee.split(' ')[0]}</span></div></td>
-<td><span class="badge badge-gray">${a.source}</span></td>
 <td style="font-size:11px;font-family:var(--font-mono);color:${a.status==='overdue'?'var(--accent-red)':isOverdue(a.dueDate)?'var(--accent-amber)':'inherit'}">${a.dueDate}</td>
 <td>${pBadge(a.priority)}</td><td>${sBadge(a.status)}</td>
-<td><button class="btn btn-success btn-sm btn-icon" onclick="closeAction('${a.id}')" title="Mark closed"><i class="fas fa-check"></i></button></td>
-</tr>`).join('')}</tbody></table>${_pgNav("actions",actions,typeof renderActions==="function"?renderActions:null)}</div></div>`;}
+<td style="max-width:220px">${lastText}</td>
+<td><div style="display:flex;gap:4px">
+  <button class="btn btn-secondary btn-sm btn-icon" onclick="showActionUpdates('${a.id}')" title="Updates (${updates.length})" style="position:relative">
+    <i class="fas fa-comments"></i>${updates.length?`<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-blue);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">${updates.length}</span>`:''}
+  </button>
+  <button class="btn btn-success btn-sm btn-icon" onclick="closeAction('${a.id}')" title="Mark closed"><i class="fas fa-check"></i></button>
+</div></td>
+</tr>`;}).join('')}</tbody></table>${_pgNav("actions",actions,typeof renderActions==="function"?renderActions:null)}</div></div>`;}
+
+function showActionUpdates(id){
+const a=(AppState.data.actions||[]).find(x=>x.id===id);
+if(!a)return;
+if(!a.updates)a.updates=[];
+const user=AppState.currentUser?.displayName||AppState.currentUser?.email||'Me';
+function _renderUpdates(){
+  const rows=a.updates.length?[...a.updates].reverse().map(u=>`
+    <div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="flex-shrink:0">${avatarH(u.by||'?',28)}</div>
+      <div style="flex:1">
+        <div style="font-size:12px;line-height:1.5">${u.text}</div>
+        <div style="font-size:10px;color:var(--text-secondary);margin-top:4px"><strong>${u.by||'Unknown'}</strong> · ${u.at?new Date(u.at).toLocaleString('en',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—'}</div>
+      </div>
+    </div>`).join(''):`<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px"><i class="fas fa-comments" style="font-size:24px;opacity:.3;display:block;margin-bottom:8px"></i>No updates yet — be the first to log one.</div>`;
+  const body=$('#genericModalBody');if(body)body.querySelector('#_auFeed').innerHTML=rows;
+}
+$('#genericModalTitle').textContent=`Updates — ${a.id}`;
+$('#genericModalBody').innerHTML=`
+<div style="background:var(--bg-hover);border-radius:8px;padding:10px 14px;margin-bottom:14px">
+  <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:2px">ACTION</div>
+  <div style="font-size:13px;font-weight:600">${a.description}</div>
+  <div style="display:flex;gap:10px;margin-top:6px;font-size:11px;color:var(--text-secondary)">
+    <span>${avatarH(a.assignee,18)} ${a.assignee}</span>
+    <span>·</span><span>Due: ${a.dueDate}</span>
+    <span>·</span>${sBadge(a.status)}
+  </div>
+</div>
+<div style="margin-bottom:12px">
+  <label class="form-label">Log an Update</label>
+  <textarea id="_auText" class="form-input" rows="3" placeholder="What happened? What's the status? Any blockers?" style="resize:vertical"></textarea>
+</div>
+<div id="_auFeed" style="max-height:280px;overflow-y:auto"></div>`;
+$('#genericModalFooter').innerHTML=`
+<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>
+<button class="btn btn-primary" onclick="saveActionUpdate('${id}')"><i class="fas fa-paper-plane"></i> Log Update</button>`;
+_renderUpdates();
+openModal('genericModal');}
+
+function saveActionUpdate(id){
+const text=($('#_auText')?.value||'').trim();
+if(!text){showToast('Type an update first','warning');return;}
+const a=(AppState.data.actions||[]).find(x=>x.id===id);
+if(!a)return;
+if(!a.updates)a.updates=[];
+const user=AppState.currentUser?.displayName||AppState.currentUser?.email||'Me';
+a.updates.push({text,by:user,at:new Date().toISOString()});
+AppState.save();
+const ta=$('#_auText');if(ta)ta.value='';
+// Re-render the feed inside the open modal
+const rows=[...a.updates].reverse().map(u=>`
+  <div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+    <div style="flex-shrink:0">${avatarH(u.by||'?',28)}</div>
+    <div style="flex:1">
+      <div style="font-size:12px;line-height:1.5">${u.text}</div>
+      <div style="font-size:10px;color:var(--text-secondary);margin-top:4px"><strong>${u.by||'Unknown'}</strong> · ${u.at?new Date(u.at).toLocaleString('en',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—'}</div>
+    </div>
+  </div>`).join('');
+const feed=$('#_auFeed');if(feed)feed.innerHTML=rows;
+showToast('Update logged','success');}
 
 function showAddAction(pid){
 if(!pid && typeof detailProjectId !== 'undefined') pid = detailProjectId;
