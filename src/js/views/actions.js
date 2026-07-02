@@ -1,7 +1,7 @@
 function _actRowHTML(a){
 const updates=a.updates||[];
 const last=updates[updates.length-1];
-const lastText=last?`<div style="font-size:11px;color:var(--text-primary);line-height:1.4">${last.text.length>60?last.text.substring(0,60)+'…':last.text}</div><div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${last.by||'—'} · ${last.at?last.at.slice(0,10):'—'}</div>`:`<span style="font-size:11px;color:var(--text-muted)">No updates yet</span>`;
+const lastText=last?`<div style="font-size:11px;color:var(--text-primary);line-height:1.5;white-space:pre-line">${last.text.length>120?last.text.substring(0,120)+'…':last.text}</div><div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${last.by||'—'} · ${last.at?last.at.slice(0,10):'—'}</div>`:`<span style="font-size:11px;color:var(--text-muted)">No updates yet</span>`;
 return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${a.id}</td>
 <td style="font-size:12px;font-weight:500;max-width:180px">${a.description}</td>
@@ -68,7 +68,7 @@ function _renderUpdates(){
     <div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="flex-shrink:0">${avatarH(u.by||'?',28)}</div>
       <div style="flex:1">
-        <div style="font-size:12px;line-height:1.5">${u.text}</div>
+        <div style="font-size:12px;line-height:1.6;white-space:pre-line">${u.text}</div>
         <div style="font-size:10px;color:var(--text-secondary);margin-top:4px"><strong>${u.by||'Unknown'}</strong> · ${u.at?new Date(u.at).toLocaleString('en',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—'}</div>
       </div>
     </div>`).join(''):`<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px"><i class="fas fa-comments" style="font-size:24px;opacity:.3;display:block;margin-bottom:8px"></i>No updates yet — be the first to log one.</div>`;
