@@ -288,6 +288,15 @@ const ov=$('#mobileOverlay');if(ov)ov.style.display='none';}
 window.addEventListener('resize',()=>{
   if(window.innerWidth>=768)_closeMobileSidebar();
 });
+// Watchdog: if the backdrop is ever visible while the sidebar is not in
+// mobile-open state (any code path, any timing), hide it. Catches every
+// stuck-overlay scenario permanently.
+setInterval(()=>{
+  const ov=document.getElementById('mobileOverlay');
+  if(!ov||ov.style.display!=='block')return;
+  const s=document.getElementById('sidebar');
+  if(window.innerWidth>=768||!s||!s.classList.contains('mobile-open'))ov.style.display='none';
+},2000);
 
 function toggleTheme(){
 AppState.theme=AppState.theme==='dark'?'light':'dark';
