@@ -134,7 +134,8 @@ openModal('genericModal');}
 
 function saveAction(){
 if(!_req(['gDesc','gAss','gDate'])){showToast('Fill in required fields','error');return;}
-const a={id:'ACT-'+((AppState.data.actions||[]).length+1).toString().padStart(3,'0'),projectId:$('#gProj').value,description:$('#gDesc').value,assignee:$('#gAss').value,source:$('#gSrc').value,dueDate:$('#gDate').value,priority:$('#gPri').value,status:'open'};
+const _actMax=Math.max(0,...(AppState.data.actions||[]).map(x=>{const m=x.id&&x.id.match(/(\d+)$/);return m?parseInt(m[1]):0;}));
+const a={id:'ACT-'+(_actMax+1).toString().padStart(3,'0'),projectId:$('#gProj').value,description:$('#gDesc').value,assignee:$('#gAss').value,source:$('#gSrc').value,dueDate:$('#gDate').value,priority:$('#gPri').value,status:'open'};
 AppState.data.actions.push(a);AppState.save();closeModal('genericModal');renderActions();showToast('Action created','success');buildSidebar();}
 
 function closeAction(id){const a=(AppState.data.actions||[]).find(a=>a.id===id);if(a){a.status='closed';AppState.save();renderActions();showToast('Action closed','success');buildSidebar();}}
