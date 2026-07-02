@@ -1,6 +1,8 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.1.1';
-const APP_BUILD='20260528b';
+const APP_VERSION='2.2.0';
+const APP_BUILD='20260702a';
+// One-line summary of this release — shown in the update banner on other users' screens
+const APP_CHANGELOG='Sync fixes: updates never lost on merge, storage cleanup, status change in updates modal';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
@@ -234,6 +236,61 @@ function _handleStorageFull(err,json){
     setTimeout(()=>{if(typeof showToast==='function')showToast('Storage full — changes not saved locally. Go to Settings → Storage to clean up.','error',8000);else alert(msg);},200);
   }
 }
+
+// ── UPDATE NOTIFICATION ──────────────────────────────────────
+// Checks GitHub for a newer version.json and shows a refresh banner.
+const _UPDATE_CHECK_URL='https://raw.githubusercontent.com/SYNERCORE/PM-SUITE/main/version.json';
+let _updateBannerShown=false;
+
+function _versionNewer(remote,local){
+  // Compare semver-ish strings: '2.2.1' > '2.2.0'
+  const r=String(remote).split('.').map(n=>parseInt(n)||0);
+  const l=String(local).split('.').map(n=>parseInt(n)||0);
+  for(let i=0;i<Math.max(r.length,l.length);i++){
+    if((r[i]||0)>(l[i]||0))return true;
+    if((r[i]||0)<(l[i]||0))return false;
+  }
+  return false;
+}
+
+async function _checkForAppUpdate(){
+  if(_updateBannerShown||!navigator.onLine)return;
+  try{
+    const res=await fetch(_UPDATE_CHECK_URL+'?t='+Date.now(),{cache:'no-store'});
+    if(!res.ok)return;
+    const v=await res.json();
+    if(!v||!v.version)return;
+    if(_versionNewer(v.version,APP_VERSION))_showUpdateBanner(v);
+  }catch(e){/* offline or GitHub unreachable — silent */}
+}
+
+function _showUpdateBanner(v){
+  if(_updateBannerShown)return;
+  _updateBannerShown=true;
+  const banner=document.createElement('div');
+  banner.id='updateBanner';
+  banner.style.cssText='position:fixed;top:0;left:0;right:0;z-index:10000;background:linear-gradient(90deg,#1f6feb,#388bfd);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:center;gap:14px;font-size:12px;font-weight:600;box-shadow:0 2px 12px rgba(0,0,0,.35)';
+  banner.innerHTML=`
+    <i class="fas fa-arrow-up-from-bracket"></i>
+    <span>New version <strong>v${v.version}</strong> is available${v.note?' — '+v.note:''}</span>
+    <button onclick="_applyAppUpdate()" style="background:#fff;color:#1f6feb;border:none;border-radius:6px;padding:5px 14px;font-size:11px;font-weight:700;cursor:pointer"><i class="fas fa-rotate-right" style="margin-right:4px"></i>Refresh Now</button>
+    <button onclick="document.getElementById('updateBanner').remove()" style="background:transparent;color:rgba(255,255,255,.8);border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer">Later</button>`;
+  document.body.appendChild(banner);
+}
+
+function _applyAppUpdate(){
+  // Save current data first, then hard-reload past the service worker cache
+  try{AppState.save();}catch(e){}
+  // Ask the service worker to drop cached copies so the new file is fetched
+  if('serviceWorker' in navigator&&navigator.serviceWorker.controller){
+    try{caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k)))).finally(()=>location.reload(true));return;}catch(e){}
+  }
+  location.reload(true);
+}
+
+// Check shortly after load, then every 30 minutes
+setTimeout(_checkForAppUpdate,15000);
+setInterval(_checkForAppUpdate,30*60*1000);
 
 // ── Module-level state variables (declared early to avoid TDZ errors) ──
 // ── All global state declared early to prevent TDZ errors ──

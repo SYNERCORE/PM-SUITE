@@ -51,6 +51,14 @@ foreach ($f in $jsFiles) {
 
 [System.IO.File]::WriteAllText("$base\promaster.html", $out, $enc)
 
+# -- Auto-generate version.json from APP_VERSION / APP_CHANGELOG in core.js --
+$coreJs = ReadFile('js\core.js')
+$ver  = if ($coreJs -match "APP_VERSION='([^']+)'")   { $Matches[1] } else { '0.0.0' }
+$note = if ($coreJs -match "APP_CHANGELOG='([^']+)'") { $Matches[1] } else { '' }
+$verJson = '{"version":"' + $ver + '","note":"' + ($note -replace '"','\"') + '","released":"' + (Get-Date -Format 'yyyy-MM-dd HH:mm') + '"}'
+[System.IO.File]::WriteAllText("$base\version.json", $verJson, $enc)
+Write-Host "  version.json -> v$ver" -ForegroundColor Cyan
+
 $size  = [Math]::Round((Get-Item "$base\promaster.html").Length / 1MB, 2)
 $lines = ([System.IO.File]::ReadAllLines("$base\promaster.html", $enc)).Count
 
