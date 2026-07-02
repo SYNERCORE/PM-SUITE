@@ -420,7 +420,7 @@ kbd {
     </div>
   </div>
 </nav>
-<div class="mobile-overlay" id="mobileOverlay" onclick="toggleSidebar()"></div>
+<div class="mobile-overlay" id="mobileOverlay" onclick="_closeMobileSidebar()"></div>
 <div class="main-content">
   <header class="topbar">
     <button class="sidebar-toggle" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
@@ -2134,6 +2134,13 @@ else s.classList.toggle('collapsed');}
 function _closeMobileSidebar(){
 const s=$('#sidebar');if(s)s.classList.remove('mobile-open');
 const ov=$('#mobileOverlay');if(ov)ov.style.display='none';}
+
+// Crossing into desktop width (split screen, window resize, rotation):
+// always clear the mobile sidebar state so the backdrop can't get stuck
+// on top of the app, dimming it and swallowing clicks.
+window.addEventListener('resize',()=>{
+  if(window.innerWidth>=768)_closeMobileSidebar();
+});
 
 function toggleTheme(){
 AppState.theme=AppState.theme==='dark'?'light':'dark';

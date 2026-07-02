@@ -282,6 +282,13 @@ function _closeMobileSidebar(){
 const s=$('#sidebar');if(s)s.classList.remove('mobile-open');
 const ov=$('#mobileOverlay');if(ov)ov.style.display='none';}
 
+// Crossing into desktop width (split screen, window resize, rotation):
+// always clear the mobile sidebar state so the backdrop can't get stuck
+// on top of the app, dimming it and swallowing clicks.
+window.addEventListener('resize',()=>{
+  if(window.innerWidth>=768)_closeMobileSidebar();
+});
+
 function toggleTheme(){
 AppState.theme=AppState.theme==='dark'?'light':'dark';
 document.documentElement.setAttribute('data-theme',AppState.theme);
