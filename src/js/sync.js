@@ -495,6 +495,9 @@ const _COLLISION_CHECKED_ARRAYS = [
   { key: 'assetHistory', prefix: 'AH', refs: ['assetId'] },
   { key: 'notifications', prefix: 'NOTIF', refs: [] },
   { key: 'idChangeRequests', prefix: 'IDC', refs: [] },
+  { key: 'warehouseItems', prefix: 'WH', refs: [] },
+  { key: 'stockTransactions', prefix: 'TX', refs: ['itemId'] },
+  { key: 'issuanceRequests', prefix: 'REQ', refs: ['itemId'] },
 ];
 
 // After pulling latest, check if any of OUR newly-created local records
@@ -578,12 +581,20 @@ function _nextFreeId(prefix, knownIds) {
     }
   });
   // Use padding consistent with prefix
-  const pad = prefix === 'TSK' ? 5 : prefix === 'AH' ? 4 : 3;
+  const pad = prefix === 'TSK' ? 5 : (prefix === 'AH' || prefix === 'WH' || prefix === 'TX' || prefix === 'REQ') ? 4 : 3;
   return prefix + '-' + String(maxN + 1).padStart(pad, '0');
 }
 
 function _clearNewlyCreatedFlags() {
+  // Never clear flags on arrays whose last push failed — those records have NOT
+  // reached SharePoint yet, and the flag is what protects them from being
+  // dropped by the next pull-merge.
+  const failed = (typeof _spPushFailedKeys !== 'undefined' && _spPushFailedKeys) ? _spPushFailedKeys : new Set();
   _COLLISION_CHECKED_ARRAYS.forEach(cfg => {
+    if (failed.has(cfg.key)) {
+      console.log('[SP] Keeping _newlyCreated protection on ' + cfg.key + ' — last push failed');
+      return;
+    }
     (AppState.data[cfg.key] || []).forEach(r => {
       if (r && r._newlyCreated) {
         delete r._newlyCreated;
@@ -2247,6 +2258,7 @@ function _spHasLocalEdits() {
 function _spApplyRemote(data, _ts, _by) {
   const hash = _spHash(data) + _ts;
   if (hash === _spDataHash) return; // no change
+  if (typeof _capturePreSyncSnapshot === 'function') _capturePreSyncSnapshot(); // safety net
   _spDataHash = hash;
   _spLastWriteTs = _ts || Date.now();
   localStorage.setItem('shic_sp_lastwritets', String(_spLastWriteTs));
@@ -2370,6 +2382,10 @@ async function _spFetchListItems(token, listName) {
     url = data['@odata.nextLink'] || null;
     pageCount++;
   }
+  // If pages remain after the cap, the fetch is INCOMPLETE — treating it as complete
+  // would make the merge see missing records as deletions. Fail instead; the pull
+  // for this list is skipped and local data stays intact.
+  if (url) throw new Error(listName + ' has more than 30,000 items — fetch incomplete, pull skipped');
   return { listId, items };
 }
 
@@ -2404,7 +2420,7 @@ async function _spPushListData(token, listName, records, prevIdMap) {
   const localIds = new Set(records.map(r => r.id));
   const remoteIdsToDelete = Object.keys(prevIdMap).filter(id => !localIds.has(id));
   const username = _spAccount?.username || _m365Account?.username || 'system';
-  let added = 0, updated = 0, deleted = 0;
+  let added = 0, updated = 0, deleted = 0, failedWrites = 0;
 
   // Build hash map of records by id for change detection (compare with prev push hash)
   for (const record of records) {
@@ -2445,26 +2461,27 @@ async function _spPushListData(token, listName, records, prevIdMap) {
     }
 
     try {
+      let writeOk = false;
       if (existingItemId) {
         const r = await fetch(
           `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/items/${existingItemId}`,
           { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
         );
-        if (r.ok) updated++;
+        if (r.ok) { updated++; writeOk = true; }
         else if (r.status === 404) {
           // Item was deleted remotely — re-create
           const c = await fetch(
             `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/items`,
             { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
           );
-          if (c.ok) { const created = await c.json(); prevIdMap[record.id] = created.id; added++; }
+          if (c.ok) { const created = await c.json(); prevIdMap[record.id] = created.id; added++; writeOk = true; }
         }
       } else {
         const r = await fetch(
           `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/items`,
           { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
         );
-        if (r.ok) { const created = await r.json(); prevIdMap[record.id] = created.id; added++; }
+        if (r.ok) { const created = await r.json(); prevIdMap[record.id] = created.id; added++; writeOk = true; }
         else if (r.status === 429) {
           await new Promise(r => setTimeout(r, 3000));
           // simple retry once
@@ -2472,13 +2489,20 @@ async function _spPushListData(token, listName, records, prevIdMap) {
             `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/items`,
             { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
           );
-          if (r2.ok) { const created = await r2.json(); prevIdMap[record.id] = created.id; added++; }
+          if (r2.ok) { const created = await r2.json(); prevIdMap[record.id] = created.id; added++; writeOk = true; }
         }
       }
-      // Update hash cache
-      if (!_spListRecordHashes[listName]) _spListRecordHashes[listName] = {};
-      _spListRecordHashes[listName][record.id] = recordHash;
-    } catch(e) { console.warn('[SP] Write error for', record.id, ':', e.message); }
+      // CRITICAL: only cache the hash when the write actually succeeded.
+      // Caching on failure marks the record as "pushed" forever — it would never
+      // be retried, and a later pull would drop it locally (silent data loss).
+      if (writeOk) {
+        if (!_spListRecordHashes[listName]) _spListRecordHashes[listName] = {};
+        _spListRecordHashes[listName][record.id] = recordHash;
+      } else {
+        failedWrites++;
+        console.warn('[SP] Write NOT confirmed for ' + listName + '/' + record.id + ' — will retry next push');
+      }
+    } catch(e) { failedWrites++; console.warn('[SP] Write error for', record.id, ':', e.message); }
   }
 
   // Delete remote items — but ONLY ones we intentionally deleted locally
@@ -2509,7 +2533,7 @@ async function _spPushListData(token, listName, records, prevIdMap) {
     } catch(e) { /* silent — non-critical */ }
   }
 
-  return { added, updated, deleted };
+  return { added, updated, deleted, failedWrites };
 }
 
 // ── Quick hash for change detection ─────────────────────────
@@ -2605,8 +2629,13 @@ async function _spFetchAllSubLists(token) {
 }
 
 // ── Push all sub-lists in parallel ──────────────────────────
+// Data keys whose push failed (fully or partially) in the LAST push cycle.
+// Records in these arrays keep their _newlyCreated protection so a pull can't drop them.
+let _spPushFailedKeys = new Set();
+
 async function _spPushAllSubLists(token) {
   const summary = { added: 0, updated: 0, deleted: 0, dupesRemoved: 0 };
+  _spPushFailedKeys = new Set();
   const tasks = Object.entries(SHIC_LIST_CONFIG).map(async ([listName, cfg]) => {
     try {
       const records = AppState.data[cfg.dataKey] || [];
@@ -2628,6 +2657,7 @@ async function _spPushAllSubLists(token) {
           // Could not resolve existing SP rows — abort push for this list to avoid mass duplicates.
           // The list will be retried on the next push cycle once SP is reachable.
           console.warn('[SP] Skipping push for ' + listName + ' — could not fetch existing items:', e.message);
+          _spPushFailedKeys.add(cfg.dataKey); // keep _newlyCreated protection on these records
           return; // skip this list entirely
         }
       }
@@ -2636,9 +2666,15 @@ async function _spPushAllSubLists(token) {
       if (r.added || r.updated || r.deleted) {
         console.log('[SP] ' + listName + ': +' + r.added + ' ~' + r.updated + ' -' + r.deleted);
       }
+      if (r.failedWrites > 0) {
+        // Some records in this list did NOT reach SharePoint — keep their protection
+        _spPushFailedKeys.add(cfg.dataKey);
+        console.warn('[SP] ' + listName + ': ' + r.failedWrites + ' write(s) failed — records stay protected until retried');
+      }
       if (typeof _markListSyncSuccess === 'function') _markListSyncSuccess(listName);
     } catch(e) {
       console.warn('[SP] Push ' + listName + ' failed:', e.message);
+      _spPushFailedKeys.add(cfg.dataKey); // keep _newlyCreated protection on these records
       if (typeof _markListSyncFail === 'function') _markListSyncFail(listName, e.message);
     }
   });
@@ -3393,6 +3429,24 @@ function getEditingRecordIds(dataKey) {
   return ids;
 }
 
+// ── Pre-sync safety snapshot (in-memory; survives until reload) ──
+// Captured right before any remote merge touches AppState.data.
+let _preSyncSnapshot = null; // { json, at }
+function _capturePreSyncSnapshot() {
+  try { _preSyncSnapshot = { json: JSON.stringify(AppState.data), at: new Date().toISOString() }; } catch(e) {}
+}
+function restorePreSyncSnapshot() {
+  if (!_preSyncSnapshot) { showToast('No pre-sync snapshot available (cleared on page reload)', 'warning', 4000); return; }
+  if (!confirm('Restore your data to the state BEFORE the last sync (' + new Date(_preSyncSnapshot.at).toLocaleTimeString() + ')?\n\nChanges made after that sync will be lost locally.')) return;
+  try {
+    AppState.data = JSON.parse(_preSyncSnapshot.json);
+    AppState.save();
+    try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
+    try { buildSidebar(); } catch(e) {}
+    showToast('Data restored to pre-sync state. Review it, then use Sync Now to push.', 'success', 6000);
+  } catch(e) { showToast('Restore failed: ' + e.message, 'error'); }
+}
+
 async function _spPollRemote() {
   if (!_spConnected || !_spAccount || _spSyncing) return;
   // Fix #1: skip if user is actively editing — prevents wiping typed text
@@ -3432,6 +3486,7 @@ async function _spPollRemote() {
     let subListsChanged = false;
     try {
       const subListResults = await _spFetchAllSubLists(token);
+      _capturePreSyncSnapshot(); // safety net: keep pre-merge state restorable from Settings
       Object.entries(SHIC_LIST_CONFIG).forEach(([listName, cfg]) => {
         const remoteList = subListResults[cfg.dataKey];
         if (!Array.isArray(remoteList)) return; // fetch failed or list missing

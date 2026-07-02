@@ -200,6 +200,7 @@ ${renderSpPanel()}
       <button class="btn btn-danger" onclick="clearAllData()"><i class="fas fa-trash"></i> Clear All Data</button>
       <button class="btn btn-secondary" onclick="showPatchImport()"><i class="fas fa-bolt"></i> Apply Update Patch</button>
       <button class="btn btn-secondary" onclick="cleanUpStorage()" style="border-color:var(--accent-amber);color:var(--accent-amber)" title="Remove soft-deleted records from local storage to free up space"><i class="fas fa-broom"></i> Clean Up Storage</button>
+      <button class="btn btn-secondary" onclick="restorePreSyncSnapshot()" title="Undo the last SharePoint sync merge — restores your data to the state just before it"><i class="fas fa-clock-rotate-left"></i> Restore Pre-Sync Snapshot</button>
       <div id="storageUsageBar" style="margin-top:4px"></div>
       <button class="btn btn-secondary" onclick="clearDemoData()" style="border-color:var(--accent-amber);color:var(--accent-amber)"><i class="fas fa-broom" style="margin-right:6px"></i> Clear Demo Data &amp; Start Fresh</button>
       <div id="adminOnlyBtns" style="display:none;flex-direction:column;gap:8px">
@@ -728,6 +729,10 @@ function _storageUsageHTML(){
 }
 
 function resetDemo(){
+  if(typeof _spConnected!=='undefined'&&_spConnected){
+    showToast('Disconnect from SharePoint first — resetting to demo data while connected would push demo records to the whole team.','error',7000);
+    return;
+  }
   if(!confirm('Reset to demo data? Current data will be lost.'))return;
   AppState.data=getDemoData();
   AppState.save();
