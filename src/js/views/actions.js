@@ -82,12 +82,24 @@ $('#genericModalBody').innerHTML=`
   <div style="display:flex;gap:10px;margin-top:6px;font-size:11px;color:var(--text-secondary)">
     <span>${avatarH(a.assignee,18)} ${a.assignee}</span>
     <span>·</span><span>Due: ${a.dueDate}</span>
-    <span>·</span>${sBadge(a.status)}
+    <span>·</span><span id="_auStatusBadge">${sBadge(a.status)}</span>
   </div>
 </div>
-<div style="margin-bottom:12px">
-  <label class="form-label">Log an Update</label>
-  <textarea id="_auText" class="form-input" rows="3" placeholder="What happened? What's the status? Any blockers?" style="resize:vertical"></textarea>
+<div style="display:flex;gap:10px;margin-bottom:12px">
+  <div style="flex:1">
+    <label class="form-label">Log an Update</label>
+    <textarea id="_auText" class="form-input" rows="3" placeholder="What happened? What's the status? Any blockers?" style="resize:vertical"></textarea>
+  </div>
+  <div style="width:140px">
+    <label class="form-label">Change Status</label>
+    <select class="form-select" id="_auStatus">
+      <option value="">— no change —</option>
+      <option value="open" ${a.status==='open'?'selected':''}>Open</option>
+      <option value="inprogress" ${a.status==='inprogress'?'selected':''}>In Progress</option>
+      <option value="overdue" ${a.status==='overdue'?'selected':''}>Overdue</option>
+      <option value="closed" ${a.status==='closed'?'selected':''}>Closed</option>
+    </select>
+  </div>
 </div>
 <div id="_auFeed" style="max-height:280px;overflow-y:auto"></div>`;
 $('#genericModalFooter').innerHTML=`
@@ -98,12 +110,22 @@ openModal('genericModal');}
 
 function saveActionUpdate(id){
 const text=($('#_auText')?.value||'').trim();
-if(!text){showToast('Type an update first','warning');return;}
+const newStatus=($('#_auStatus')?.value||'').trim();
+if(!text&&!newStatus){showToast('Type an update or change the status first','warning');return;}
 const a=(AppState.data.actions||[]).find(x=>x.id===id);
 if(!a)return;
 if(!a.updates)a.updates=[];
 const user=AppState.currentUser?.displayName||AppState.currentUser?.email||'Me';
-a.updates.push({text,by:user,at:new Date().toISOString()});
+if(newStatus&&newStatus!==a.status){
+  const oldStatus=a.status;
+  a.status=newStatus;
+  const statusLabel={open:'Open',inprogress:'In Progress',overdue:'Overdue',closed:'Closed'};
+  const autoNote=`Status changed: ${statusLabel[oldStatus]||oldStatus} → ${statusLabel[newStatus]||newStatus}`;
+  a.updates.push({text:text?(autoNote+'\n'+text):autoNote,by:user,at:new Date().toISOString()});
+  const badge=$('#_auStatusBadge');if(badge)badge.innerHTML=sBadge(newStatus);
+}else if(text){
+  a.updates.push({text,by:user,at:new Date().toISOString()});
+}
 AppState.save();
 const ta=$('#_auText');if(ta)ta.value='';
 // Re-render the feed inside the open modal

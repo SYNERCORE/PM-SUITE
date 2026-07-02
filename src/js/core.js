@@ -155,7 +155,6 @@ async function _encryptAndStore(json) {
     const ctB64 = btoa(bin);
     const enc = JSON.stringify({__enc:1,iv:ivHex,ct:ctB64});
     localStorage.setItem('pm_data', enc);
-    localStorage.setItem('shic_data_backup', enc);
     return true;
   } catch(e) { console.warn('[SHIC] Encrypt failed:', e.message); return false; }
 }
@@ -180,16 +179,13 @@ save(){
   try{
     const json=JSON.stringify(this.data);
     if(_cryptoKey){
-      // Async encrypt — fire-and-forget; overwrites pm_data with ciphertext
       _encryptAndStore(json).catch(()=>{
-        localStorage.setItem('pm_data',json);
-        localStorage.setItem('shic_data_backup',json);
+        try{localStorage.setItem('pm_data',json);}catch(qe){_handleStorageFull(qe,json);}
       });
     }else{
-      localStorage.setItem('pm_data',json);
-      localStorage.setItem('shic_data_backup',json);
+      try{localStorage.setItem('pm_data',json);}catch(qe){_handleStorageFull(qe,json);}
     }
-  }catch(e){}
+  }catch(e){console.warn('[SHIC] Save error:',e.message);}
 },
 load(){
   try{
@@ -210,6 +206,35 @@ load(){
   if(!this.data)this.data=getDefaultData();
 },
 ensureData(){if(!this.data)this.load();if(!this.data)this.data=getDefaultData();return this.data;}};
+// ── localStorage quota handler ──────────────────────────────
+let _storageFull_notified=false;
+function _handleStorageFull(err,json){
+  if(!err||!(err.name==='QuotaExceededError'||err.name==='NS_ERROR_DOM_QUOTA_REACHED'||err.code===22))return;
+  // Try freeing space: remove the duplicate backup key and any MSAL cache
+  try{localStorage.removeItem('shic_data_backup');}catch(e){}
+  try{Object.keys(localStorage).filter(k=>k.startsWith('msal.')).forEach(k=>localStorage.removeItem(k));}catch(e){}
+  // Retry save after cleanup
+  try{localStorage.setItem('pm_data',json);_storageFull_notified=false;return;}catch(e){}
+  // Still full — try a lean version without soft-deleted records
+  try{
+    const lean=JSON.parse(json);
+    const arrays=['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
+      'resourceAllocations','dailyMeetingLogs','procurement','procurementLogs','materials',
+      'manpower','equipment','tools','vehicles','consumables','thirdParty',
+      'warehouseItems','stockTransactions','issuanceRequests','notifications','activities'];
+    arrays.forEach(k=>{if(lean[k])lean[k]=lean[k].filter(r=>!r||!r._deleted);});
+    localStorage.setItem('pm_data',JSON.stringify(lean));
+    _storageFull_notified=false;
+    return;
+  }catch(e){}
+  // Cannot save — notify user once per session
+  if(!_storageFull_notified){
+    _storageFull_notified=true;
+    const msg='⚠️ Local storage is full. Your latest changes could not be saved locally.\n\nGo to Settings → Storage → Clean Up to free space, or export a backup.';
+    setTimeout(()=>{if(typeof showToast==='function')showToast('Storage full — changes not saved locally. Go to Settings → Storage to clean up.','error',8000);else alert(msg);},200);
+  }
+}
+
 // ── Module-level state variables (declared early to avoid TDZ errors) ──
 // ── All global state declared early to prevent TDZ errors ──
 // Auth

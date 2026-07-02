@@ -2,6 +2,7 @@ function renderSettings(){
 AppState.ensureData();
   // Inject offline status into placeholder
   setTimeout(()=>{const osc=document.getElementById('offlineStatusContainer');if(osc)osc.innerHTML=getOfflineStatusHTML();},80);
+  setTimeout(()=>{const b=document.getElementById('storageUsageBar');if(b&&typeof _storageUsageHTML==='function')b.innerHTML=_storageUsageHTML();},100);
   // Render palette picker
   setTimeout(()=>{const p=document.getElementById('palettePicker');if(p&&typeof _renderPalettePicker==='function')_renderPalettePicker(p);},90);
   // Show admin-only buttons only to admins
@@ -198,6 +199,8 @@ ${renderSpPanel()}
       <button class="btn btn-warning" onclick="resetDemo()"><i class="fas fa-redo"></i> Reset to Demo Data</button>
       <button class="btn btn-danger" onclick="clearAllData()"><i class="fas fa-trash"></i> Clear All Data</button>
       <button class="btn btn-secondary" onclick="showPatchImport()"><i class="fas fa-bolt"></i> Apply Update Patch</button>
+      <button class="btn btn-secondary" onclick="cleanUpStorage()" style="border-color:var(--accent-amber);color:var(--accent-amber)" title="Remove soft-deleted records from local storage to free up space"><i class="fas fa-broom"></i> Clean Up Storage</button>
+      <div id="storageUsageBar" style="margin-top:4px"></div>
       <button class="btn btn-secondary" onclick="clearDemoData()" style="border-color:var(--accent-amber);color:var(--accent-amber)"><i class="fas fa-broom" style="margin-right:6px"></i> Clear Demo Data &amp; Start Fresh</button>
       <div id="adminOnlyBtns" style="display:none;flex-direction:column;gap:8px">
         <div style="font-size:10px;color:var(--accent-amber);padding:6px 10px;background:rgba(248,81,73,.07);border-radius:6px;border-left:3px solid var(--accent-amber)">
@@ -681,6 +684,47 @@ function clearDemoData(){
   // Navigate to fresh dashboard
   navigate('dashboard');
   buildSidebar();
+}
+
+function cleanUpStorage(){
+  AppState.ensureData();
+  const arrays=['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
+    'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs',
+    'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
+    'assetHistory','assetUtilization','idChangeRequests','notifications','activities',
+    'warehouseItems','stockTransactions','issuanceRequests'];
+  let removed=0;
+  arrays.forEach(k=>{
+    if(!AppState.data[k])return;
+    const before=AppState.data[k].length;
+    AppState.data[k]=AppState.data[k].filter(r=>!r||!r._deleted);
+    removed+=before-AppState.data[k].length;
+  });
+  // Remove the old backup key which doubles storage
+  try{localStorage.removeItem('shic_data_backup');}catch(e){}
+  // Remove stale MSAL cache entries
+  const msalKeys=Object.keys(localStorage).filter(k=>k.startsWith('msal.'));
+  msalKeys.forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
+  AppState.save();
+  // Update usage display
+  const usedKB=Math.round(JSON.stringify(AppState.data).length/1024);
+  showToast(`Storage cleaned — removed ${removed} deleted record(s). Current size: ~${usedKB} KB`,'success',5000);
+  const bar=document.getElementById('storageUsageBar');
+  if(bar)bar.innerHTML=_storageUsageHTML();
+}
+
+function _storageUsageHTML(){
+  let used=0;
+  try{Object.keys(localStorage).forEach(k=>{used+=((localStorage.getItem(k)||'').length*2);});}catch(e){}
+  const usedKB=Math.round(used/1024);
+  const pct=Math.min(100,Math.round(usedKB/5120*100));
+  const color=pct>80?'var(--accent-red)':pct>60?'var(--accent-amber)':'var(--accent-green)';
+  return`<div style="font-size:10px;color:var(--text-secondary);margin-top:6px">
+    Local storage: <strong style="color:${color}">${usedKB} KB / ~5,120 KB</strong>
+    <div style="height:4px;border-radius:2px;background:var(--border);margin-top:4px">
+      <div style="height:4px;border-radius:2px;background:${color};width:${pct}%"></div>
+    </div>
+  </div>`;
 }
 
 function resetDemo(){

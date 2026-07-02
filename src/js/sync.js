@@ -3300,10 +3300,12 @@ let _activeEditingFocus = null;
   }, true);
 })();
 
-// Returns true if user is actively editing (focused input OR typed within last 8s)
+// Returns true if user is actively editing (focused input OR typed within last 60s OR a modal is open)
 function _isUserActivelyEditing() {
   if (_activeEditingFocus) return true;
-  if (_activeEditingTs && (Date.now() - _activeEditingTs) < 8000) return true;
+  if (_activeEditingTs && (Date.now() - _activeEditingTs) < 60000) return true;
+  // Also block if any modal overlay is open
+  if (document.querySelector('.modal-overlay.open')) return true;
   return false;
 }
 
@@ -3472,7 +3474,8 @@ async function _spPollRemote() {
     // Save merged sub-lists immediately (they preserved local unsynced + deleted markers)
     if (subListsChanged) {
       AppState.save();
-      _refreshCurrentView();
+      // Only re-render if the user is not mid-form — prevents wiping typed text
+      if (!_isUserActivelyEditing()) _refreshCurrentView();
     }
 
     // Main blob is more cautious: only apply if user has no local edits
