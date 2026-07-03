@@ -280,7 +280,9 @@ else s.classList.toggle('collapsed');}
 
 function _closeMobileSidebar(){
 const s=$('#sidebar');if(s)s.classList.remove('mobile-open');
-const ov=$('#mobileOverlay');if(ov)ov.style.display='none';}
+// setProperty with 'important' — a plain style.display='none' loses to any
+// !important CSS rule injected by legacy patches, leaving the backdrop stuck
+const ov=$('#mobileOverlay');if(ov)ov.style.setProperty('display','none','important');}
 
 // Crossing into desktop width (split screen, window resize, rotation):
 // always clear the mobile sidebar state so the backdrop can't get stuck
@@ -289,13 +291,17 @@ window.addEventListener('resize',()=>{
   if(window.innerWidth>=768)_closeMobileSidebar();
 });
 // Watchdog: if the backdrop is ever visible while the sidebar is not in
-// mobile-open state (any code path, any timing), hide it. Catches every
-// stuck-overlay scenario permanently.
+// mobile-open state (any code path, any timing), hide it. Uses COMPUTED
+// style (inline style can be overridden by legacy patch CSS with
+// !important) and hides with !important so nothing can out-rank it.
 setInterval(()=>{
   const ov=document.getElementById('mobileOverlay');
-  if(!ov||ov.style.display!=='block')return;
+  if(!ov)return;
+  if(getComputedStyle(ov).display==='none')return;
   const s=document.getElementById('sidebar');
-  if(window.innerWidth>=768||!s||!s.classList.contains('mobile-open'))ov.style.display='none';
+  if(window.innerWidth>=768||!s||!s.classList.contains('mobile-open')){
+    ov.style.setProperty('display','none','important');
+  }
 },2000);
 
 function toggleTheme(){

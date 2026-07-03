@@ -1,8 +1,8 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.4.2';
-const APP_BUILD='20260703a';
+const APP_VERSION='2.4.3';
+const APP_BUILD='20260703b';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Fix dimmed screen in split view (stuck sidebar backdrop) with permanent watchdog';
+const APP_RELEASE_NOTE='Fix dimmed screen for good: backdrop hidden with !important, immune to legacy patch CSS';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching

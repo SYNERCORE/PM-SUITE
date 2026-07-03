@@ -1,1 +1,1 @@
-{"version":"2.4.2","note":"Fix dimmed screen in split view (stuck sidebar backdrop) with permanent watchdog","released":"2026-07-03 07:48"}
+{"version":"2.4.3","note":"Fix dimmed screen for good: backdrop hidden with !important, immune to legacy patch CSS","released":"2026-07-03 08:07"}
