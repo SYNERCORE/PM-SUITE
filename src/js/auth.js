@@ -117,6 +117,10 @@ async function doM365Login() {
         try { AppState.data = JSON.parse(decJson); } catch(e) { _restoreLocalData(); }
       } else { _restoreLocalData(); }
     } else { _restoreLocalData(); }
+    // Now that the encryption key exists, adopt the IndexedDB full-data
+    // mirror if it holds more records than the localStorage bootstrap
+    // (covers quota-trimmed or corrupt localStorage with an encrypted mirror)
+    if (typeof _idbAdoptIfFuller === 'function') { try { await _idbAdoptIfFuller(); } catch(e) {} }
     // Migrate existing plaintext pm_data → encrypted now that key is ready
     if (typeof _encryptAndStore === 'function' && _cryptoKey) {
       const raw = localStorage.getItem('pm_data');

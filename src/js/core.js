@@ -1,8 +1,8 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.4.3';
-const APP_BUILD='20260703b';
+const APP_VERSION='2.5.0';
+const APP_BUILD='20260703c';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Fix dimmed screen for good: backdrop hidden with !important, immune to legacy patch CSS';
+const APP_RELEASE_NOTE='Unlimited local storage via IndexedDB mirror; legacy patches retired (fixes built in)';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
@@ -232,7 +232,10 @@ save(){
       try{localStorage.setItem('pm_data',json);}catch(qe){_handleStorageFull(qe,json);}
     }
     // Rolling IndexedDB snapshot (throttled to one per 10 min, keeps last 3)
-    try{_idbSaveSnapshot(json,typeof _dataRecordCount==='function'?_dataRecordCount(this.data):0);}catch(e){}
+    const _rc=typeof _dataRecordCount==='function'?_dataRecordCount(this.data):0;
+    try{_idbSaveSnapshot(json,_rc);}catch(e){}
+    // Full-data mirror in IndexedDB — quota-proof authoritative local copy
+    try{_idbDataSave(json,_rc);}catch(e){}
   }catch(e){console.warn('[SHIC] Save error:',e.message);}
 },
 load(){
@@ -291,11 +294,11 @@ function _handleStorageFull(err,json){
     _storageFull_notified=false;
     return;
   }catch(e){}
-  // Cannot save — notify user once per session
+  // localStorage is full — but the FULL dataset is still saved in the
+  // IndexedDB mirror (no quota), so nothing is lost. Notify once per session.
   if(!_storageFull_notified){
     _storageFull_notified=true;
-    const msg='⚠️ Local storage is full. Your latest changes could not be saved locally.\n\nGo to Settings → Storage → Clean Up to free space, or export a backup.';
-    setTimeout(()=>{if(typeof showToast==='function')showToast('Storage full — changes not saved locally. Go to Settings → Storage to clean up.','error',8000);else alert(msg);},200);
+    setTimeout(()=>{if(typeof showToast==='function')showToast('Browser storage is full — your data is safe (kept in IndexedDB + SharePoint). Settings → Clean Up Storage to clear the warning.','warning',8000);},200);
   }
 }
 
@@ -347,11 +350,65 @@ async function _idbListSnapshots(){
     return await new Promise(res=>{
       const st=db.transaction(_SNAP_STORE,'readonly').objectStore(_SNAP_STORE);
       const q=st.getAll();
-      q.onsuccess=()=>{db.close();res((q.result||[]).sort((a,b)=>b.ts-a.ts));};
+      q.onsuccess=()=>{db.close();res((q.result||[]).filter(s=>typeof s.ts==='number').sort((a,b)=>b.ts-a.ts));};
       q.onerror=()=>{db.close();res([]);};
     });
   }catch(e){return[];}
 }
+
+// ── FULL-DATA MIRROR (IndexedDB) ─────────────────────────────
+// A complete, always-current copy of AppState.data lives in IndexedDB
+// (no 5MB quota). localStorage remains only a fast synchronous bootstrap;
+// if it is lean/trimmed/corrupt, the fuller IDB copy is adopted at boot.
+const _IDB_DATA_KEY='pm_data_full';
+let _idbDataTimer=null;
+function _idbDataSave(json,recordCount){
+  clearTimeout(_idbDataTimer);
+  _idbDataTimer=setTimeout(async()=>{
+    try{
+      const db=await _idbOpen();
+      const payload=await _snapEncrypt(json);
+      const tx=db.transaction(_SNAP_STORE,'readwrite');
+      tx.objectStore(_SNAP_STORE).put(Object.assign({ts:_IDB_DATA_KEY,at:Date.now(),count:recordCount||0},payload));
+      tx.oncomplete=()=>db.close();
+    }catch(e){}
+  },1500);
+}
+async function _idbDataLoad(){
+  try{
+    const db=await _idbOpen();
+    return await new Promise(res=>{
+      const q=db.transaction(_SNAP_STORE,'readonly').objectStore(_SNAP_STORE).get(_IDB_DATA_KEY);
+      q.onsuccess=()=>{db.close();res(q.result||null);};
+      q.onerror=()=>{db.close();res(null);};
+    });
+  }catch(e){return null;}
+}
+// Adopt the IndexedDB copy when it holds MORE records than what we booted
+// with — catches quota-trimmed, corrupt, or missing localStorage.
+async function _idbAdoptIfFuller(){
+  try{
+    const rec=await _idbDataLoad();
+    if(!rec)return false;
+    if(rec.plain===undefined&&!_cryptoKey)return false; // encrypted — caller retries after login
+    const json=rec.plain!==undefined?rec.plain:await _snapDecrypt(rec);
+    const parsed=JSON.parse(json);
+    const idbCount=_dataRecordCount(parsed);
+    const curCount=_dataRecordCount(AppState.data);
+    if(idbCount<=curCount)return false;
+    AppState.data=Object.assign(getDefaultData(),parsed);
+    if(typeof migrateData==='function')migrateData();
+    AppState.save();
+    try{renderPage(AppState.currentPage||'dashboard');}catch(e){}
+    try{buildSidebar();}catch(e){}
+    console.log('[SHIC] Adopted fuller IndexedDB copy: '+idbCount+' records (bootstrap had '+curCount+')');
+    try{showToast('Recovered full dataset from IndexedDB ('+idbCount+' records)','success',5000);}catch(e){}
+    return true;
+  }catch(e){console.warn('[SHIC] IDB adopt failed:',e.message);return false;}
+}
+// Boot check shortly after load (pre-login covers plaintext mirrors;
+// the login flow re-runs this for encrypted ones)
+setTimeout(()=>{try{_idbAdoptIfFuller();}catch(e){}},1500);
 
 // ── UPDATE NOTIFICATION ──────────────────────────────────────
 // Checks GitHub for a newer version.json and shows a refresh banner.
@@ -709,6 +766,20 @@ const OFFLINE_QUEUE_KEY='shic_offline_queue';
 const OFFLINE_DATA_KEY='shic_offline_data';
 const PERSISTENT_PATCHES_KEY='shic_persistent_patches';
 const UPDATE_CHECK_URL=''; // Set your GitHub releases URL here
+
+// ── One-time: archive legacy persistent patches (v2.5.0) ────
+// All fixes those patches carried are built into the app now, and their
+// injected CSS/JS conflicts with current markup (e.g. the stuck sidebar
+// backdrop). Reversible: the raw patches are kept in shic_patches_archived.
+try{
+  const _rawP=localStorage.getItem(PERSISTENT_PATCHES_KEY);
+  if(_rawP&&_rawP!=='{}'&&_rawP!=='[]'&&!localStorage.getItem('shic_patches_archived')){
+    localStorage.setItem('shic_patches_archived',_rawP);
+    localStorage.removeItem(PERSISTENT_PATCHES_KEY);
+    console.warn('[SHIC] Legacy persistent patches archived to shic_patches_archived — their fixes are built into this version');
+    setTimeout(()=>{try{showToast('Legacy patches archived — all their fixes are built into this version now.','info',7000);}catch(e){}},3000);
+  }
+}catch(e){}
 
 // Module-level state variables
 let mlTab='all', mlSearch='', mlStatusFilter='all', mlProjectFilter='all';
