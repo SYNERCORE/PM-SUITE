@@ -84,11 +84,16 @@ async function exportGanttPDF(projectId){
     // Build rows
     const rows=[];
     rows.push({type:'proj',d:project,depth:0});
-    const sorted=[...tasks].sort((a,b)=>{
-      if(a.wbs&&b.wbs)return a.wbs.localeCompare(b.wbs,undefined,{numeric:true});
-      return(a.startDate||'').localeCompare(b.startDate||'');
-    });
-    sorted.forEach(t=>rows.push({type:'task',d:t,depth:_wbsDepth(t.wbs)}));
+    if(typeof _orderTasksHier==='function'&&tasks.some(t=>t.parentId)){
+      // Real parent/child hierarchy: DFS order with true depth
+      _orderTasksHier(tasks).forEach(({t,depth})=>rows.push({type:'task',d:t,depth}));
+    }else{
+      const sorted=[...tasks].sort((a,b)=>{
+        if(a.wbs&&b.wbs)return a.wbs.localeCompare(b.wbs,undefined,{numeric:true});
+        return(a.startDate||'').localeCompare(b.startDate||'');
+      });
+      sorted.forEach(t=>rows.push({type:'task',d:t,depth:_wbsDepth(t.wbs)}));
+    }
 
     // Date range
     const allD=[project.startDate,project.endDate,...tasks.flatMap(t=>[t.startDate,t.endDate||t.dueDate])].filter(d=>d&&/^\d{4}/.test(d));

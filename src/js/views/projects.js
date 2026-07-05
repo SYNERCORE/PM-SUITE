@@ -1472,9 +1472,10 @@ function renderDetailTasks(){
 
 function renderDetailTaskRows(tasks){
   if(!tasks.length)return`<tr><td colspan="13"><div class="empty-state"><i class="fas fa-tasks"></i><p>No tasks yet. Click "Add Task" to create one.</p></div></td></tr>`;
-  return tasks.map(t=>`<tr>
+  const ordered=typeof _orderTasksHier==='function'?_orderTasksHier(tasks):tasks.map(t=>({t,depth:0}));
+  return ordered.map(({t,depth})=>{const isSum=typeof _taskHasChildren==='function'&&_taskHasChildren(t.id,tasks);return`<tr>
     <td style="font-size:10px;font-family:var(--font-mono);color:var(--text-muted)">${t.wbs||t.id}</td>
-    <td><div style="font-weight:500;font-size:12px">${t.name}</div></td>
+    <td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${t.name}</div></td>
     <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.assignee,22)}<span style="font-size:11px">${t.assignee}</span></div></td>
     <td style="font-size:11px;color:var(--text-secondary)">${t.dept}</td>
     <td style="font-size:11px;font-family:var(--font-mono)">${t.startDate}</td>
@@ -1489,7 +1490,7 @@ function renderDetailTaskRows(tasks){
       <button class="btn btn-secondary btn-sm btn-icon" onclick="taskProjectFilter='${t.projectId}';showTaskForm('${t.id}')"><i class="fas fa-edit"></i></button>
       <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDetailTask('${t.id}')"><i class="fas fa-trash"></i></button>
     </div></td>
-  </tr>`).join('');
+  </tr>`;}).join('');
 }
 
 function deleteDetailTask(id){

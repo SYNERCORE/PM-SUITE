@@ -1,3 +1,59 @@
+// ── Parent/Child (WBS) task hierarchy ─────────────────────────
+function _taskHasChildren(id,tasks){return (tasks||AppState.data.tasks||[]).some(t=>t.parentId===id&&!t._deleted);}
+// true if candidateId sits anywhere under ofId (walks up the parent chain)
+function _taskIsDescendant(candidateId,ofId,tasks){
+  const all=tasks||AppState.data.tasks||[];
+  let cur=all.find(t=>t.id===candidateId);
+  const seen=new Set();
+  while(cur&&cur.parentId&&!seen.has(cur.id)){
+    if(cur.parentId===ofId)return true;
+    seen.add(cur.id);
+    cur=all.find(t=>t.id===cur.parentId);
+  }
+  return false;
+}
+// DFS order: roots first, each followed by its children. Tasks whose parent
+// is missing from the list (filtered out / deleted) surface as roots.
+function _orderTasksHier(list){
+  const ids=new Set(list.map(t=>t.id));
+  const out=[];const visited=new Set();
+  const add=(t,depth)=>{
+    if(visited.has(t.id))return; // cycle guard
+    visited.add(t.id);
+    out.push({t,depth});
+    list.filter(c=>c.parentId===t.id).forEach(c=>add(c,Math.min(depth+1,6)));
+  };
+  list.filter(t=>!t.parentId||!ids.has(t.parentId)).forEach(t=>add(t,0));
+  list.forEach(t=>{if(!visited.has(t.id))add(t,0);}); // orphans in a cycle
+  return out;
+}
+// Summary tasks: dates = span of children, progress = duration-weighted avg.
+// Bottom-up via repeated passes (handles nesting up to 10 levels).
+function _applySummaryRollups(projId){
+  const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===projId&&!t._deleted);
+  for(let pass=0;pass<10;pass++){
+    let changed=false;
+    tasks.forEach(p=>{
+      const kids=tasks.filter(c=>c.parentId===p.id);
+      if(!kids.length)return;
+      const starts=kids.map(k=>k.startDate).filter(Boolean);
+      const ends=kids.map(k=>k.endDate).filter(Boolean);
+      const ns=starts.length?starts.reduce((a,b)=>a<b?a:b):p.startDate;
+      const ne=ends.length?ends.reduce((a,b)=>a>b?a:b):p.endDate;
+      let wSum=0,pSum=0;
+      kids.forEach(k=>{
+        const w=Math.max(1,k.durationHrs||((k.startDate&&k.endDate&&typeof daysBetween==='function')?(daysBetween(k.startDate,k.endDate)+1)*8:8));
+        wSum+=w;pSum+=w*(k.progress||0);
+      });
+      const np=wSum?Math.round(pSum/wSum):(p.progress||0);
+      if(p.startDate!==ns||p.endDate!==ne||p.progress!==np){p.startDate=ns;p.endDate=ne;p.progress=np;changed=true;}
+      if(np>=100&&p.status!=='done'){p.status='done';changed=true;}
+      else if(np>0&&np<100&&p.status==='todo'){p.status='inprogress';changed=true;}
+    });
+    if(!changed)break;
+  }
+}
+
 function _getTaskProjHPD(projectId) {
   const p = (AppState.data.projects||[]).find(p => p.id === projectId);
   return p?.calendar?.hoursPerDay || 8;
@@ -61,9 +117,9 @@ if(!__ttContainer)return; // not on tasks page
 const tasks=getFilteredTasks();
 $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><table>
 <thead><tr><th>WBS</th><th>Task</th><th>Project</th><th>Assignee</th><th>End</th><th>Progress</th><th>Status</th><th>Priority</th><th></th></tr></thead>
-<tbody>${_pgSlice("tasks",tasks).map(t=>`<tr>
+<tbody>${_pgSlice("tasks",_orderTasksHier(tasks)).map(({t,depth})=>{const isSum=_taskHasChildren(t.id,tasks);return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${t.wbs||t.id}</td>
-<td><div style="font-weight:500;font-size:12px">${t.name}</div><div style="font-size:10px;color:var(--text-secondary)">${t.dept}</div></td>
+<td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${t.name}</div><div style="font-size:10px;color:var(--text-secondary);padding-left:${depth*18}px">${t.dept||''}</div></td>
 <td><span class="badge badge-blue">${t.projectId}</span></td>
 <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.assignee)}<span style="font-size:11px">${t.assignee.split(' ')[0]}</span></div></td>
 <td style="font-size:11px;font-family:var(--font-mono);color:${isOverdue(t.endDate)?'var(--accent-red)':'inherit'}">${t.endDate}</td>
@@ -72,7 +128,7 @@ $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><tabl
 <td><div style="display:flex;gap:3px">
 <button class="btn btn-secondary btn-sm btn-icon" onclick="showTaskForm('${t.id}')"><i class="fas fa-edit"></i></button>
 <button class="btn btn-danger btn-sm btn-icon" onclick="deleteTask('${t.id}')"><i class="fas fa-trash"></i></button>
-</div></td></tr>`).join('')}</tbody></table>${_pgNav("tasks",tasks,typeof renderTaskView==="function"?renderTaskView:null)}</div></div>`;}
+</div></td></tr>`;}).join('')}</tbody></table>${_pgNav("tasks",tasks,typeof renderTaskView==="function"?renderTaskView:null)}</div></div>`;}
 
 let _tEditingId=null; // tracks which task is open in the form
 
@@ -86,12 +142,14 @@ const _hasPred=!!(t?.predecessors||'').trim();
 const _isMile=!!t?.milestone;
 const _hpd=_getTaskProjHPD(t?.projectId||taskProjectFilter||'');
 const _durVal=t?.durationHrs>0?+(t.durationHrs/_hpd).toFixed(1):(_isMile?0:'');
-// For successor tasks: start/end are CPM-computed — show read-only hint
-const _dateRO=_hasPred?'readonly style="opacity:.55;cursor:not-allowed;background:var(--bg-secondary)"':'';
-const _dateNote=_hasPred?'<span style="font-size:10px;color:var(--accent-amber);margin-left:6px"><i class="fas fa-calculator"></i> Computed by CPM</span>':'';
+const _isSummary=!!(id&&_taskHasChildren(id));
+// For successor tasks: start/end are CPM-computed. For summary tasks: rolled up from children.
+const _dateRO=(_hasPred||_isSummary)?'readonly style="opacity:.55;cursor:not-allowed;background:var(--bg-secondary)"':'';
+const _dateNote=_isSummary?'<span style="font-size:10px;color:var(--accent-cyan);margin-left:6px"><i class="fas fa-sitemap"></i> Rolled up from subtasks</span>':(_hasPred?'<span style="font-size:10px;color:var(--accent-amber);margin-left:6px"><i class="fas fa-calculator"></i> Computed by CPM</span>':'');
 $('#taskModalBody').innerHTML=`<div class="form-grid">
-<div class="form-group"><label class="form-label">Project</label><select class="form-select" id="tProj">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${(t?.projectId===p.id||taskProjectFilter===p.id)?'selected':''}>${p.id}</option>`).join('')}</select></div>
+<div class="form-group"><label class="form-label">Project</label><select class="form-select" id="tProj" onchange="_tRefreshParentOptions('${id||''}')">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${(t?.projectId===p.id||taskProjectFilter===p.id)?'selected':''}>${p.id}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">WBS Code</label><input class="form-input" id="tWbs" value="${t?.wbs||''}" placeholder="e.g., 1.2.3"></div>
+<div class="form-group" style="grid-column:1/-1"><label class="form-label">Parent Task <span style="font-size:10px;color:var(--text-muted)">— makes this a subtask (WBS hierarchy)</span></label><select class="form-select" id="tParent">${_tParentOptionsHTML(id,t?.projectId||taskProjectFilter||'',t?.parentId||'')}</select></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Task Name *</label><input class="form-input" id="tName" value="${t?.name||''}" placeholder="Task description"></div>
 <div class="form-group"><label class="form-label">Assigned To</label><input class="form-input" id="tAss" value="${t?.assignee||''}" placeholder="Name"></div>
 <div class="form-group"><label class="form-label">Department</label><input class="form-input" id="tDept" value="${t?.dept||''}" placeholder="Department"></div>
@@ -112,6 +170,21 @@ $('#taskModalBody').innerHTML=`<div class="form-grid">
 </div>`; openModal('taskModal');
 // Run live CPM preview immediately so read-only date fields show computed values on open
 if(_hasPred) setTimeout(_runFormCPMPreview, 50);
+}
+
+// Options for the Parent Task dropdown: same-project tasks, excluding self,
+// own descendants (cycle guard) and milestones. Indented to show hierarchy.
+function _tParentOptionsHTML(editId,projId,selectedId){
+  const all=AppState.data.tasks||[];
+  if(!projId)projId=(AppState.data.projects||[])[0]?.id||'';
+  const pool=all.filter(t=>t.projectId===projId&&!t._deleted&&!t.milestone&&t.id!==editId&&!(editId&&_taskIsDescendant(t.id,editId,all)));
+  const ordered=_orderTasksHier(pool);
+  return `<option value="">— None (top-level task) —</option>`+
+    ordered.map(({t,depth})=>`<option value="${t.id}" ${selectedId===t.id?'selected':''}>${' '.repeat(depth*3)}${t.wbs||t.id} — ${(t.name||'').substring(0,50)}</option>`).join('');
+}
+function _tRefreshParentOptions(editId){
+  const sel=$('#tParent');if(!sel)return;
+  sel.innerHTML=_tParentOptionsHTML(editId||null,$('#tProj')?.value||'',sel.value);
 }
 
 async function saveTask(id){
@@ -144,13 +217,21 @@ const t={
   status:$('#tStat').value,priority:$('#tPri').value,
   progress:parseInt($('#tProg').value)||0,
   milestone:_isMileSave,
+  parentId:$('#tParent')?.value||'',
   predecessors:_normPred,
   durationHrs:_isMileSave?0:(_tDurDays>0?_tDurDays*_tHPD:(id?(AppState.data.tasks||[]).find(x=>x.id===id)?.durationHrs||0:0))
 };
 if(!_req(['tName','tProj','tStart'])){showToast('Fill in required fields','error');return;}
+// Hierarchy guards: no self-parenting, no cycles, parent must be in same project
+if(t.parentId){
+  if(t.parentId===t.id||_taskIsDescendant(t.parentId,t.id)){showToast('Invalid parent: would create a loop in the hierarchy','error');return;}
+  const par=(AppState.data.tasks||[]).find(x=>x.id===t.parentId);
+  if(!par||par._deleted||par.projectId!==_tProjId){showToast('Parent task must belong to the same project','error');return;}
+}
 if(id){const i=(AppState.data.tasks||[]).findIndex(x=>x.id===id);AppState.data.tasks[i]={...AppState.data.tasks[i],...t};}
 else AppState.data.tasks.push(t);
 _applyCPMDates(_tProjId);
+_applySummaryRollups(_tProjId);
 AppState.save();closeModal('taskModal');
 if(typeof detailProjectId!=='undefined'&&detailProjectId&&typeof renderDetailTasks==='function'){renderDetailTasks();}else{renderTaskView();}
 showToast(id?'Task updated':'Task created','success');}
@@ -171,6 +252,7 @@ function _applyCPMDates(projId){
     const i=(AppState.data.tasks||[]).findIndex(x=>x.id===ct.id);
     if(i<0)return;
     const stored=AppState.data.tasks[i];
+    if(_taskHasChildren(ct.id,pt))return; // summary task: dates come from rollup, not CPM
     const hasPreds=(ct.predecessors||'').trim().length>0;
     if(hasPreds){
       // Successor: CPM owns both dates

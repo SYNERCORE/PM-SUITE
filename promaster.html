@@ -533,10 +533,10 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.5.0';
-const APP_BUILD='20260703c';
+const APP_VERSION='2.6.0';
+const APP_BUILD='20260706a';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Unlimited local storage via IndexedDB mirror; legacy patches retired (fixes built in)';
+const APP_RELEASE_NOTE='Task hierarchy: parent/child subtasks with WBS rollup in Tasks, Gantt and PDF export';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
@@ -10126,9 +10126,10 @@ function renderDetailTasks(){
 
 function renderDetailTaskRows(tasks){
   if(!tasks.length)return`<tr><td colspan="13"><div class="empty-state"><i class="fas fa-tasks"></i><p>No tasks yet. Click "Add Task" to create one.</p></div></td></tr>`;
-  return tasks.map(t=>`<tr>
+  const ordered=typeof _orderTasksHier==='function'?_orderTasksHier(tasks):tasks.map(t=>({t,depth:0}));
+  return ordered.map(({t,depth})=>{const isSum=typeof _taskHasChildren==='function'&&_taskHasChildren(t.id,tasks);return`<tr>
     <td style="font-size:10px;font-family:var(--font-mono);color:var(--text-muted)">${t.wbs||t.id}</td>
-    <td><div style="font-weight:500;font-size:12px">${t.name}</div></td>
+    <td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${t.name}</div></td>
     <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.assignee,22)}<span style="font-size:11px">${t.assignee}</span></div></td>
     <td style="font-size:11px;color:var(--text-secondary)">${t.dept}</td>
     <td style="font-size:11px;font-family:var(--font-mono)">${t.startDate}</td>
@@ -10143,7 +10144,7 @@ function renderDetailTaskRows(tasks){
       <button class="btn btn-secondary btn-sm btn-icon" onclick="taskProjectFilter='${t.projectId}';showTaskForm('${t.id}')"><i class="fas fa-edit"></i></button>
       <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDetailTask('${t.id}')"><i class="fas fa-trash"></i></button>
     </div></td>
-  </tr>`).join('');
+  </tr>`;}).join('');
 }
 
 function deleteDetailTask(id){
@@ -13441,6 +13442,62 @@ function cancelIdChangeRequest(requestId) {
 let taskView='kanban',taskProjectFilter='all';
 </script>
 <script>
+// ── Parent/Child (WBS) task hierarchy ─────────────────────────
+function _taskHasChildren(id,tasks){return (tasks||AppState.data.tasks||[]).some(t=>t.parentId===id&&!t._deleted);}
+// true if candidateId sits anywhere under ofId (walks up the parent chain)
+function _taskIsDescendant(candidateId,ofId,tasks){
+  const all=tasks||AppState.data.tasks||[];
+  let cur=all.find(t=>t.id===candidateId);
+  const seen=new Set();
+  while(cur&&cur.parentId&&!seen.has(cur.id)){
+    if(cur.parentId===ofId)return true;
+    seen.add(cur.id);
+    cur=all.find(t=>t.id===cur.parentId);
+  }
+  return false;
+}
+// DFS order: roots first, each followed by its children. Tasks whose parent
+// is missing from the list (filtered out / deleted) surface as roots.
+function _orderTasksHier(list){
+  const ids=new Set(list.map(t=>t.id));
+  const out=[];const visited=new Set();
+  const add=(t,depth)=>{
+    if(visited.has(t.id))return; // cycle guard
+    visited.add(t.id);
+    out.push({t,depth});
+    list.filter(c=>c.parentId===t.id).forEach(c=>add(c,Math.min(depth+1,6)));
+  };
+  list.filter(t=>!t.parentId||!ids.has(t.parentId)).forEach(t=>add(t,0));
+  list.forEach(t=>{if(!visited.has(t.id))add(t,0);}); // orphans in a cycle
+  return out;
+}
+// Summary tasks: dates = span of children, progress = duration-weighted avg.
+// Bottom-up via repeated passes (handles nesting up to 10 levels).
+function _applySummaryRollups(projId){
+  const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===projId&&!t._deleted);
+  for(let pass=0;pass<10;pass++){
+    let changed=false;
+    tasks.forEach(p=>{
+      const kids=tasks.filter(c=>c.parentId===p.id);
+      if(!kids.length)return;
+      const starts=kids.map(k=>k.startDate).filter(Boolean);
+      const ends=kids.map(k=>k.endDate).filter(Boolean);
+      const ns=starts.length?starts.reduce((a,b)=>a<b?a:b):p.startDate;
+      const ne=ends.length?ends.reduce((a,b)=>a>b?a:b):p.endDate;
+      let wSum=0,pSum=0;
+      kids.forEach(k=>{
+        const w=Math.max(1,k.durationHrs||((k.startDate&&k.endDate&&typeof daysBetween==='function')?(daysBetween(k.startDate,k.endDate)+1)*8:8));
+        wSum+=w;pSum+=w*(k.progress||0);
+      });
+      const np=wSum?Math.round(pSum/wSum):(p.progress||0);
+      if(p.startDate!==ns||p.endDate!==ne||p.progress!==np){p.startDate=ns;p.endDate=ne;p.progress=np;changed=true;}
+      if(np>=100&&p.status!=='done'){p.status='done';changed=true;}
+      else if(np>0&&np<100&&p.status==='todo'){p.status='inprogress';changed=true;}
+    });
+    if(!changed)break;
+  }
+}
+
 function _getTaskProjHPD(projectId) {
   const p = (AppState.data.projects||[]).find(p => p.id === projectId);
   return p?.calendar?.hoursPerDay || 8;
@@ -13504,9 +13561,9 @@ if(!__ttContainer)return; // not on tasks page
 const tasks=getFilteredTasks();
 $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><table>
 <thead><tr><th>WBS</th><th>Task</th><th>Project</th><th>Assignee</th><th>End</th><th>Progress</th><th>Status</th><th>Priority</th><th></th></tr></thead>
-<tbody>${_pgSlice("tasks",tasks).map(t=>`<tr>
+<tbody>${_pgSlice("tasks",_orderTasksHier(tasks)).map(({t,depth})=>{const isSum=_taskHasChildren(t.id,tasks);return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${t.wbs||t.id}</td>
-<td><div style="font-weight:500;font-size:12px">${t.name}</div><div style="font-size:10px;color:var(--text-secondary)">${t.dept}</div></td>
+<td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${t.name}</div><div style="font-size:10px;color:var(--text-secondary);padding-left:${depth*18}px">${t.dept||''}</div></td>
 <td><span class="badge badge-blue">${t.projectId}</span></td>
 <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.assignee)}<span style="font-size:11px">${t.assignee.split(' ')[0]}</span></div></td>
 <td style="font-size:11px;font-family:var(--font-mono);color:${isOverdue(t.endDate)?'var(--accent-red)':'inherit'}">${t.endDate}</td>
@@ -13515,7 +13572,7 @@ $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><tabl
 <td><div style="display:flex;gap:3px">
 <button class="btn btn-secondary btn-sm btn-icon" onclick="showTaskForm('${t.id}')"><i class="fas fa-edit"></i></button>
 <button class="btn btn-danger btn-sm btn-icon" onclick="deleteTask('${t.id}')"><i class="fas fa-trash"></i></button>
-</div></td></tr>`).join('')}</tbody></table>${_pgNav("tasks",tasks,typeof renderTaskView==="function"?renderTaskView:null)}</div></div>`;}
+</div></td></tr>`;}).join('')}</tbody></table>${_pgNav("tasks",tasks,typeof renderTaskView==="function"?renderTaskView:null)}</div></div>`;}
 
 let _tEditingId=null; // tracks which task is open in the form
 
@@ -13529,12 +13586,14 @@ const _hasPred=!!(t?.predecessors||'').trim();
 const _isMile=!!t?.milestone;
 const _hpd=_getTaskProjHPD(t?.projectId||taskProjectFilter||'');
 const _durVal=t?.durationHrs>0?+(t.durationHrs/_hpd).toFixed(1):(_isMile?0:'');
-// For successor tasks: start/end are CPM-computed — show read-only hint
-const _dateRO=_hasPred?'readonly style="opacity:.55;cursor:not-allowed;background:var(--bg-secondary)"':'';
-const _dateNote=_hasPred?'<span style="font-size:10px;color:var(--accent-amber);margin-left:6px"><i class="fas fa-calculator"></i> Computed by CPM</span>':'';
+const _isSummary=!!(id&&_taskHasChildren(id));
+// For successor tasks: start/end are CPM-computed. For summary tasks: rolled up from children.
+const _dateRO=(_hasPred||_isSummary)?'readonly style="opacity:.55;cursor:not-allowed;background:var(--bg-secondary)"':'';
+const _dateNote=_isSummary?'<span style="font-size:10px;color:var(--accent-cyan);margin-left:6px"><i class="fas fa-sitemap"></i> Rolled up from subtasks</span>':(_hasPred?'<span style="font-size:10px;color:var(--accent-amber);margin-left:6px"><i class="fas fa-calculator"></i> Computed by CPM</span>':'');
 $('#taskModalBody').innerHTML=`<div class="form-grid">
-<div class="form-group"><label class="form-label">Project</label><select class="form-select" id="tProj">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${(t?.projectId===p.id||taskProjectFilter===p.id)?'selected':''}>${p.id}</option>`).join('')}</select></div>
+<div class="form-group"><label class="form-label">Project</label><select class="form-select" id="tProj" onchange="_tRefreshParentOptions('${id||''}')">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${(t?.projectId===p.id||taskProjectFilter===p.id)?'selected':''}>${p.id}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">WBS Code</label><input class="form-input" id="tWbs" value="${t?.wbs||''}" placeholder="e.g., 1.2.3"></div>
+<div class="form-group" style="grid-column:1/-1"><label class="form-label">Parent Task <span style="font-size:10px;color:var(--text-muted)">— makes this a subtask (WBS hierarchy)</span></label><select class="form-select" id="tParent">${_tParentOptionsHTML(id,t?.projectId||taskProjectFilter||'',t?.parentId||'')}</select></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Task Name *</label><input class="form-input" id="tName" value="${t?.name||''}" placeholder="Task description"></div>
 <div class="form-group"><label class="form-label">Assigned To</label><input class="form-input" id="tAss" value="${t?.assignee||''}" placeholder="Name"></div>
 <div class="form-group"><label class="form-label">Department</label><input class="form-input" id="tDept" value="${t?.dept||''}" placeholder="Department"></div>
@@ -13555,6 +13614,21 @@ $('#taskModalBody').innerHTML=`<div class="form-grid">
 </div>`; openModal('taskModal');
 // Run live CPM preview immediately so read-only date fields show computed values on open
 if(_hasPred) setTimeout(_runFormCPMPreview, 50);
+}
+
+// Options for the Parent Task dropdown: same-project tasks, excluding self,
+// own descendants (cycle guard) and milestones. Indented to show hierarchy.
+function _tParentOptionsHTML(editId,projId,selectedId){
+  const all=AppState.data.tasks||[];
+  if(!projId)projId=(AppState.data.projects||[])[0]?.id||'';
+  const pool=all.filter(t=>t.projectId===projId&&!t._deleted&&!t.milestone&&t.id!==editId&&!(editId&&_taskIsDescendant(t.id,editId,all)));
+  const ordered=_orderTasksHier(pool);
+  return `<option value="">— None (top-level task) —</option>`+
+    ordered.map(({t,depth})=>`<option value="${t.id}" ${selectedId===t.id?'selected':''}>${' '.repeat(depth*3)}${t.wbs||t.id} — ${(t.name||'').substring(0,50)}</option>`).join('');
+}
+function _tRefreshParentOptions(editId){
+  const sel=$('#tParent');if(!sel)return;
+  sel.innerHTML=_tParentOptionsHTML(editId||null,$('#tProj')?.value||'',sel.value);
 }
 
 async function saveTask(id){
@@ -13587,13 +13661,21 @@ const t={
   status:$('#tStat').value,priority:$('#tPri').value,
   progress:parseInt($('#tProg').value)||0,
   milestone:_isMileSave,
+  parentId:$('#tParent')?.value||'',
   predecessors:_normPred,
   durationHrs:_isMileSave?0:(_tDurDays>0?_tDurDays*_tHPD:(id?(AppState.data.tasks||[]).find(x=>x.id===id)?.durationHrs||0:0))
 };
 if(!_req(['tName','tProj','tStart'])){showToast('Fill in required fields','error');return;}
+// Hierarchy guards: no self-parenting, no cycles, parent must be in same project
+if(t.parentId){
+  if(t.parentId===t.id||_taskIsDescendant(t.parentId,t.id)){showToast('Invalid parent: would create a loop in the hierarchy','error');return;}
+  const par=(AppState.data.tasks||[]).find(x=>x.id===t.parentId);
+  if(!par||par._deleted||par.projectId!==_tProjId){showToast('Parent task must belong to the same project','error');return;}
+}
 if(id){const i=(AppState.data.tasks||[]).findIndex(x=>x.id===id);AppState.data.tasks[i]={...AppState.data.tasks[i],...t};}
 else AppState.data.tasks.push(t);
 _applyCPMDates(_tProjId);
+_applySummaryRollups(_tProjId);
 AppState.save();closeModal('taskModal');
 if(typeof detailProjectId!=='undefined'&&detailProjectId&&typeof renderDetailTasks==='function'){renderDetailTasks();}else{renderTaskView();}
 showToast(id?'Task updated':'Task created','success');}
@@ -13614,6 +13696,7 @@ function _applyCPMDates(projId){
     const i=(AppState.data.tasks||[]).findIndex(x=>x.id===ct.id);
     if(i<0)return;
     const stored=AppState.data.tasks[i];
+    if(_taskHasChildren(ct.id,pt))return; // summary task: dates come from rollup, not CPM
     const hasPreds=(ct.predecessors||'').trim().length>0;
     if(hasPreds){
       // Successor: CPM owns both dates
@@ -14392,9 +14475,11 @@ function renderGantt(){
       currentY+=28;
     }
 
-    pt.forEach(t=>{
+    const ptOrdered=typeof _orderTasksHier==='function'?_orderTasksHier(pt):pt.map(t=>({t,depth:0}));
+    ptOrdered.forEach(({t,depth})=>{
+      const isSummary=typeof _taskHasChildren==='function'&&_taskHasChildren(t.id,pt);
       const cpm=cpmMap.get(t.id);
-      const isCrit=cpm?._isCritical||false;
+      const isCrit=!isSummary&&(cpm?._isCritical||false);
       const tf=cpm?._TF||0;
 
       // Always use stored dates for bar position (keeps Gantt in sync with Task List).
@@ -14435,7 +14520,14 @@ function renderGantt(){
       totalTasksShown++;
 
       let bar='';
-      if(isMile){
+      if(isSummary){
+        // Summary bar: slim solid bracket with end caps spanning the children
+        const lft=pct(tsStr),wdt=wPct(tsStr,teStr);
+        bar=`${ghostBar}
+          <div style="position:absolute;left:${lft}%;width:${wdt}%;min-width:8px;top:9px;height:7px;background:#6e7681;border-radius:2px" title="Summary: ${t.name} (${tsStr} → ${teStr})"></div>
+          <div style="position:absolute;left:${lft}%;top:16px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid #6e7681;margin-left:-1px"></div>
+          <div style="position:absolute;left:calc(${lft}% + ${wdt}% - 7px);top:16px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid #6e7681"></div>`;
+      }else if(isMile){
         bar=`${ghostBar}<div style="position:absolute;left:calc(${pct(tsStr)}% - 9px);top:4px;width:18px;height:18px;background:${isCrit?'#f85149':'var(--accent-amber)'};border-radius:2px;transform:rotate(45deg)" title="Milestone: ${t.name}"></div>`;
       }else{
         const lft=pct(tsStr);
@@ -14455,10 +14547,10 @@ function renderGantt(){
       const predCount=(window.SHICCPMEngine&&t.predecessors)?SHICCPMEngine.parsePredecessors(t.predecessors).length:0;
 
       rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${t.name} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0?' — Float: '+tf.toFixed(1)+'d':''}">
-        <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:4px 10px 4px 26px;border-right:1px solid var(--border);overflow:hidden">
+        <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:4px 10px 4px ${26+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
           <div style="display:flex;align-items:center;gap:5px">
-            <i class="fas ${isMile?'fa-diamond':'fa-circle'}" style="color:${isMile?(isCrit?'#f85149':'var(--accent-amber)'):tc};font-size:${isMile?'9':'5'}px;flex-shrink:0"></i>
-            <span style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${isCrit?'var(--accent-red)':overdue?'var(--accent-red)':'inherit'};font-weight:${isCrit?'600':'400'}">${t.name}</span>
+            <i class="fas ${isSummary?'fa-folder-open':isMile?'fa-diamond':'fa-circle'}" style="color:${isSummary?'#6e7681':isMile?(isCrit?'#f85149':'var(--accent-amber)'):tc};font-size:${isSummary?'9':isMile?'9':'5'}px;flex-shrink:0"></i>
+            <span style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${isCrit?'var(--accent-red)':overdue?'var(--accent-red)':'inherit'};font-weight:${isSummary?'700':isCrit?'600':'400'}">${t.name}</span>
             ${isCrit?`<span style="flex-shrink:0;width:6px;height:6px;background:var(--accent-red);border-radius:50%" title="Critical Path"></span>`:''}
           </div>
           <div style="display:flex;gap:4px;align-items:center;padding-left:14px">
@@ -14633,7 +14725,7 @@ function renderGantt(){
       </div>
     </div>
     <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-      ${[['#388bfd','In Progress'],['#3fb950','Done'],['#8b949e','Todo'],['#f85149','Critical / Overdue ⚠'],['#f0a450','On Hold'],['var(--accent-amber)','Milestone ◆'],['rgba(139,148,158,.3)','Float'],['rgba(139,148,158,.15)','Baseline ┄']].map(([c,l])=>`<div style="display:flex;align-items:center;gap:4px"><div style="width:14px;height:8px;background:${c};border-radius:2px;border:1.5px dashed ${c.includes('rgba')||c==='rgba(139,148,158,.15)'?'#8b949e':'transparent'}"></div><span style="font-size:10px">${l}</span></div>`).join('')}
+      ${[['#388bfd','In Progress'],['#3fb950','Done'],['#8b949e','Todo'],['#f85149','Critical / Overdue ⚠'],['#f0a450','On Hold'],['var(--accent-amber)','Milestone ◆'],['#6e7681','Summary ▔'],['rgba(139,148,158,.3)','Float'],['rgba(139,148,158,.15)','Baseline ┄']].map(([c,l])=>`<div style="display:flex;align-items:center;gap:4px"><div style="width:14px;height:8px;background:${c};border-radius:2px;border:1.5px dashed ${c.includes('rgba')||c==='rgba(139,148,158,.15)'?'#8b949e':'transparent'}"></div><span style="font-size:10px">${l}</span></div>`).join('')}
       ${todayPct>0&&todayPct<100?`<div style="display:flex;align-items:center;gap:4px"><div style="width:2px;height:14px;background:var(--accent-red)"></div><span style="font-size:10px">Today: ${today}</span></div>`:''}
     </div>
   </div>
@@ -14821,11 +14913,16 @@ async function exportGanttPDF(projectId){
     // Build rows
     const rows=[];
     rows.push({type:'proj',d:project,depth:0});
-    const sorted=[...tasks].sort((a,b)=>{
-      if(a.wbs&&b.wbs)return a.wbs.localeCompare(b.wbs,undefined,{numeric:true});
-      return(a.startDate||'').localeCompare(b.startDate||'');
-    });
-    sorted.forEach(t=>rows.push({type:'task',d:t,depth:_wbsDepth(t.wbs)}));
+    if(typeof _orderTasksHier==='function'&&tasks.some(t=>t.parentId)){
+      // Real parent/child hierarchy: DFS order with true depth
+      _orderTasksHier(tasks).forEach(({t,depth})=>rows.push({type:'task',d:t,depth}));
+    }else{
+      const sorted=[...tasks].sort((a,b)=>{
+        if(a.wbs&&b.wbs)return a.wbs.localeCompare(b.wbs,undefined,{numeric:true});
+        return(a.startDate||'').localeCompare(b.startDate||'');
+      });
+      sorted.forEach(t=>rows.push({type:'task',d:t,depth:_wbsDepth(t.wbs)}));
+    }
 
     // Date range
     const allD=[project.startDate,project.endDate,...tasks.flatMap(t=>[t.startDate,t.endDate||t.dueDate])].filter(d=>d&&/^\d{4}/.test(d));

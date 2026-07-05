@@ -1,8 +1,8 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.5.0';
-const APP_BUILD='20260703c';
+const APP_VERSION='2.6.0';
+const APP_BUILD='20260706a';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Unlimited local storage via IndexedDB mirror; legacy patches retired (fixes built in)';
+const APP_RELEASE_NOTE='Task hierarchy: parent/child subtasks with WBS rollup in Tasks, Gantt and PDF export';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching

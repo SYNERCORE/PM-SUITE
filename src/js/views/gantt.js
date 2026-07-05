@@ -132,9 +132,11 @@ function renderGantt(){
       currentY+=28;
     }
 
-    pt.forEach(t=>{
+    const ptOrdered=typeof _orderTasksHier==='function'?_orderTasksHier(pt):pt.map(t=>({t,depth:0}));
+    ptOrdered.forEach(({t,depth})=>{
+      const isSummary=typeof _taskHasChildren==='function'&&_taskHasChildren(t.id,pt);
       const cpm=cpmMap.get(t.id);
-      const isCrit=cpm?._isCritical||false;
+      const isCrit=!isSummary&&(cpm?._isCritical||false);
       const tf=cpm?._TF||0;
 
       // Always use stored dates for bar position (keeps Gantt in sync with Task List).
@@ -175,7 +177,14 @@ function renderGantt(){
       totalTasksShown++;
 
       let bar='';
-      if(isMile){
+      if(isSummary){
+        // Summary bar: slim solid bracket with end caps spanning the children
+        const lft=pct(tsStr),wdt=wPct(tsStr,teStr);
+        bar=`${ghostBar}
+          <div style="position:absolute;left:${lft}%;width:${wdt}%;min-width:8px;top:9px;height:7px;background:#6e7681;border-radius:2px" title="Summary: ${t.name} (${tsStr} → ${teStr})"></div>
+          <div style="position:absolute;left:${lft}%;top:16px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid #6e7681;margin-left:-1px"></div>
+          <div style="position:absolute;left:calc(${lft}% + ${wdt}% - 7px);top:16px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid #6e7681"></div>`;
+      }else if(isMile){
         bar=`${ghostBar}<div style="position:absolute;left:calc(${pct(tsStr)}% - 9px);top:4px;width:18px;height:18px;background:${isCrit?'#f85149':'var(--accent-amber)'};border-radius:2px;transform:rotate(45deg)" title="Milestone: ${t.name}"></div>`;
       }else{
         const lft=pct(tsStr);
@@ -195,10 +204,10 @@ function renderGantt(){
       const predCount=(window.SHICCPMEngine&&t.predecessors)?SHICCPMEngine.parsePredecessors(t.predecessors).length:0;
 
       rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${t.name} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0?' — Float: '+tf.toFixed(1)+'d':''}">
-        <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:4px 10px 4px 26px;border-right:1px solid var(--border);overflow:hidden">
+        <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:4px 10px 4px ${26+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
           <div style="display:flex;align-items:center;gap:5px">
-            <i class="fas ${isMile?'fa-diamond':'fa-circle'}" style="color:${isMile?(isCrit?'#f85149':'var(--accent-amber)'):tc};font-size:${isMile?'9':'5'}px;flex-shrink:0"></i>
-            <span style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${isCrit?'var(--accent-red)':overdue?'var(--accent-red)':'inherit'};font-weight:${isCrit?'600':'400'}">${t.name}</span>
+            <i class="fas ${isSummary?'fa-folder-open':isMile?'fa-diamond':'fa-circle'}" style="color:${isSummary?'#6e7681':isMile?(isCrit?'#f85149':'var(--accent-amber)'):tc};font-size:${isSummary?'9':isMile?'9':'5'}px;flex-shrink:0"></i>
+            <span style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${isCrit?'var(--accent-red)':overdue?'var(--accent-red)':'inherit'};font-weight:${isSummary?'700':isCrit?'600':'400'}">${t.name}</span>
             ${isCrit?`<span style="flex-shrink:0;width:6px;height:6px;background:var(--accent-red);border-radius:50%" title="Critical Path"></span>`:''}
           </div>
           <div style="display:flex;gap:4px;align-items:center;padding-left:14px">
@@ -373,7 +382,7 @@ function renderGantt(){
       </div>
     </div>
     <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-      ${[['#388bfd','In Progress'],['#3fb950','Done'],['#8b949e','Todo'],['#f85149','Critical / Overdue ⚠'],['#f0a450','On Hold'],['var(--accent-amber)','Milestone ◆'],['rgba(139,148,158,.3)','Float'],['rgba(139,148,158,.15)','Baseline ┄']].map(([c,l])=>`<div style="display:flex;align-items:center;gap:4px"><div style="width:14px;height:8px;background:${c};border-radius:2px;border:1.5px dashed ${c.includes('rgba')||c==='rgba(139,148,158,.15)'?'#8b949e':'transparent'}"></div><span style="font-size:10px">${l}</span></div>`).join('')}
+      ${[['#388bfd','In Progress'],['#3fb950','Done'],['#8b949e','Todo'],['#f85149','Critical / Overdue ⚠'],['#f0a450','On Hold'],['var(--accent-amber)','Milestone ◆'],['#6e7681','Summary ▔'],['rgba(139,148,158,.3)','Float'],['rgba(139,148,158,.15)','Baseline ┄']].map(([c,l])=>`<div style="display:flex;align-items:center;gap:4px"><div style="width:14px;height:8px;background:${c};border-radius:2px;border:1.5px dashed ${c.includes('rgba')||c==='rgba(139,148,158,.15)'?'#8b949e':'transparent'}"></div><span style="font-size:10px">${l}</span></div>`).join('')}
       ${todayPct>0&&todayPct<100?`<div style="display:flex;align-items:center;gap:4px"><div style="width:2px;height:14px;background:var(--accent-red)"></div><span style="font-size:10px">Today: ${today}</span></div>`:''}
     </div>
   </div>

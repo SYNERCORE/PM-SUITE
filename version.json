@@ -1,1 +1,1 @@
-{"version":"2.5.0","note":"Unlimited local storage via IndexedDB mirror; legacy patches retired (fixes built in)","released":"2026-07-03 08:17"}
+{"version":"2.6.0","note":"Task hierarchy: parent/child subtasks with WBS rollup in Tasks, Gantt and PDF export","released":"2026-07-06 07:47"}
