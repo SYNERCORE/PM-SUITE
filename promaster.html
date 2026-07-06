@@ -535,10 +535,10 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.7.0';
-const APP_BUILD='20260706c';
+const APP_VERSION='2.7.1';
+const APP_BUILD='20260706d';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Workflow routing: multi-step approvals, Workflow Editor, My Approvals inbox, admin mid-route control';
+const APP_RELEASE_NOTE='Workflow editor: approver email now added on click-away or Save, not just Enter';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
@@ -13848,8 +13848,9 @@ function _wfEdRenderSteps() {
         <button class="btn btn-danger btn-sm btn-icon" onclick="_wfEdSteps.splice(${i},1);_wfEdRenderSteps()" title="Remove step"><i class="fas fa-trash"></i></button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        <input class="form-input" list="wfUserList" style="flex:2;min-width:180px;height:28px;font-size:11px" placeholder="Add approver email + Enter"
-          onkeydown="if(event.key==='Enter'){event.preventDefault();const v=this.value.trim().toLowerCase();if(v.includes('@')&&!_wfEdSteps[${i}].approvers.includes(v)){_wfEdSteps[${i}].approvers.push(v);_wfEdRenderSteps();}}">
+        <input class="form-input wf-appr-input" data-step="${i}" list="wfUserList" style="flex:2;min-width:180px;height:28px;font-size:11px" placeholder="Type approver email, press Enter"
+          onkeydown="if(event.key==='Enter'||event.key===','){event.preventDefault();_wfEdCommitEmail(this,${i});}"
+          onblur="_wfEdCommitEmail(this,${i})" onchange="_wfEdCommitEmail(this,${i})">
         <select class="form-select" style="width:130px;height:28px;font-size:11px" onchange="_wfEdSteps[${i}].mode=this.value">
           <option value="any" ${s.mode !== 'all' ? 'selected' : ''}>Any one approves</option>
           <option value="all" ${s.mode === 'all' ? 'selected' : ''}>All must approve</option>
@@ -13865,10 +13866,26 @@ function _wfEdRenderSteps() {
     </div>`).join('');
 }
 
+// Commit whatever is typed in an approver input into the step (Enter, comma, blur, or Save)
+function _wfEdCommitEmail(inp, i) {
+  const v = (inp.value || '').trim().toLowerCase().replace(/,$/, '');
+  if (!v) return;
+  if (!v.includes('@')) return; // leave partial text in place
+  if (!_wfEdSteps[i].approvers.includes(v)) _wfEdSteps[i].approvers.push(v);
+  inp.value = '';
+  _wfEdRenderSteps();
+}
+function _wfEdCommitAllEmails() {
+  document.querySelectorAll('.wf-appr-input').forEach(inp => {
+    const i = parseInt(inp.dataset.step);
+    if (!isNaN(i) && _wfEdSteps[i]) _wfEdCommitEmail(inp, i);
+  });
+}
 function _wfEdAddStep() { _wfEdSteps.push({ name: 'Approval ' + (_wfEdSteps.length + 1), approvers: [], mode: 'any', slaDays: 0, minAmount: 0 }); _wfEdRenderSteps(); }
 function _wfEdMove(i, dir) { const t = _wfEdSteps[i + dir]; _wfEdSteps[i + dir] = _wfEdSteps[i]; _wfEdSteps[i] = t; _wfEdRenderSteps(); }
 
 function wfSaveDef() {
+  _wfEdCommitAllEmails(); // sweep any email still sitting in an input box
   const name = ($('#wfDefName')?.value || '').trim() || WF_DOCTYPES[_wfEdDocType].label + ' Route';
   const steps = _wfEdSteps.filter(s => s.approvers.length && s.name.trim());
   if (!steps.length) { showToast('Add at least one step with an approver', 'error'); return; }

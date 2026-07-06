@@ -1,8 +1,8 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.7.0';
-const APP_BUILD='20260706c';
+const APP_VERSION='2.7.1';
+const APP_BUILD='20260706d';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Workflow routing: multi-step approvals, Workflow Editor, My Approvals inbox, admin mid-route control';
+const APP_RELEASE_NOTE='Workflow editor: approver email now added on click-away or Save, not just Enter';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
