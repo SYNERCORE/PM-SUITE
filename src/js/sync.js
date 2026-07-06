@@ -2243,7 +2243,7 @@ function _spMergeArrays(localArr, remoteArr, localEdited, arrayKey) {
 // Deduplicates by 'at' timestamp — safe for arrays where each entry is immutable once added.
 function _spMergeAppendArrays(base, donor) {
   if (!donor) return base;
-  const APPEND_FIELDS = ['updates','comments','attachments','notes'];
+  const APPEND_FIELDS = ['updates','comments','attachments','notes','wfActions'];
   let merged = base;
   APPEND_FIELDS.forEach(field => {
     const baseArr = Array.isArray(base[field]) ? base[field] : [];

@@ -1344,7 +1344,8 @@ function _whRequestsHTML(){
     const q=isStock?_whCalcQty(r.itemId):{qtyOnHand:0,qtyAvailable:0};
     const hasStock=isStock&&q.qtyAvailable>=r.qty;
     const _whCanManage=typeof hasModulePermission==='function'?hasModulePermission('warehouse','manage'):isAdminUser();
-    const canApprove=_whCanManage&&r.status==='pending';
+    const inRoute=!!r.wfRoute; // workflow-routed: engine owns approve/reject
+    const canApprove=!inRoute&&_whCanManage&&r.status==='pending';
     const canRelease=_whCanManage&&r.status==='approved'&&isStock&&hasStock;
     const canStartPR=_whCanManage&&(r.status==='pending'||r.status==='approved')&&!r.prId;
     const sc=statusColor[r.status]||'#555';
@@ -1374,10 +1375,12 @@ function _whRequestsHTML(){
         <span class="badge" style="background:${sc}22;color:${sc};border:1px solid ${sc}44;font-size:10px">
           ${statusLabel[r.status]||r.status}
         </span>
+        ${inRoute&&typeof wfBadge==='function'?`<div style="margin-top:3px">${wfBadge(r)}</div>`:''}
         ${r.prId?`<div style="font-size:9px;color:#bc8cff;margin-top:2px"><i class="fas fa-file-alt" style="margin-right:3px"></i>${r.prId}</div>`:''}
       </td>
       <td>
         <div style="display:flex;gap:4px;flex-wrap:wrap">
+          ${inRoute&&r.status==='pending'&&typeof wfActionButtonsHTML==='function'?wfActionButtonsHTML('issuanceRequest',r):''}
           ${canApprove&&isStock?`<button class="btn btn-secondary btn-sm" style="padding:2px 7px;font-size:11px;color:var(--accent-green)" onclick="_whApproveReq('${r.id}',true)"><i class="fas fa-check"></i> Approve</button>
           <button class="btn btn-secondary btn-sm" style="padding:2px 7px;font-size:11px;color:var(--accent-red)" onclick="_whApproveReq('${r.id}',false)"><i class="fas fa-times"></i> Reject</button>`:''}
           ${canRelease?`<button class="btn btn-primary btn-sm" style="padding:2px 7px;font-size:11px" onclick="_whReleaseReq('${r.id}')"><i class="fas fa-dolly"></i> Release</button>`:''}
@@ -2623,12 +2626,14 @@ function _whSaveRequest(){
   const location=$('#whr-location')?.value.trim();
   const requestedAt=new Date().toISOString();
   valid.forEach(ln=>{
-    AppState.data.issuanceRequests.push({
+    const req={
       id:_whNextId('REQ-',AppState.data.issuanceRequests),
       itemId:ln.itemId,qty:parseFloat(ln.qty),
       projectId,requestedBy,dateNeeded,reason,priority,location,
       status:'pending',requestedAt,
-    });
+    };
+    AppState.data.issuanceRequests.push(req);
+    if(typeof wfStart==='function')wfStart('issuanceRequest',req); // route via workflow if one is active
   });
   AppState.save();
   closeModal('whReqModal');

@@ -1,8 +1,8 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.6.1';
-const APP_BUILD='20260706b';
+const APP_VERSION='2.7.0';
+const APP_BUILD='20260706c';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Fix: Quick Add button no longer covers last row buttons in tables';
+const APP_RELEASE_NOTE='Workflow routing: multi-step approvals, Workflow Editor, My Approvals inbox, admin mid-route control';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
@@ -39,6 +39,10 @@ const APP_CHANGELOG=[
 ];
 // Migration registry — add new migration functions here when adding new data structures
 const DATA_MIGRATIONS={
+  '2.7.0': function(data){
+    if(!data.workflowDefs)data.workflowDefs=[];
+    return data;
+  },
   '2.4.0': function(data){
     if(!data.warehouseItems)data.warehouseItems=[];
     if(!data.stockTransactions)data.stockTransactions=[];
@@ -675,6 +679,12 @@ const SHIC_LIST_CONFIG = {
       { field: 'projectId', spCol: 'ProjectId', spType: 'Text' },
     ],
   },
+  'SHIC_WorkflowDefs': {
+    dataKey: 'workflowDefs', idField: 'DefId', name: 'Workflow Definitions', hasProject: false,
+    indexCols: [
+      { field: 'docType', spCol: 'DocType', spType: 'Text' },
+    ],
+  },
   'SHIC_DeletionRequests': {
     dataKey: 'deletionRequests', idField: 'ReqId', name: 'Deletion Requests', hasProject: false,
     indexCols: [
@@ -804,6 +814,8 @@ const NAV_ITEMS=[
 {id:'qaqc',label:'QA/QC',icon:'fas fa-check-double',section:'Quality'},
 {id:'risks',label:'Risk Register',icon:'fas fa-exclamation-triangle',section:'Quality'},
 {id:'actions',label:'Action Items',icon:'fas fa-clipboard-list',section:'Control'},
+{id:'approvals',label:'My Approvals',icon:'fas fa-stamp',section:'Control'},
+{id:'workflows',label:'Workflow Editor',icon:'fas fa-route',section:'Control'},
 {id:'documents',label:'Documents',icon:'fas fa-folder-open',section:'Control'},
 {id:'library',label:'Reference Library',icon:'fas fa-book',section:'Control'},
 {id:'progress',label:'Progress',icon:'fas fa-chart-line',section:'Control'},
@@ -855,7 +867,7 @@ function getDefaultData(){
   return{
     projects:[],tasks:[],resources:[],equipment:[],tools:[],vehicles:[],
     consumables:[],materials:[],manpower:[],procurement:[],procurementLogs:[],
-    warehouseItems:[],stockTransactions:[],issuanceRequests:[],
+    warehouseItems:[],stockTransactions:[],issuanceRequests:[],workflowDefs:[],
     resourceAllocations:[],resourceUsageLogs:[],costs:[],qaqc:[],risks:[],
     actions:[],documents:[],progress:[],kpiData:[],calendar:[],
     assetHistory:[],assetUtilization:[],thirdParty:[],projectTeam:[],activities:[],notifications:[],

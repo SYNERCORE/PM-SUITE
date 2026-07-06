@@ -71,7 +71,12 @@ function renderDeletionRequests(tab) {
                 </div>
                 ${r.rejectionReason ? `<div style="margin-top:5px;padding:6px 9px;background:rgba(248,81,73,.08);border-radius:5px;font-size:11px;color:var(--accent-red)"><strong>Rejected:</strong> ${r.rejectionReason}</div>` : ''}
               </div>
-              ${(isAdmin && r.status === 'pending') ? `
+              ${(r.wfRoute && r.status === 'pending' && typeof wfActionButtonsHTML === 'function') ? `
+                <div style="display:flex;gap:5px;flex-shrink:0;flex-direction:column;align-items:flex-end">
+                  ${typeof wfBadge === 'function' ? wfBadge(r) : ''}
+                  <div style="display:flex;gap:5px">${wfActionButtonsHTML('deletionRequest', r)}</div>
+                </div>
+              ` : (isAdmin && r.status === 'pending') ? `
                 <div style="display:flex;gap:5px;flex-shrink:0">
                   <button class="btn btn-success btn-sm" onclick="approveDeletionRequest('${r.id}')"><i class="fas fa-check"></i> Approve</button>
                   <button class="btn btn-danger btn-sm" onclick="rejectDeletionRequest('${r.id}')"><i class="fas fa-times"></i> Reject</button>

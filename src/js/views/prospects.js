@@ -250,6 +250,7 @@ function submitDeletionRequest(arrayKey, id) {
     _newlyCreated: true,
   };
   AppState.data.deletionRequests.push(req);
+  if (typeof wfStart === 'function') wfStart('deletionRequest', req); // route via workflow if one is active
   AppState.save();
   if (typeof auditLog === 'function') auditLog('delete_request', 'Deletion requested: ' + req.recordType + ' ' + id, { reason, recordLabel });
   closeModal('genericModal');

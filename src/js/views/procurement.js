@@ -145,6 +145,8 @@ function renderProcList(){
             <i class="fas ${stage.icon}" style="color:${stage.color};font-size:10px"></i>
             <span class="badge" style="background:${stage.color}22;color:${stage.color};font-size:9px;white-space:nowrap">${stage.label}</span>
           </div>
+          ${p.wfRoute&&typeof wfBadge==='function'?`<div style="margin-top:3px">${wfBadge(p)}</div>`:''}
+          ${p.wfRoute&&typeof wfState==='function'&&wfState(p).status==='in-route'&&typeof wfActionButtonsHTML==='function'?`<div style="display:flex;gap:3px;margin-top:3px">${wfActionButtonsHTML(p.wfRoute.docType,p)}</div>`:''}
         </td>
         <td style="font-size:10px;color:var(--text-secondary);min-width:130px">${lastLog?`<div style="font-weight:500;color:var(--text-primary)">${lastLog.action}</div><div style="font-size:9px">${lastLog.date} · ${lastLog.by}</div>`:'<span style="color:var(--text-muted)">No updates yet</span>'}</td>
         <td>
@@ -407,6 +409,22 @@ function changeProcStage(id,newStage){
   if(!p)return;
   const oldStage=p.status;
   if(oldStage===newStage)return;
+  // Workflow gates: moving into 'approved' or 'ordered' goes through routing when a workflow is active
+  if(typeof wfStart==='function'&&typeof wfState==='function'){
+    const gate=newStage==='approved'?'procurementPR':newStage==='ordered'?'procurementPO':null;
+    if(gate){
+      const st=p.wfRoute?wfState(p):null;
+      const routedForGate=st&&p.wfRoute.docType===gate;
+      if(routedForGate&&st.status==='in-route'){showToast('Already in approval route — see My Approvals','warning');return;}
+      if(!routedForGate&&wfStart(gate,p)){
+        AppState.save();
+        addProcLog(id,{action:'Sent for approval ('+(gate==='procurementPR'?'PR':'PO')+' route)',stageBefore:oldStage,stageAfter:oldStage,by:(_currentUserProfile?.name||'User'),remarks:''});
+        closeModal('genericModal');renderProcurement();
+        showToast('Sent for approval — route started','success');
+        return;
+      }
+    }
+  }
   p.status=newStage;
   AppState.save();
   // Auto-log stage change

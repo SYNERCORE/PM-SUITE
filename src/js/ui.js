@@ -18,7 +18,9 @@ NAV_ITEMS.forEach(item=>{
 if(item.section!==lastSec){html+=`<div class="nav-section"><div class="nav-section-label">${item.section}</div></div>`;lastSec=item.section;}
 const badge={actions:(AppState.data.actions||[]).filter(a=>a.status==='overdue').length,
 qaqc:(AppState.data.qaqc||[]).filter(q=>q.type==='NCR'&&q.status==='open').length,
-risks:(AppState.data.risks||[]).filter(r=>r.status==='active').length}[item.id];
+risks:(AppState.data.risks||[]).filter(r=>r.status==='active').length,
+approvals:(typeof wfPendingForMe==='function'?wfPendingForMe().length:0)}[item.id];
+if(item.id==='workflows'&&!_isAdm)return; // Workflow Editor is admin-only
 if(!_isAdm&&(_userPerms[item.id]==='none'))return; // no access
 html+=`<div class="nav-item ${AppState.currentPage===item.id?'active':''}" onclick="navigate('${item.id}')" id="nav-${item.id}">
 <span class="nav-icon"><i class="${item.icon}"></i></span><span class="nav-label">${item.label}</span>
@@ -235,7 +237,9 @@ resources:renderResources,manpower:renderManpower,materials:renderMaterials,proc
 costs:renderCosts,qaqc:renderQAQC,risks:renderRisks,actions:renderActions,documents:renderDocuments,
 progress:renderProgress,kpi:renderKPI,analytics:()=>{if(typeof renderAnalytics==='function')renderAnalytics();else{const el=$('#analytics');if(el)el.innerHTML='<div class="empty-state"><p>Analytics module not loaded.</p></div>';}},dailymeeting:renderDailyMeeting,calendar:renderCalendar,reports:renderReports,settings:renderSettings,masterlist:renderMasterlist,prospects:renderProspects,library:renderLibrary,
 trash:typeof renderTrash==='function'?renderTrash:null,
-deletionRequests:typeof renderDeletionRequests==='function'?renderDeletionRequests:null};
+deletionRequests:typeof renderDeletionRequests==='function'?renderDeletionRequests:null,
+approvals:typeof renderApprovals==='function'?renderApprovals:null,
+workflows:typeof renderWorkflows==='function'?renderWorkflows:null};
 // ── Global error boundary (Phase A4) ─────────────────────────
 if (map[pid]) {
   try {
