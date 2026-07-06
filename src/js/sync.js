@@ -1969,6 +1969,7 @@ async function connectSharePoint() {
             AppState.data = Object.assign(getDefaultData(), cleanData);
             if (typeof migrateData === 'function') migrateData();
             if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
+    try { _spFlushMergeConflicts(); } catch(e) {}
             AppState.save();
             _spOfflineQueue = false;
             localStorage.removeItem('shic_sp_offlinequeue');
@@ -2200,6 +2201,17 @@ function _spWasDeleted(arrayKey, id) {
   return !!(_spDeletedIds[arrayKey] && _spDeletedIds[arrayKey][id]);
 }
 
+// Conflict visibility: records where a newer remote edit overwrote this
+// device's local edit during merge. Flushed to a toast after each poll.
+let _spMergeConflicts = [];
+function _spFlushMergeConflicts() {
+  if (!_spMergeConflicts.length) return;
+  const names = _spMergeConflicts.slice(0, 3).map(c => typeof esc === 'function' ? esc(c.label) : c.label).join(', ');
+  const extra = _spMergeConflicts.length > 3 ? ` +${_spMergeConflicts.length - 3} more` : '';
+  showToast(`<i class="fas fa-code-branch"></i> ${_spMergeConflicts.length} record(s) updated by another user won over your older edit: ${names}${extra}. Your comments/updates were kept.`, 'warning', 7000);
+  _spMergeConflicts = [];
+}
+
 // ── Merge helper: union of remote + local arrays ─────────
 // Remote wins for records that exist in BOTH (authoritative)
 // Local wins only for records added locally that aren't in remote yet
@@ -2223,6 +2235,10 @@ function _spMergeArrays(localArr, remoteArr, localEdited, arrayKey) {
       else if (!localRec._mAt && remoteRec._mAt) localWins = false;
       else localWins = !!localEdited;
       // Winner's fields + union of append-only sub-arrays so no updates are lost
+      // Conflict visibility: remote overwrote a record this device had edited
+      if (!localWins && localRec._mAt && remoteRec._mAt && localRec._mAt !== remoteRec._mAt) {
+        _spMergeConflicts.push({ arrayKey, id: remoteRec.id, label: remoteRec.name || remoteRec.description || remoteRec.title || remoteRec.id });
+      }
       result.push(localWins
         ? _spMergeAppendArrays(localRec, remoteRec)
         : _spMergeAppendArrays(remoteRec, localRec));
@@ -2309,6 +2325,7 @@ function _spApplyRemote(data, _ts, _by) {
     AppState.data = Object.assign(getDefaultData(), merged);
     if (typeof migrateData === 'function') migrateData();
     if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
+    try { _spFlushMergeConflicts(); } catch(e) {}
     AppState.save();
     setTimeout(() => {
       try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
@@ -2347,6 +2364,7 @@ function _spApplyRemote(data, _ts, _by) {
     }
     if (typeof migrateData === 'function') migrateData();
     if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
+    try { _spFlushMergeConflicts(); } catch(e) {}
     AppState.save();
     setTimeout(() => {
       try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
@@ -3152,6 +3170,7 @@ async function spPushData(silent = false) {
       }
       AppState.data = Object.assign(getDefaultData(), merged);
       if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
+    try { _spFlushMergeConflicts(); } catch(e) {}
       _spLastWriteTs = _ts;
       _spDataHash = _spHash(remoteData) + _ts;
       if (!silent) showToast('Merged remote changes before push', 'info', 2500);
@@ -3579,7 +3598,8 @@ async function _spPollRemote() {
 
     // Save merged sub-lists immediately (they preserved local unsynced + deleted markers)
     if (subListsChanged) {
-      if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes(); // remote records are not "local edits"
+      if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
+    try { _spFlushMergeConflicts(); } catch(e) {} // remote records are not "local edits"
       AppState.save();
       // Only re-render if the user is not mid-form — prevents wiping typed text
       if (!_isUserActivelyEditing()) _refreshCurrentView();

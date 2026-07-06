@@ -1,0 +1,60 @@
+name: Validate build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax-check all source JS
+        run: |
+          set -e
+          for f in $(find src/js -name '*.js'); do
+            node --check "$f"
+          done
+          echo "All source files parse OK"
+
+      - name: Verify bundle matches sources
+        run: |
+          # promaster.html must contain the version declared in src/js/core.js
+          SRC_VER=$(grep -oP "APP_VERSION='\K[^']+" src/js/core.js)
+          if ! grep -q "APP_VERSION='$SRC_VER'" promaster.html; then
+            echo "::error::promaster.html does not contain APP_VERSION=$SRC_VER — did you forget to run build.ps1?"
+            exit 1
+          fi
+          if ! grep -q "\"version\":\"$SRC_VER\"" version.json; then
+            echo "::error::version.json does not match APP_VERSION=$SRC_VER"
+            exit 1
+          fi
+          echo "Bundle is v$SRC_VER and matches sources"
+
+      - name: Smoke-load the app in headless Chrome
+        run: |
+          npm i -g puppeteer@23 --silent
+          node - <<'EOF'
+          const puppeteer = require('puppeteer');
+          (async () => {
+            const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
+            const page = await browser.newPage();
+            const errors = [];
+            page.on('pageerror', e => errors.push(e.message));
+            await page.goto('file://' + process.cwd() + '/promaster.html', { waitUntil: 'load', timeout: 60000 });
+            await new Promise(r => setTimeout(r, 3000));
+            const checks = await page.evaluate(() => ({
+              version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : null,
+              appState: typeof AppState === 'object',
+              renderPage: typeof renderPage === 'function',
+            }));
+            await browser.close();
+            console.log('Checks:', JSON.stringify(checks), 'Errors:', errors);
+            if (!checks.version || !checks.appState || errors.length) {
+              console.error('App failed to boot cleanly');
+              process.exit(1);
+            }
+          })();
+          EOF

@@ -73,6 +73,7 @@ function wfStart(docType, doc) {
   doc.wfActions = [];
   doc.wfDone = false;
   _wfNotifyStep(doc, 0);
+  _wfWebhook('route_started', docType, doc, { workflow: def.name, step: steps[0].name, approvers: steps[0].approvers });
   if (typeof spWriteAuditLog === 'function') spWriteAuditLog('wf_start', docType, doc.id, WF_DOCTYPES[docType]?.ref(doc) || doc.id, { workflow: def.name, steps: steps.map(s => s.name).join(' → ') });
   return true;
 }
@@ -144,6 +145,8 @@ function wfAct(docType, id, decision) {
   AppState.save();
   if (typeof spWriteAuditLog === 'function') spWriteAuditLog('wf_' + decision, docType, doc.id, reg.ref(doc), { step: st.steps[st.cur]?.name, note });
   if (after.status === 'in-route' && after.cur > st.cur) _wfNotifyStep(doc, after.cur);
+  _wfWebhook(after.status === 'in-route' ? 'step_' + decision : 'route_' + after.status, docType, doc,
+    { by: me.email, step: st.steps[st.cur]?.name, note, nextStep: after.status === 'in-route' ? after.steps[after.cur]?.name : null, nextApprovers: after.status === 'in-route' ? after.steps[after.cur]?.approvers : null });
   showToast(decision === 'reject' ? 'Rejected' : (after.status === 'approved' ? 'Approved — route complete' : 'Approved — moved to next step'), decision === 'reject' ? 'error' : 'success');
   _wfRefresh();
 }
@@ -159,6 +162,26 @@ function _wfNotifyStep(doc, stepIdx) {
       message: `${doc.id} — step "${step.name}" awaits ${step.approvers.join(', ')}`,
       targets: step.approvers,
     });
+  } catch (e) {}
+}
+
+// ── Power Automate / webhook integration ─────────────────────
+// POSTs workflow events to the URL in Settings → Integrations. Fire-and-forget:
+// failures never block the approval itself.
+function _wfWebhook(event, docType, doc, extra) {
+  try {
+    const url = AppState.data.settings?.webhookUrl; // Settings → Integrations → Webhook URL
+    if (!url || !/^https:\/\//i.test(url)) return;
+    const reg = WF_DOCTYPES[docType];
+    const payload = {
+      event, docType, docId: doc.id,
+      ref: reg?.ref(doc) || doc.id,
+      amount: reg?.amount(doc) || 0,
+      appUrl: 'https://synercore.github.io/PM-SUITE/promaster.html',
+      at: _wfNow(),
+      ...extra,
+    };
+    fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {});
   } catch (e) {}
 }
 

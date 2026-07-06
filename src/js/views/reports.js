@@ -319,8 +319,12 @@ const PERM_COLORS={none:'var(--accent-red)',view:'var(--accent-amber)',edit:'var
 
 function _getPermKey(uid){return'shic_perms_'+uid;}
 
+// Permissions live in AppState.data.userPerms (synced to SharePoint) so an
+// admin's changes reach every device. localStorage is only a legacy fallback.
 function getModulePerms(uid){
   try{
+    const rec=(AppState.data?.userPerms||[]).find(p=>p.id===uid&&!p._deleted);
+    if(rec&&rec.perms)return rec.perms;
     const stored=JSON.parse(localStorage.getItem(_getPermKey(uid))||'null');
     if(stored)return stored;
     // Migrate from old block-list format
@@ -331,8 +335,15 @@ function getModulePerms(uid){
   }catch{return{};}
 }
 
-function setModulePerms(uid,perms){
-  localStorage.setItem(_getPermKey(uid),JSON.stringify(perms));
+function setModulePerms(uid,perms,email){
+  AppState.ensureData();
+  if(!AppState.data.userPerms)AppState.data.userPerms=[];
+  const arr=AppState.data.userPerms;
+  const i=arr.findIndex(p=>p.id===uid);
+  const rec={id:uid,email:(email||'').toLowerCase(),perms,updatedBy:(typeof _currentUserProfile!=='undefined'?_currentUserProfile?.email:'')||'',updatedAt:new Date().toISOString()};
+  if(i>=0)arr[i]={...arr[i],...rec};else arr.push(rec);
+  AppState.save();
+  try{localStorage.setItem(_getPermKey(uid),JSON.stringify(perms));}catch(e){} // legacy mirror for old builds
 }
 
 // Returns the permission level string ('none','view','edit','manage') for the current user on a module
@@ -358,7 +369,8 @@ function getBlockedModules(uid){
   return Object.entries(perms).filter(([,v])=>v==='none').map(([k])=>k);
 }
 
-function showModuleAccess(uid,userName){
+function showModuleAccess(uid,userName,userEmail){
+  _modAccessEmail=userEmail||'';
   const perms=getModulePerms(uid);
   $('#genericModalTitle').textContent='Module Permissions — '+userName;
   $('#genericModalBody').innerHTML=`
@@ -390,6 +402,7 @@ function showModuleAccess(uid,userName){
   openModal('genericModal');
 }
 
+let _modAccessEmail='';
 function saveModuleAccess(uid,setAll=false,setView=false){
   const perms={};
   if(setAll){
@@ -401,7 +414,7 @@ function saveModuleAccess(uid,setAll=false,setView=false){
       perms[sel.dataset.mod]=sel.value;
     });
   }
-  setModulePerms(uid,perms);
+  setModulePerms(uid,perms,_modAccessEmail);
   closeModal('genericModal');
   buildSidebar();
   showToast('Module permissions updated for '+uid,'success');

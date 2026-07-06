@@ -1,8 +1,8 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.7.1';
-const APP_BUILD='20260706d';
+const APP_VERSION='2.8.0';
+const APP_BUILD='20260706e';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Workflow editor: approver email now added on click-away or Save, not just Enter';
+const APP_RELEASE_NOTE='Synced user permissions, approval notifications, conflict alerts, workflow webhooks, XSS hardening';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
@@ -685,6 +685,12 @@ const SHIC_LIST_CONFIG = {
       { field: 'docType', spCol: 'DocType', spType: 'Text' },
     ],
   },
+  'SHIC_UserPerms': {
+    dataKey: 'userPerms', idField: 'PermId', name: 'User Permissions', hasProject: false,
+    indexCols: [
+      { field: 'email', spCol: 'Email', spType: 'Text' },
+    ],
+  },
   'SHIC_DeletionRequests': {
     dataKey: 'deletionRequests', idField: 'ReqId', name: 'Deletion Requests', hasProject: false,
     indexCols: [
@@ -867,7 +873,7 @@ function getDefaultData(){
   return{
     projects:[],tasks:[],resources:[],equipment:[],tools:[],vehicles:[],
     consumables:[],materials:[],manpower:[],procurement:[],procurementLogs:[],
-    warehouseItems:[],stockTransactions:[],issuanceRequests:[],workflowDefs:[],
+    warehouseItems:[],stockTransactions:[],issuanceRequests:[],workflowDefs:[],userPerms:[],
     resourceAllocations:[],resourceUsageLogs:[],costs:[],qaqc:[],risks:[],
     actions:[],documents:[],progress:[],kpiData:[],calendar:[],
     assetHistory:[],assetUtilization:[],thirdParty:[],projectTeam:[],activities:[],notifications:[],
@@ -920,6 +926,8 @@ function _restoreLocalData(){
 
 const $=s=>document.querySelector(s);
 const $$=s=>document.querySelectorAll(s);
+// Escape user-entered text before inserting into innerHTML (XSS/layout-break guard)
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const fmtNum=(n,d=0)=>n>=1000000?`${(n/1e6).toFixed(1)}M`:n>=1000?`${(n/1000).toFixed(0)}K`:(n||0).toFixed(d);
 const fmtCur=n=>'₱'+Number(n||0).toLocaleString('en-PH');
 const pColor=p=>p>=80?'var(--accent-green)':p>=50?'var(--accent-blue)':p>=30?'var(--accent-amber)':'var(--accent-red)';

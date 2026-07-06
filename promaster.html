@@ -535,10 +535,10 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.7.1';
-const APP_BUILD='20260706d';
+const APP_VERSION='2.8.0';
+const APP_BUILD='20260706e';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Workflow editor: approver email now added on click-away or Save, not just Enter';
+const APP_RELEASE_NOTE='Synced user permissions, approval notifications, conflict alerts, workflow webhooks, XSS hardening';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
@@ -1221,6 +1221,12 @@ const SHIC_LIST_CONFIG = {
       { field: 'docType', spCol: 'DocType', spType: 'Text' },
     ],
   },
+  'SHIC_UserPerms': {
+    dataKey: 'userPerms', idField: 'PermId', name: 'User Permissions', hasProject: false,
+    indexCols: [
+      { field: 'email', spCol: 'Email', spType: 'Text' },
+    ],
+  },
   'SHIC_DeletionRequests': {
     dataKey: 'deletionRequests', idField: 'ReqId', name: 'Deletion Requests', hasProject: false,
     indexCols: [
@@ -1403,7 +1409,7 @@ function getDefaultData(){
   return{
     projects:[],tasks:[],resources:[],equipment:[],tools:[],vehicles:[],
     consumables:[],materials:[],manpower:[],procurement:[],procurementLogs:[],
-    warehouseItems:[],stockTransactions:[],issuanceRequests:[],workflowDefs:[],
+    warehouseItems:[],stockTransactions:[],issuanceRequests:[],workflowDefs:[],userPerms:[],
     resourceAllocations:[],resourceUsageLogs:[],costs:[],qaqc:[],risks:[],
     actions:[],documents:[],progress:[],kpiData:[],calendar:[],
     assetHistory:[],assetUtilization:[],thirdParty:[],projectTeam:[],activities:[],notifications:[],
@@ -1456,6 +1462,8 @@ function _restoreLocalData(){
 
 const $=s=>document.querySelector(s);
 const $$=s=>document.querySelectorAll(s);
+// Escape user-entered text before inserting into innerHTML (XSS/layout-break guard)
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const fmtNum=(n,d=0)=>n>=1000000?`${(n/1e6).toFixed(1)}M`:n>=1000?`${(n/1000).toFixed(0)}K`:(n||0).toFixed(d);
 const fmtCur=n=>'₱'+Number(n||0).toLocaleString('en-PH');
 const pColor=p=>p>=80?'var(--accent-green)':p>=50?'var(--accent-blue)':p>=30?'var(--accent-amber)':'var(--accent-red)';
@@ -2290,6 +2298,13 @@ function _generateSmartNotifs(){
   if(myPend.length)smart.push({id:'my_dr',type:'info',title:'Your Deletion Requests',
     message:`${myPend.length} of your request${myPend.length!==1?'s are':' is'} pending admin approval`,
     onclick:`navigate('deletionRequests')`,read:false,auto:true});
+  // Workflow approvals waiting for me
+  if(typeof wfPendingForMe==='function'){
+    const wfMine=wfPendingForMe();
+    if(wfMine.length)smart.push({id:'wf_pending_me',type:'info',title:'Approvals Waiting for You',
+      message:`${wfMine.length} document${wfMine.length!==1?'s':''} in route need${wfMine.length===1?'s':''} your approval`,
+      onclick:`navigate('approvals')`,read:false,auto:true});
+  }
   // Sync error
   if(typeof _syncState!=='undefined'&&_syncState==='error')
     smart.push({id:'sync_err',type:'error',title:'Sync Error',
@@ -2344,7 +2359,9 @@ function _generateSmartNotifs(){
 
 function renderNotifPanel(){
 AppState.ensureData();
-const stored=AppState.data.notifications||[];
+const _myEmailN=(typeof _currentUserProfile!=='undefined'?(_currentUserProfile?.email||''):'').toLowerCase();
+// Targeted notifications (e.g. workflow approvals) only show for their recipients
+const stored=(AppState.data.notifications||[]).filter(n=>!n.targets||!n.targets.length||n.targets.includes(_myEmailN));
 const smart=_generateSmartNotifs();
 // Merge: smart notifs on top, then stored manual ones
 const all=[...smart,...stored.filter(n=>!smart.find(s=>s.id===n.id))];
@@ -2355,7 +2372,7 @@ $('#notifPanel').innerHTML=`<div class="notif-panel-header">Notifications <span 
 <div style="max-height:340px;overflow-y:auto">
 ${all.length?all.map(n=>`<div class="notif-item ${n.read?'':'unread'}" ${n.onclick?`onclick="${n.onclick};toggleNotifications()"style="cursor:pointer"`:''}>
 <span style="font-size:14px">${icons[n.type]||'●'}</span>
-<div><div class="notif-title">${n.title}</div><div class="notif-time">${n.message||''}</div>${n.time?`<div class="notif-time">${n.time}</div>`:''}</div>
+<div><div class="notif-title">${esc(n.title)}</div><div class="notif-time">${esc(n.message||'')}</div>${n.time?`<div class="notif-time">${esc(n.time)}</div>`:''}</div>
 </div>`).join(''):'<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px"><i class="fas fa-check-circle" style="font-size:20px;display:block;margin-bottom:6px;opacity:.3"></i>All caught up!</div>'}
 </div>`;
 $('#notifDot').style.display=unread?'':'none';}
@@ -2874,7 +2891,7 @@ function _renderUserTable(users){
           <button class="btn btn-danger btn-sm" style="font-size:9px;padding:3px 8px" onclick="rejectUser('${u.uid}','${u.name||'User'}')"><i class="fas fa-times"></i> Reject</button>`:''}
           ${u.status==='approved'&&!isMe?`<button class="btn btn-warning btn-sm" style="font-size:9px;padding:3px 8px" onclick="suspendUser('${u.uid}','${u.name||'User'}')"><i class="fas fa-ban"></i> Suspend</button>`:''}
           ${(u.status==='rejected'||u.status==='suspended')?`<button class="btn btn-success btn-sm" style="font-size:9px;padding:3px 8px" onclick="approveUser('${u.uid}','${u.name||'User'}','${u.email}')"><i class="fas fa-redo"></i> Restore</button>`:''}
-          ${!u.isAdmin?`<button class="btn btn-secondary btn-sm" style="font-size:9px;padding:3px 8px;white-space:nowrap;display:block;width:100%;margin-top:3px" onclick="showModuleAccess('${u.uid}','${(u.name||'User').replace(/'/g,'\'')}')" title="Module Access"><i class="fas fa-lock" style="margin-right:4px"></i>Module Access</button>`:''}
+          ${!u.isAdmin?`<button class="btn btn-secondary btn-sm" style="font-size:9px;padding:3px 8px;white-space:nowrap;display:block;width:100%;margin-top:3px" onclick="showModuleAccess('${u.uid}','${(u.name||'User').replace(/'/g,'\'')}','${u.email||''}')" title="Module Access"><i class="fas fa-lock" style="margin-right:4px"></i>Module Access</button>`:''}
           ${!isMe?`<button class="btn btn-danger btn-sm btn-icon" onclick="deleteUser('${u.uid}','${u.name||'User'}')" title="Delete"><i class="fas fa-trash"></i></button>`:''}
         </div></td>
       </tr>`;}).join(''):`<tr><td colspan="8"><div class="empty-state"><p>No users registered yet.</p></div></td></tr>`}
@@ -5572,6 +5589,7 @@ async function connectSharePoint() {
             AppState.data = Object.assign(getDefaultData(), cleanData);
             if (typeof migrateData === 'function') migrateData();
             if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
+    try { _spFlushMergeConflicts(); } catch(e) {}
             AppState.save();
             _spOfflineQueue = false;
             localStorage.removeItem('shic_sp_offlinequeue');
@@ -5803,6 +5821,17 @@ function _spWasDeleted(arrayKey, id) {
   return !!(_spDeletedIds[arrayKey] && _spDeletedIds[arrayKey][id]);
 }
 
+// Conflict visibility: records where a newer remote edit overwrote this
+// device's local edit during merge. Flushed to a toast after each poll.
+let _spMergeConflicts = [];
+function _spFlushMergeConflicts() {
+  if (!_spMergeConflicts.length) return;
+  const names = _spMergeConflicts.slice(0, 3).map(c => typeof esc === 'function' ? esc(c.label) : c.label).join(', ');
+  const extra = _spMergeConflicts.length > 3 ? ` +${_spMergeConflicts.length - 3} more` : '';
+  showToast(`<i class="fas fa-code-branch"></i> ${_spMergeConflicts.length} record(s) updated by another user won over your older edit: ${names}${extra}. Your comments/updates were kept.`, 'warning', 7000);
+  _spMergeConflicts = [];
+}
+
 // ── Merge helper: union of remote + local arrays ─────────
 // Remote wins for records that exist in BOTH (authoritative)
 // Local wins only for records added locally that aren't in remote yet
@@ -5826,6 +5855,10 @@ function _spMergeArrays(localArr, remoteArr, localEdited, arrayKey) {
       else if (!localRec._mAt && remoteRec._mAt) localWins = false;
       else localWins = !!localEdited;
       // Winner's fields + union of append-only sub-arrays so no updates are lost
+      // Conflict visibility: remote overwrote a record this device had edited
+      if (!localWins && localRec._mAt && remoteRec._mAt && localRec._mAt !== remoteRec._mAt) {
+        _spMergeConflicts.push({ arrayKey, id: remoteRec.id, label: remoteRec.name || remoteRec.description || remoteRec.title || remoteRec.id });
+      }
       result.push(localWins
         ? _spMergeAppendArrays(localRec, remoteRec)
         : _spMergeAppendArrays(remoteRec, localRec));
@@ -5912,6 +5945,7 @@ function _spApplyRemote(data, _ts, _by) {
     AppState.data = Object.assign(getDefaultData(), merged);
     if (typeof migrateData === 'function') migrateData();
     if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
+    try { _spFlushMergeConflicts(); } catch(e) {}
     AppState.save();
     setTimeout(() => {
       try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
@@ -5950,6 +5984,7 @@ function _spApplyRemote(data, _ts, _by) {
     }
     if (typeof migrateData === 'function') migrateData();
     if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
+    try { _spFlushMergeConflicts(); } catch(e) {}
     AppState.save();
     setTimeout(() => {
       try { renderPage(AppState.currentPage || 'dashboard'); } catch(e) {}
@@ -6755,6 +6790,7 @@ async function spPushData(silent = false) {
       }
       AppState.data = Object.assign(getDefaultData(), merged);
       if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
+    try { _spFlushMergeConflicts(); } catch(e) {}
       _spLastWriteTs = _ts;
       _spDataHash = _spHash(remoteData) + _ts;
       if (!silent) showToast('Merged remote changes before push', 'info', 2500);
@@ -7182,7 +7218,8 @@ async function _spPollRemote() {
 
     // Save merged sub-lists immediately (they preserved local unsynced + deleted markers)
     if (subListsChanged) {
-      if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes(); // remote records are not "local edits"
+      if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
+    try { _spFlushMergeConflicts(); } catch(e) {} // remote records are not "local edits"
       AppState.save();
       // Only re-render if the user is not mid-form — prevents wiping typed text
       if (!_isUserActivelyEditing()) _refreshCurrentView();
@@ -13541,6 +13578,7 @@ function wfStart(docType, doc) {
   doc.wfActions = [];
   doc.wfDone = false;
   _wfNotifyStep(doc, 0);
+  _wfWebhook('route_started', docType, doc, { workflow: def.name, step: steps[0].name, approvers: steps[0].approvers });
   if (typeof spWriteAuditLog === 'function') spWriteAuditLog('wf_start', docType, doc.id, WF_DOCTYPES[docType]?.ref(doc) || doc.id, { workflow: def.name, steps: steps.map(s => s.name).join(' → ') });
   return true;
 }
@@ -13612,6 +13650,8 @@ function wfAct(docType, id, decision) {
   AppState.save();
   if (typeof spWriteAuditLog === 'function') spWriteAuditLog('wf_' + decision, docType, doc.id, reg.ref(doc), { step: st.steps[st.cur]?.name, note });
   if (after.status === 'in-route' && after.cur > st.cur) _wfNotifyStep(doc, after.cur);
+  _wfWebhook(after.status === 'in-route' ? 'step_' + decision : 'route_' + after.status, docType, doc,
+    { by: me.email, step: st.steps[st.cur]?.name, note, nextStep: after.status === 'in-route' ? after.steps[after.cur]?.name : null, nextApprovers: after.status === 'in-route' ? after.steps[after.cur]?.approvers : null });
   showToast(decision === 'reject' ? 'Rejected' : (after.status === 'approved' ? 'Approved — route complete' : 'Approved — moved to next step'), decision === 'reject' ? 'error' : 'success');
   _wfRefresh();
 }
@@ -13627,6 +13667,26 @@ function _wfNotifyStep(doc, stepIdx) {
       message: `${doc.id} — step "${step.name}" awaits ${step.approvers.join(', ')}`,
       targets: step.approvers,
     });
+  } catch (e) {}
+}
+
+// ── Power Automate / webhook integration ─────────────────────
+// POSTs workflow events to the URL in Settings → Integrations. Fire-and-forget:
+// failures never block the approval itself.
+function _wfWebhook(event, docType, doc, extra) {
+  try {
+    const url = AppState.data.settings?.webhookUrl; // Settings → Integrations → Webhook URL
+    if (!url || !/^https:\/\//i.test(url)) return;
+    const reg = WF_DOCTYPES[docType];
+    const payload = {
+      event, docType, docId: doc.id,
+      ref: reg?.ref(doc) || doc.id,
+      amount: reg?.amount(doc) || 0,
+      appUrl: 'https://synercore.github.io/PM-SUITE/promaster.html',
+      at: _wfNow(),
+      ...extra,
+    };
+    fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {});
   } catch (e) {}
 }
 
@@ -14074,7 +14134,7 @@ ${ct.map(t=>`<div class="kanban-card" draggable="true" ondragstart="dragTaskId='
 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:5px">
 <span style="font-size:9px;font-family:var(--font-mono);color:var(--text-muted)">${t.wbs||t.id}</span>
 ${t.milestone?'<span style="color:var(--accent-amber)">&#9670;</span>':''}${pBadge(t.priority)}</div>
-<div class="kanban-card-title">${t.name}</div>
+<div class="kanban-card-title">${esc(t.name)}</div>
 ${t.progress>0?`<div style="margin-bottom:6px"><div class="progress-bar" style="height:4px"><div class="progress-fill" style="width:${t.progress}%;background:${pColor(t.progress)}"></div></div></div>`:''}
 <div class="kanban-card-meta">${avatarH(t.assignee,22)}<span style="font-size:10px;color:var(--text-secondary)">${t.assignee.split(' ')[0]}</span>
 <span style="margin-left:auto;font-size:9px;color:${isOverdue(t.endDate)?'var(--accent-red)':'var(--text-muted)'}">${t.endDate}</span></div>
@@ -14095,7 +14155,7 @@ $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><tabl
 <thead><tr><th>WBS</th><th>Task</th><th>Project</th><th>Assignee</th><th>End</th><th>Progress</th><th>Status</th><th>Priority</th><th></th></tr></thead>
 <tbody>${_pgSlice("tasks",_orderTasksHier(tasks)).map(({t,depth})=>{const isSum=_taskHasChildren(t.id,tasks);return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${t.wbs||t.id}</td>
-<td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${t.name}</div><div style="font-size:10px;color:var(--text-secondary);padding-left:${depth*18}px">${t.dept||''}</div></td>
+<td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${esc(t.name)}</div><div style="font-size:10px;color:var(--text-secondary);padding-left:${depth*18}px">${esc(t.dept||'')}</div></td>
 <td><span class="badge badge-blue">${t.projectId}</span></td>
 <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.assignee)}<span style="font-size:11px">${t.assignee.split(' ')[0]}</span></div></td>
 <td style="font-size:11px;font-family:var(--font-mono);color:${isOverdue(t.endDate)?'var(--accent-red)':'inherit'}">${t.endDate}</td>
@@ -15082,7 +15142,7 @@ function renderGantt(){
         <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:4px 10px 4px ${26+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
           <div style="display:flex;align-items:center;gap:5px">
             <i class="fas ${isSummary?'fa-folder-open':isMile?'fa-diamond':'fa-circle'}" style="color:${isSummary?'#6e7681':isMile?(isCrit?'#f85149':'var(--accent-amber)'):tc};font-size:${isSummary?'9':isMile?'9':'5'}px;flex-shrink:0"></i>
-            <span style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${isCrit?'var(--accent-red)':overdue?'var(--accent-red)':'inherit'};font-weight:${isSummary?'700':isCrit?'600':'400'}">${t.name}</span>
+            <span style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${isCrit?'var(--accent-red)':overdue?'var(--accent-red)':'inherit'};font-weight:${isSummary?'700':isCrit?'600':'400'}">${esc(t.name)}</span>
             ${isCrit?`<span style="flex-shrink:0;width:6px;height:6px;background:var(--accent-red);border-radius:50%" title="Critical Path"></span>`:''}
           </div>
           <div style="display:flex;gap:4px;align-items:center;padding-left:14px">
@@ -21536,8 +21596,12 @@ const PERM_COLORS={none:'var(--accent-red)',view:'var(--accent-amber)',edit:'var
 
 function _getPermKey(uid){return'shic_perms_'+uid;}
 
+// Permissions live in AppState.data.userPerms (synced to SharePoint) so an
+// admin's changes reach every device. localStorage is only a legacy fallback.
 function getModulePerms(uid){
   try{
+    const rec=(AppState.data?.userPerms||[]).find(p=>p.id===uid&&!p._deleted);
+    if(rec&&rec.perms)return rec.perms;
     const stored=JSON.parse(localStorage.getItem(_getPermKey(uid))||'null');
     if(stored)return stored;
     // Migrate from old block-list format
@@ -21548,8 +21612,15 @@ function getModulePerms(uid){
   }catch{return{};}
 }
 
-function setModulePerms(uid,perms){
-  localStorage.setItem(_getPermKey(uid),JSON.stringify(perms));
+function setModulePerms(uid,perms,email){
+  AppState.ensureData();
+  if(!AppState.data.userPerms)AppState.data.userPerms=[];
+  const arr=AppState.data.userPerms;
+  const i=arr.findIndex(p=>p.id===uid);
+  const rec={id:uid,email:(email||'').toLowerCase(),perms,updatedBy:(typeof _currentUserProfile!=='undefined'?_currentUserProfile?.email:'')||'',updatedAt:new Date().toISOString()};
+  if(i>=0)arr[i]={...arr[i],...rec};else arr.push(rec);
+  AppState.save();
+  try{localStorage.setItem(_getPermKey(uid),JSON.stringify(perms));}catch(e){} // legacy mirror for old builds
 }
 
 // Returns the permission level string ('none','view','edit','manage') for the current user on a module
@@ -21575,7 +21646,8 @@ function getBlockedModules(uid){
   return Object.entries(perms).filter(([,v])=>v==='none').map(([k])=>k);
 }
 
-function showModuleAccess(uid,userName){
+function showModuleAccess(uid,userName,userEmail){
+  _modAccessEmail=userEmail||'';
   const perms=getModulePerms(uid);
   $('#genericModalTitle').textContent='Module Permissions — '+userName;
   $('#genericModalBody').innerHTML=`
@@ -21607,6 +21679,7 @@ function showModuleAccess(uid,userName){
   openModal('genericModal');
 }
 
+let _modAccessEmail='';
 function saveModuleAccess(uid,setAll=false,setView=false){
   const perms={};
   if(setAll){
@@ -21618,7 +21691,7 @@ function saveModuleAccess(uid,setAll=false,setView=false){
       perms[sel.dataset.mod]=sel.value;
     });
   }
-  setModulePerms(uid,perms);
+  setModulePerms(uid,perms,_modAccessEmail);
   closeModal('genericModal');
   buildSidebar();
   showToast('Module permissions updated for '+uid,'success');
@@ -23071,8 +23144,8 @@ function _whItemsHTML(){
     return`<tr>
       <td style="width:32px;text-align:center"><input type="checkbox" data-wh-id="${item.id}" ${_whSelected.has(item.id)?'checked':''} onchange="_whToggleSel('${item.id}')" style="cursor:pointer"></td>
       <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">${item.code||item.id}</td>
-      <td><div style="font-weight:600">${item.name}</div>
-        <div style="font-size:10px;color:var(--text-secondary)">${item.category||'—'}</div>
+      <td><div style="font-weight:600">${esc(item.name)}</div>
+        <div style="font-size:10px;color:var(--text-secondary)">${esc(item.category||'—')}</div>
         ${item.itemMasterId?`<div style="font-size:9px;color:var(--accent-blue)"><i class="fas fa-link"></i> ${item.itemMasterId}</div>`:''}
       </td>
       <td style="white-space:nowrap">

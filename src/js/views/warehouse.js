@@ -435,8 +435,8 @@ function _whItemsHTML(){
     return`<tr>
       <td style="width:32px;text-align:center"><input type="checkbox" data-wh-id="${item.id}" ${_whSelected.has(item.id)?'checked':''} onchange="_whToggleSel('${item.id}')" style="cursor:pointer"></td>
       <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">${item.code||item.id}</td>
-      <td><div style="font-weight:600">${item.name}</div>
-        <div style="font-size:10px;color:var(--text-secondary)">${item.category||'—'}</div>
+      <td><div style="font-weight:600">${esc(item.name)}</div>
+        <div style="font-size:10px;color:var(--text-secondary)">${esc(item.category||'—')}</div>
         ${item.itemMasterId?`<div style="font-size:9px;color:var(--accent-blue)"><i class="fas fa-link"></i> ${item.itemMasterId}</div>`:''}
       </td>
       <td style="white-space:nowrap">

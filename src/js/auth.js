@@ -404,7 +404,7 @@ function _renderUserTable(users){
           <button class="btn btn-danger btn-sm" style="font-size:9px;padding:3px 8px" onclick="rejectUser('${u.uid}','${u.name||'User'}')"><i class="fas fa-times"></i> Reject</button>`:''}
           ${u.status==='approved'&&!isMe?`<button class="btn btn-warning btn-sm" style="font-size:9px;padding:3px 8px" onclick="suspendUser('${u.uid}','${u.name||'User'}')"><i class="fas fa-ban"></i> Suspend</button>`:''}
           ${(u.status==='rejected'||u.status==='suspended')?`<button class="btn btn-success btn-sm" style="font-size:9px;padding:3px 8px" onclick="approveUser('${u.uid}','${u.name||'User'}','${u.email}')"><i class="fas fa-redo"></i> Restore</button>`:''}
-          ${!u.isAdmin?`<button class="btn btn-secondary btn-sm" style="font-size:9px;padding:3px 8px;white-space:nowrap;display:block;width:100%;margin-top:3px" onclick="showModuleAccess('${u.uid}','${(u.name||'User').replace(/'/g,'\'')}')" title="Module Access"><i class="fas fa-lock" style="margin-right:4px"></i>Module Access</button>`:''}
+          ${!u.isAdmin?`<button class="btn btn-secondary btn-sm" style="font-size:9px;padding:3px 8px;white-space:nowrap;display:block;width:100%;margin-top:3px" onclick="showModuleAccess('${u.uid}','${(u.name||'User').replace(/'/g,'\'')}','${u.email||''}')" title="Module Access"><i class="fas fa-lock" style="margin-right:4px"></i>Module Access</button>`:''}
           ${!isMe?`<button class="btn btn-danger btn-sm btn-icon" onclick="deleteUser('${u.uid}','${u.name||'User'}')" title="Delete"><i class="fas fa-trash"></i></button>`:''}
         </div></td>
       </tr>`;}).join(''):`<tr><td colspan="8"><div class="empty-state"><p>No users registered yet.</p></div></td></tr>`}

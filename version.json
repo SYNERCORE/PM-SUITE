@@ -1,1 +1,1 @@
-{"version":"2.7.1","note":"Workflow editor: approver email now added on click-away or Save, not just Enter","released":"2026-07-06 14:16"}
+{"version":"2.8.0","note":"Synced user permissions, approval notifications, conflict alerts, workflow webhooks, XSS hardening","released":"2026-07-06 17:52"}

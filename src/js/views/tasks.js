@@ -98,7 +98,7 @@ ${ct.map(t=>`<div class="kanban-card" draggable="true" ondragstart="dragTaskId='
 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:5px">
 <span style="font-size:9px;font-family:var(--font-mono);color:var(--text-muted)">${t.wbs||t.id}</span>
 ${t.milestone?'<span style="color:var(--accent-amber)">&#9670;</span>':''}${pBadge(t.priority)}</div>
-<div class="kanban-card-title">${t.name}</div>
+<div class="kanban-card-title">${esc(t.name)}</div>
 ${t.progress>0?`<div style="margin-bottom:6px"><div class="progress-bar" style="height:4px"><div class="progress-fill" style="width:${t.progress}%;background:${pColor(t.progress)}"></div></div></div>`:''}
 <div class="kanban-card-meta">${avatarH(t.assignee,22)}<span style="font-size:10px;color:var(--text-secondary)">${t.assignee.split(' ')[0]}</span>
 <span style="margin-left:auto;font-size:9px;color:${isOverdue(t.endDate)?'var(--accent-red)':'var(--text-muted)'}">${t.endDate}</span></div>
@@ -119,7 +119,7 @@ $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><tabl
 <thead><tr><th>WBS</th><th>Task</th><th>Project</th><th>Assignee</th><th>End</th><th>Progress</th><th>Status</th><th>Priority</th><th></th></tr></thead>
 <tbody>${_pgSlice("tasks",_orderTasksHier(tasks)).map(({t,depth})=>{const isSum=_taskHasChildren(t.id,tasks);return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${t.wbs||t.id}</td>
-<td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${t.name}</div><div style="font-size:10px;color:var(--text-secondary);padding-left:${depth*18}px">${t.dept||''}</div></td>
+<td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${esc(t.name)}</div><div style="font-size:10px;color:var(--text-secondary);padding-left:${depth*18}px">${esc(t.dept||'')}</div></td>
 <td><span class="badge badge-blue">${t.projectId}</span></td>
 <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.assignee)}<span style="font-size:11px">${t.assignee.split(' ')[0]}</span></div></td>
 <td style="font-size:11px;font-family:var(--font-mono);color:${isOverdue(t.endDate)?'var(--accent-red)':'inherit'}">${t.endDate}</td>

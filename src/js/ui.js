@@ -352,6 +352,13 @@ function _generateSmartNotifs(){
   if(myPend.length)smart.push({id:'my_dr',type:'info',title:'Your Deletion Requests',
     message:`${myPend.length} of your request${myPend.length!==1?'s are':' is'} pending admin approval`,
     onclick:`navigate('deletionRequests')`,read:false,auto:true});
+  // Workflow approvals waiting for me
+  if(typeof wfPendingForMe==='function'){
+    const wfMine=wfPendingForMe();
+    if(wfMine.length)smart.push({id:'wf_pending_me',type:'info',title:'Approvals Waiting for You',
+      message:`${wfMine.length} document${wfMine.length!==1?'s':''} in route need${wfMine.length===1?'s':''} your approval`,
+      onclick:`navigate('approvals')`,read:false,auto:true});
+  }
   // Sync error
   if(typeof _syncState!=='undefined'&&_syncState==='error')
     smart.push({id:'sync_err',type:'error',title:'Sync Error',
@@ -406,7 +413,9 @@ function _generateSmartNotifs(){
 
 function renderNotifPanel(){
 AppState.ensureData();
-const stored=AppState.data.notifications||[];
+const _myEmailN=(typeof _currentUserProfile!=='undefined'?(_currentUserProfile?.email||''):'').toLowerCase();
+// Targeted notifications (e.g. workflow approvals) only show for their recipients
+const stored=(AppState.data.notifications||[]).filter(n=>!n.targets||!n.targets.length||n.targets.includes(_myEmailN));
 const smart=_generateSmartNotifs();
 // Merge: smart notifs on top, then stored manual ones
 const all=[...smart,...stored.filter(n=>!smart.find(s=>s.id===n.id))];
@@ -417,7 +426,7 @@ $('#notifPanel').innerHTML=`<div class="notif-panel-header">Notifications <span 
 <div style="max-height:340px;overflow-y:auto">
 ${all.length?all.map(n=>`<div class="notif-item ${n.read?'':'unread'}" ${n.onclick?`onclick="${n.onclick};toggleNotifications()"style="cursor:pointer"`:''}>
 <span style="font-size:14px">${icons[n.type]||'●'}</span>
-<div><div class="notif-title">${n.title}</div><div class="notif-time">${n.message||''}</div>${n.time?`<div class="notif-time">${n.time}</div>`:''}</div>
+<div><div class="notif-title">${esc(n.title)}</div><div class="notif-time">${esc(n.message||'')}</div>${n.time?`<div class="notif-time">${esc(n.time)}</div>`:''}</div>
 </div>`).join(''):'<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px"><i class="fas fa-check-circle" style="font-size:20px;display:block;margin-bottom:6px;opacity:.3"></i>All caught up!</div>'}
 </div>`;
 $('#notifDot').style.display=unread?'':'none';}
