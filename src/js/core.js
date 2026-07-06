@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
 const APP_VERSION='2.8.0';
-const APP_BUILD='20260706e';
+const APP_BUILD='20260707a';
 // One-line summary of this release — shown in the update banner on other users' screens
 const APP_RELEASE_NOTE='Synced user permissions, approval notifications, conflict alerts, workflow webhooks, XSS hardening';
 const APP_NAME='SHIC Enterprise PM Suite';

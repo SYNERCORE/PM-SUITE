@@ -544,4 +544,3 @@ document.addEventListener('visibilitychange', function() {
     spPushData(true).catch(() => {});
   }
 });
-</script>
