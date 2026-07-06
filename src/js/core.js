@@ -1,8 +1,8 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.6.0';
-const APP_BUILD='20260706a';
+const APP_VERSION='2.6.1';
+const APP_BUILD='20260706b';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Task hierarchy: parent/child subtasks with WBS rollup in Tasks, Gantt and PDF export';
+const APP_RELEASE_NOTE='Fix: Quick Add button no longer covers last row buttons in tables';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching

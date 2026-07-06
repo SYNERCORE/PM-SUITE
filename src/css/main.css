@@ -44,7 +44,7 @@ body{font-family:var(--font-main);background:var(--bg-primary);color:var(--text-
 .btn-sm{padding:5px 10px;font-size:11px}
 .btn-icon{padding:6px}
 .page-content{flex:1;overflow-y:auto;overflow-x:hidden}
-.page{display:none;padding:18px;animation:fadeIn 0.2s ease}
+.page{display:none;padding:18px 18px 96px;animation:fadeIn 0.2s ease} /* bottom padding clears the Quick Add FAB */
 .page.active{display:block}
 @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 .card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:15px;box-shadow:var(--shadow-sm)}
