@@ -35,7 +35,8 @@ jobs:
 
       - name: Smoke-load the app in headless Chrome
         run: |
-          npm i -g puppeteer@23 --silent
+          npm init -y > /dev/null
+          npm i puppeteer@23 --silent
           node - <<'EOF'
           const puppeteer = require('puppeteer');
           (async () => {
