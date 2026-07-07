@@ -14466,12 +14466,14 @@ function _runFormCPMPreview(){
   if(!computed||!computed._ES)return;
   startEl.value=computed._ES;
   endEl.value=isMile?computed._ES:(computed._EF||computed._ES);
-  // Update duration display if not milestone
+  // Update duration display if not milestone. Keep a fractional value the user
+  // typed (e.g. 0.5, 1.25) as long as it rounds up to the same calendar span.
   if(!isMile&&durEl){
     const cal=SHICCPMEngine.getCalendar(proj);
     // inclusive: workingDaysBetween(Mon,Mon)=0 → dur=1; workingDaysBetween(Mon,Fri)=4 → dur=5
     const d=SHICCPMEngine.workingDaysBetween(computed._ES,computed._EF||computed._ES,cal)+1;
-    if(d>=1)durEl.value=d;
+    const cur=parseFloat(durEl.value);
+    if(d>=1&&(isNaN(cur)||cur<=0||Math.ceil(cur)!==d))durEl.value=d;
   }
 }
 
@@ -14653,7 +14655,7 @@ function _pprApplyToField(){
     parts.push(`${id} ${type}${lagStr}`);
   });
   const field=$('#tPred');
-  if(field)field.value=parts.join(', ');
+  if(field){field.value=parts.join(', ');_tFormRecalc('pred');}
   $('#predPickerModal')?.classList.remove('open');
 }
 
