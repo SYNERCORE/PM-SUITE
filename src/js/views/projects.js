@@ -1446,6 +1446,7 @@ function saveDetailOverview(){
 }
 
 function renderDetailTasks(){
+  if(typeof _recalcAllWbs==='function'){const pool=(AppState.data.tasks||[]).filter(t=>t.projectId===detailProjectId&&!t._deleted);if(pool.some(t=>!t.wbs)){_recalcAllWbs(detailProjectId);AppState.save();}}
   const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===detailProjectId&&!t._deleted);
   const p=(AppState.data.projects||[]).find(x=>x.id===detailProjectId);
   const done=tasks.filter(t=>t.status==='done').length;

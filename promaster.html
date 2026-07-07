@@ -10163,6 +10163,7 @@ function saveDetailOverview(){
 }
 
 function renderDetailTasks(){
+  if(typeof _recalcAllWbs==='function'){const pool=(AppState.data.tasks||[]).filter(t=>t.projectId===detailProjectId&&!t._deleted);if(pool.some(t=>!t.wbs)){_recalcAllWbs(detailProjectId);AppState.save();}}
   const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===detailProjectId&&!t._deleted);
   const p=(AppState.data.projects||[]).find(x=>x.id===detailProjectId);
   const done=tasks.filter(t=>t.status==='done').length;
@@ -14089,6 +14090,45 @@ setTimeout(wfUpdateBadge, 3000);
 <script>
 // ── Parent/Child (WBS) task hierarchy ─────────────────────────
 function _taskHasChildren(id,tasks){return (tasks||AppState.data.tasks||[]).some(t=>t.parentId===id&&!t._deleted);}
+
+// Auto-WBS: compute next WBS number for a task given its project and parent
+function _autoWbs(projId,parentId,editId){
+  const all=(AppState.data.tasks||[]).filter(t=>t.projectId===projId&&!t._deleted&&t.id!==editId);
+  if(!parentId){
+    const roots=all.filter(t=>!t.parentId);
+    const nums=roots.map(t=>{const n=parseInt(t.wbs);return isNaN(n)?0:n;});
+    return String((nums.length?Math.max(...nums):0)+1);
+  }
+  const par=all.find(t=>t.id===parentId);
+  const parWbs=par?.wbs||'';
+  const siblings=all.filter(t=>t.parentId===parentId);
+  const last=siblings.reduce((mx,t)=>{
+    const parts=(t.wbs||'').split('.');
+    const n=parseInt(parts[parts.length-1]);
+    return isNaN(n)?mx:Math.max(mx,n);
+  },0);
+  return parWbs?(parWbs+'.'+(last+1)):String(last+1);
+}
+
+// Recalculate all WBS numbers for a project so they stay sequential
+function _recalcAllWbs(projId){
+  const all=AppState.data.tasks||[];
+  const pool=all.filter(t=>t.projectId===projId&&!t._deleted);
+  const assign=(parentId,prefix)=>{
+    const children=pool.filter(t=>(t.parentId||'')===(parentId||''));
+    children.sort((a,b)=>{
+      const ap=(a.wbs||'').split('.'),bp=(b.wbs||'').split('.');
+      const aw=parseInt(ap[ap.length-1])||0,bw=parseInt(bp[bp.length-1])||0;
+      if(aw!==bw)return aw-bw;
+      return (a.createdAt||a.id)<(b.createdAt||b.id)?-1:1;
+    });
+    children.forEach((t,i)=>{
+      t.wbs=prefix?(prefix+'.'+(i+1)):String(i+1);
+      assign(t.id,t.wbs);
+    });
+  };
+  assign('','');
+}
 // true if candidateId sits anywhere under ofId (walks up the parent chain)
 function _taskIsDescendant(candidateId,ofId,tasks){
   const all=tasks||AppState.data.tasks||[];
@@ -14164,6 +14204,14 @@ function _getTaskProjHPD(projectId) {
 }
 
 function renderTasks(){
+// Ensure all projects have sequential WBS numbers assigned
+const _wbsProjs=new Set((AppState.data.tasks||[]).filter(t=>!t._deleted).map(t=>t.projectId));
+let _wbsDirty=false;
+_wbsProjs.forEach(pid=>{
+  const pool=(AppState.data.tasks||[]).filter(t=>t.projectId===pid&&!t._deleted);
+  if(pool.some(t=>!t.wbs)){_recalcAllWbs(pid);_wbsDirty=true;}
+});
+if(_wbsDirty)AppState.save();
 const el=$('#tasks');
 el.innerHTML=`<div class="section-header" style="margin-bottom:14px">
 <div><div class="section-title">Task Management</div><div class="section-sub">${(AppState.data.tasks||[]).length} tasks total</div></div>
@@ -14252,8 +14300,8 @@ const _dateRO=(_hasPred||_isSummary)?'readonly style="opacity:.55;cursor:not-all
 const _dateNote=_isSummary?'<span style="font-size:10px;color:var(--accent-cyan);margin-left:6px"><i class="fas fa-sitemap"></i> Rolled up from subtasks</span>':(_hasPred?'<span style="font-size:10px;color:var(--accent-amber);margin-left:6px"><i class="fas fa-calculator"></i> Computed by CPM</span>':'');
 $('#taskModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">Project</label><select class="form-select" id="tProj" onchange="_tRefreshParentOptions('${id||''}')">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${(t?.projectId===p.id||taskProjectFilter===p.id)?'selected':''}>${p.id}</option>`).join('')}</select></div>
-<div class="form-group"><label class="form-label">WBS Code</label><input class="form-input" id="tWbs" value="${t?.wbs||''}" placeholder="e.g., 1.2.3"></div>
-<div class="form-group" style="grid-column:1/-1"><label class="form-label">Parent Task <span style="font-size:10px;color:var(--text-muted)">— makes this a subtask (WBS hierarchy)</span></label><select class="form-select" id="tParent">${_tParentOptionsHTML(id,t?.projectId||taskProjectFilter||'',t?.parentId||'')}</select></div>
+<div class="form-group"><label class="form-label">WBS Code <span style="font-size:10px;color:var(--text-muted)">auto</span></label><input class="form-input" id="tWbs" value="${t?.wbs||''}" readonly style="opacity:.7;cursor:not-allowed;background:var(--bg-secondary)"></div>
+<div class="form-group" style="grid-column:1/-1"><label class="form-label">Parent Task <span style="font-size:10px;color:var(--text-muted)">— makes this a subtask (WBS hierarchy)</span></label><select class="form-select" id="tParent" onchange="_tRefreshWbs('${id||''}')">${_tParentOptionsHTML(id,t?.projectId||(taskProjectFilter!=='all'?taskProjectFilter:((AppState.data.projects||[])[0]?.id||'')),t?.parentId||'')}</select></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Task Name *</label><input class="form-input" id="tName" value="${t?.name||''}" placeholder="Task description"></div>
 <div class="form-group"><label class="form-label">Assigned To</label><input class="form-input" id="tAss" value="${t?.assignee||''}" placeholder="Name"></div>
 <div class="form-group"><label class="form-label">Department</label><input class="form-input" id="tDept" value="${t?.dept||''}" placeholder="Department"></div>
@@ -14272,6 +14320,8 @@ $('#taskModalBody').innerHTML=`<div class="form-grid">
 <button class="btn btn-secondary" onclick="closeModal('taskModal')">Cancel</button>
 <button class="btn btn-primary" onclick="saveTask('${id||''}')"><i class="fas fa-save"></i> ${id?'Update':'Create'}</button>
 </div>`; openModal('taskModal');
+// Auto-fill WBS for new tasks after form is rendered; also refresh parent options to match resolved project
+if(!id) setTimeout(()=>{_tRefreshParentOptions('');_tRefreshWbs('');},0);
 // Run live CPM preview immediately so read-only date fields show computed values on open
 if(_hasPred) setTimeout(_runFormCPMPreview, 50);
 }
@@ -14289,6 +14339,11 @@ function _tParentOptionsHTML(editId,projId,selectedId){
 function _tRefreshParentOptions(editId){
   const sel=$('#tParent');if(!sel)return;
   sel.innerHTML=_tParentOptionsHTML(editId||null,$('#tProj')?.value||'',sel.value);
+  _tRefreshWbs(editId);
+}
+function _tRefreshWbs(editId){
+  const el=$('#tWbs');if(!el)return;
+  el.value=_autoWbs($('#tProj')?.value||'',$('#tParent')?.value||'',editId||'');
 }
 
 async function saveTask(id){
@@ -14337,6 +14392,7 @@ else AppState.data.tasks.push(t);
 _applyCPMDates(_tProjId);
 _applySummaryRollups(_tProjId);
 _recalcProjectProgress(_tProjId);
+_recalcAllWbs(_tProjId);
 AppState.save();closeModal('taskModal');
 if(typeof detailProjectId!=='undefined'&&detailProjectId&&typeof renderDetailTasks==='function'){renderDetailTasks();}else{renderTaskView();}
 showToast(id?'Task updated':'Task created','success');}
