@@ -1,12 +1,18 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.8.0';
-const APP_BUILD='20260707a';
+const APP_VERSION='2.9.0';
+const APP_BUILD='20260707b';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Synced user permissions, approval notifications, conflict alerts, workflow webhooks, XSS hardening';
+const APP_RELEASE_NOTE='SLA auto-escalation, role-based workflow approvers, project archiving';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.9.0',date:'2026-07-07',type:'major',notes:[
+    'SLA auto-escalation: overdue workflow steps trigger notifications + webhook',
+    'Role-based approver steps: define approver roles in Settings, assign to workflow steps',
+    'Project archiving: export completed projects to JSON, remove from active data',
+    'Escalation email setting for fallback SLA breach alerts',
+  ]},
   {version:'2.1.1',date:'2026-05-28',type:'patch',notes:[
     'Module access control: admins can restrict modules per user',
     'Procurement: added Disapproved status, renamed Stage → Status, PO Issued flow',
@@ -878,7 +884,7 @@ function getDefaultData(){
     actions:[],documents:[],progress:[],kpiData:[],calendar:[],
     assetHistory:[],assetUtilization:[],thirdParty:[],projectTeam:[],activities:[],notifications:[],
     trades:[],
-    settings:{companyName:'SHIC',currency:'PHP',timezone:'Asia/Manila'},
+    settings:{companyName:'SHIC',currency:'PHP',timezone:'Asia/Manila',approverRoles:[],escalationEmail:'',archiveAfterDays:180},
     businessUnits:[], // [{id,name,color,description}]
     dailyMeetingLogs:[], // [{id,date,projectId,status,remarks,targetActivity,update,progressSnapshot,flagged,savedBy}]
     idChangeRequests:[], // [{id,projectId,oldId,newId,requestedBy,requestedAt,reason,status,approvedBy,approvedAt,rejectedAt,rejectionReason}]

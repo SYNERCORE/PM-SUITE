@@ -352,6 +352,8 @@ function _generateSmartNotifs(){
   if(myPend.length)smart.push({id:'my_dr',type:'info',title:'Your Deletion Requests',
     message:`${myPend.length} of your request${myPend.length!==1?'s are':' is'} pending admin approval`,
     onclick:`navigate('deletionRequests')`,read:false,auto:true});
+  // SLA escalation check
+  if(typeof _wfCheckEscalations==='function') try{_wfCheckEscalations();}catch(e){}
   // Workflow approvals waiting for me
   if(typeof wfPendingForMe==='function'){
     const wfMine=wfPendingForMe();

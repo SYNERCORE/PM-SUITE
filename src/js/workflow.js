@@ -63,9 +63,14 @@ function wfStart(docType, doc) {
   if (!def || !def.steps?.length) return false;
   const amt = WF_DOCTYPES[docType]?.amount(doc) || 0;
   // Snapshot steps; drop steps whose amount condition doesn't trigger
+  const roles = AppState.data.settings?.approverRoles || [];
   const steps = def.steps
     .filter(s => !s.minAmount || amt >= s.minAmount)
-    .map(s => ({ name: s.name, approvers: (s.approvers || []).map(a => a.toLowerCase()), mode: s.mode === 'all' ? 'all' : 'any', slaDays: s.slaDays || 0 }));
+    .map(s => {
+      let approvers = (s.approvers || []).map(a => a.toLowerCase());
+      if (s.role) { const r = roles.find(x => x.id === s.role); if (r) approvers = [...new Set([...approvers, ...(r.members || []).map(m => m.toLowerCase())])]; }
+      return { name: s.name, approvers, mode: s.mode === 'all' ? 'all' : 'any', slaDays: s.slaDays || 0 };
+    });
   if (!steps.length) return false;
   // A finished previous route on the same doc (e.g. PR→PO) gets archived
   if (doc.wfRoute) { doc.wfPast = doc.wfPast || []; doc.wfPast.push({ route: doc.wfRoute, actions: doc.wfActions || [], archivedAt: _wfNow() }); }
@@ -403,7 +408,11 @@ function _wfEdRenderSteps() {
         <button class="btn btn-danger btn-sm btn-icon" onclick="_wfEdSteps.splice(${i},1);_wfEdRenderSteps()" title="Remove step"><i class="fas fa-trash"></i></button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        <input class="form-input wf-appr-input" data-step="${i}" list="wfUserList" style="flex:2;min-width:180px;height:28px;font-size:11px" placeholder="Type approver email, press Enter"
+        <select class="form-select" style="width:140px;height:28px;font-size:11px" onchange="_wfEdSteps[${i}].role=this.value||null;_wfEdRenderSteps()">
+          <option value="">— No role —</option>
+          ${(AppState.data.settings?.approverRoles||[]).map(r=>`<option value="${r.id}" ${s.role===r.id?'selected':''}>${esc(r.name)} (${r.members.length})</option>`).join('')}
+        </select>
+        <input class="form-input wf-appr-input" data-step="${i}" list="wfUserList" style="flex:2;min-width:180px;height:28px;font-size:11px" placeholder="${s.role?'+ additional emails (optional)':'Type approver email, press Enter'}"
           onkeydown="if(event.key==='Enter'||event.key===','){event.preventDefault();_wfEdCommitEmail(this,${i});}"
           onblur="_wfEdCommitEmail(this,${i})" onchange="_wfEdCommitEmail(this,${i})">
         <select class="form-select" style="width:130px;height:28px;font-size:11px" onchange="_wfEdSteps[${i}].mode=this.value">
@@ -416,7 +425,8 @@ function _wfEdRenderSteps() {
           <input class="form-input" type="number" min="0" style="width:90px;height:28px;font-size:11px" value="${s.minAmount || 0}" onchange="_wfEdSteps[${i}].minAmount=parseFloat(this.value)||0"></div>
       </div>
       <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">
-        ${s.approvers.map((a, ai) => `<span class="badge" style="background:rgba(56,139,253,.12);color:#79c0ff;font-size:10px;display:inline-flex;align-items:center;gap:4px">${a}<i class="fas fa-times" style="cursor:pointer" onclick="_wfEdSteps[${i}].approvers.splice(${ai},1);_wfEdRenderSteps()"></i></span>`).join('') || '<span style="font-size:10px;color:var(--accent-amber)"><i class="fas fa-exclamation-circle"></i> No approvers yet</span>'}
+        ${s.role ? `<span class="badge" style="background:rgba(188,140,255,.15);color:#bc8cff;font-size:10px"><i class="fas fa-users-cog"></i> ${esc((AppState.data.settings?.approverRoles||[]).find(r=>r.id===s.role)?.name||s.role)}</span>` : ''}
+        ${s.approvers.map((a, ai) => `<span class="badge" style="background:rgba(56,139,253,.12);color:#79c0ff;font-size:10px;display:inline-flex;align-items:center;gap:4px">${a}<i class="fas fa-times" style="cursor:pointer" onclick="_wfEdSteps[${i}].approvers.splice(${ai},1);_wfEdRenderSteps()"></i></span>`).join('') || (s.role ? '' : '<span style="font-size:10px;color:var(--accent-amber)"><i class="fas fa-exclamation-circle"></i> No approvers yet</span>')}
       </div>
     </div>`).join('');
 }
@@ -517,6 +527,41 @@ function renderApprovals() {
   </div>
   ${cards || '<div class="empty-state" style="padding:36px"><i class="fas fa-check-double" style="font-size:28px;opacity:.3;display:block;margin-bottom:10px"></i><p>Nothing waiting for your approval. 🎉</p></div>'}
   ${others ? `<div class="card" style="padding:0;margin-top:14px"><div style="padding:10px 12px;font-size:11px;font-weight:700;color:var(--text-secondary);border-bottom:1px solid var(--border)">OTHER DOCUMENTS IN ROUTE</div>${others}</div>` : ''}`;
+}
+
+// ═══ SLA AUTO-ESCALATION ═════════════════════════════════════
+function _wfCheckEscalations() {
+  const now = Date.now();
+  Object.entries(WF_DOCTYPES).forEach(([dt, reg]) => {
+    (AppState.data[reg.arrayKey] || []).forEach(d => {
+      if (d._deleted || !d.wfRoute || d.wfRoute.docType !== dt) return;
+      const st = wfState(d);
+      if (st.status !== 'in-route') return;
+      const step = st.steps[st.cur];
+      if (!step || !step.slaDays || step.slaDays <= 0) return;
+      const stepStart = st.stepAt[st.cur];
+      if (!stepStart) return;
+      const elapsed = now - new Date(stepStart).getTime();
+      if (elapsed <= step.slaDays * 864e5) return;
+      if (!d.wfEscalatedSteps) d.wfEscalatedSteps = [];
+      const key = st.cur + ':' + d.wfRoute.startedAt;
+      if (d.wfEscalatedSteps.includes(key)) return;
+      d.wfEscalatedSteps.push(key);
+      const escEmail = AppState.data.settings?.escalationEmail || '';
+      const targets = [...step.approvers];
+      if (escEmail && !targets.includes(escEmail.toLowerCase())) targets.push(escEmail.toLowerCase());
+      if (!AppState.data.notifications) AppState.data.notifications = [];
+      AppState.data.notifications.push({
+        id: 'ESC-' + Date.now() + '-' + Math.floor(Math.random() * 999),
+        type: 'escalation', read: false, at: _wfNow(),
+        title: 'SLA BREACH: ' + (reg.label || dt),
+        message: `${d.id} — step "${step.name}" has exceeded its ${step.slaDays}-day SLA. Awaiting: ${step.approvers.join(', ')}`,
+        targets,
+      });
+      _wfWebhook('sla_breach', dt, d, { step: step.name, slaDays: step.slaDays, elapsedDays: Math.round(elapsed / 864e5 * 10) / 10, approvers: step.approvers, escalationEmail: escEmail || null });
+      AppState.save();
+    });
+  });
 }
 
 // Sidebar badge refresh: buildSidebar() computes the approvals count itself —

@@ -535,14 +535,20 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.8.0';
-const APP_BUILD='20260707a';
+const APP_VERSION='2.9.0';
+const APP_BUILD='20260707b';
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Synced user permissions, approval notifications, conflict alerts, workflow webhooks, XSS hardening';
+const APP_RELEASE_NOTE='SLA auto-escalation, role-based workflow approvers, project archiving';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.9.0',date:'2026-07-07',type:'major',notes:[
+    'SLA auto-escalation: overdue workflow steps trigger notifications + webhook',
+    'Role-based approver steps: define approver roles in Settings, assign to workflow steps',
+    'Project archiving: export completed projects to JSON, remove from active data',
+    'Escalation email setting for fallback SLA breach alerts',
+  ]},
   {version:'2.1.1',date:'2026-05-28',type:'patch',notes:[
     'Module access control: admins can restrict modules per user',
     'Procurement: added Disapproved status, renamed Stage → Status, PO Issued flow',
@@ -1414,7 +1420,7 @@ function getDefaultData(){
     actions:[],documents:[],progress:[],kpiData:[],calendar:[],
     assetHistory:[],assetUtilization:[],thirdParty:[],projectTeam:[],activities:[],notifications:[],
     trades:[],
-    settings:{companyName:'SHIC',currency:'PHP',timezone:'Asia/Manila'},
+    settings:{companyName:'SHIC',currency:'PHP',timezone:'Asia/Manila',approverRoles:[],escalationEmail:'',archiveAfterDays:180},
     businessUnits:[], // [{id,name,color,description}]
     dailyMeetingLogs:[], // [{id,date,projectId,status,remarks,targetActivity,update,progressSnapshot,flagged,savedBy}]
     idChangeRequests:[], // [{id,projectId,oldId,newId,requestedBy,requestedAt,reason,status,approvedBy,approvedAt,rejectedAt,rejectionReason}]
@@ -2298,6 +2304,8 @@ function _generateSmartNotifs(){
   if(myPend.length)smart.push({id:'my_dr',type:'info',title:'Your Deletion Requests',
     message:`${myPend.length} of your request${myPend.length!==1?'s are':' is'} pending admin approval`,
     onclick:`navigate('deletionRequests')`,read:false,auto:true});
+  // SLA escalation check
+  if(typeof _wfCheckEscalations==='function') try{_wfCheckEscalations();}catch(e){}
   // Workflow approvals waiting for me
   if(typeof wfPendingForMe==='function'){
     const wfMine=wfPendingForMe();
@@ -13568,9 +13576,14 @@ function wfStart(docType, doc) {
   if (!def || !def.steps?.length) return false;
   const amt = WF_DOCTYPES[docType]?.amount(doc) || 0;
   // Snapshot steps; drop steps whose amount condition doesn't trigger
+  const roles = AppState.data.settings?.approverRoles || [];
   const steps = def.steps
     .filter(s => !s.minAmount || amt >= s.minAmount)
-    .map(s => ({ name: s.name, approvers: (s.approvers || []).map(a => a.toLowerCase()), mode: s.mode === 'all' ? 'all' : 'any', slaDays: s.slaDays || 0 }));
+    .map(s => {
+      let approvers = (s.approvers || []).map(a => a.toLowerCase());
+      if (s.role) { const r = roles.find(x => x.id === s.role); if (r) approvers = [...new Set([...approvers, ...(r.members || []).map(m => m.toLowerCase())])]; }
+      return { name: s.name, approvers, mode: s.mode === 'all' ? 'all' : 'any', slaDays: s.slaDays || 0 };
+    });
   if (!steps.length) return false;
   // A finished previous route on the same doc (e.g. PR→PO) gets archived
   if (doc.wfRoute) { doc.wfPast = doc.wfPast || []; doc.wfPast.push({ route: doc.wfRoute, actions: doc.wfActions || [], archivedAt: _wfNow() }); }
@@ -13908,7 +13921,11 @@ function _wfEdRenderSteps() {
         <button class="btn btn-danger btn-sm btn-icon" onclick="_wfEdSteps.splice(${i},1);_wfEdRenderSteps()" title="Remove step"><i class="fas fa-trash"></i></button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        <input class="form-input wf-appr-input" data-step="${i}" list="wfUserList" style="flex:2;min-width:180px;height:28px;font-size:11px" placeholder="Type approver email, press Enter"
+        <select class="form-select" style="width:140px;height:28px;font-size:11px" onchange="_wfEdSteps[${i}].role=this.value||null;_wfEdRenderSteps()">
+          <option value="">— No role —</option>
+          ${(AppState.data.settings?.approverRoles||[]).map(r=>`<option value="${r.id}" ${s.role===r.id?'selected':''}>${esc(r.name)} (${r.members.length})</option>`).join('')}
+        </select>
+        <input class="form-input wf-appr-input" data-step="${i}" list="wfUserList" style="flex:2;min-width:180px;height:28px;font-size:11px" placeholder="${s.role?'+ additional emails (optional)':'Type approver email, press Enter'}"
           onkeydown="if(event.key==='Enter'||event.key===','){event.preventDefault();_wfEdCommitEmail(this,${i});}"
           onblur="_wfEdCommitEmail(this,${i})" onchange="_wfEdCommitEmail(this,${i})">
         <select class="form-select" style="width:130px;height:28px;font-size:11px" onchange="_wfEdSteps[${i}].mode=this.value">
@@ -13921,7 +13938,8 @@ function _wfEdRenderSteps() {
           <input class="form-input" type="number" min="0" style="width:90px;height:28px;font-size:11px" value="${s.minAmount || 0}" onchange="_wfEdSteps[${i}].minAmount=parseFloat(this.value)||0"></div>
       </div>
       <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">
-        ${s.approvers.map((a, ai) => `<span class="badge" style="background:rgba(56,139,253,.12);color:#79c0ff;font-size:10px;display:inline-flex;align-items:center;gap:4px">${a}<i class="fas fa-times" style="cursor:pointer" onclick="_wfEdSteps[${i}].approvers.splice(${ai},1);_wfEdRenderSteps()"></i></span>`).join('') || '<span style="font-size:10px;color:var(--accent-amber)"><i class="fas fa-exclamation-circle"></i> No approvers yet</span>'}
+        ${s.role ? `<span class="badge" style="background:rgba(188,140,255,.15);color:#bc8cff;font-size:10px"><i class="fas fa-users-cog"></i> ${esc((AppState.data.settings?.approverRoles||[]).find(r=>r.id===s.role)?.name||s.role)}</span>` : ''}
+        ${s.approvers.map((a, ai) => `<span class="badge" style="background:rgba(56,139,253,.12);color:#79c0ff;font-size:10px;display:inline-flex;align-items:center;gap:4px">${a}<i class="fas fa-times" style="cursor:pointer" onclick="_wfEdSteps[${i}].approvers.splice(${ai},1);_wfEdRenderSteps()"></i></span>`).join('') || (s.role ? '' : '<span style="font-size:10px;color:var(--accent-amber)"><i class="fas fa-exclamation-circle"></i> No approvers yet</span>')}
       </div>
     </div>`).join('');
 }
@@ -14022,6 +14040,41 @@ function renderApprovals() {
   </div>
   ${cards || '<div class="empty-state" style="padding:36px"><i class="fas fa-check-double" style="font-size:28px;opacity:.3;display:block;margin-bottom:10px"></i><p>Nothing waiting for your approval. 🎉</p></div>'}
   ${others ? `<div class="card" style="padding:0;margin-top:14px"><div style="padding:10px 12px;font-size:11px;font-weight:700;color:var(--text-secondary);border-bottom:1px solid var(--border)">OTHER DOCUMENTS IN ROUTE</div>${others}</div>` : ''}`;
+}
+
+// ═══ SLA AUTO-ESCALATION ═════════════════════════════════════
+function _wfCheckEscalations() {
+  const now = Date.now();
+  Object.entries(WF_DOCTYPES).forEach(([dt, reg]) => {
+    (AppState.data[reg.arrayKey] || []).forEach(d => {
+      if (d._deleted || !d.wfRoute || d.wfRoute.docType !== dt) return;
+      const st = wfState(d);
+      if (st.status !== 'in-route') return;
+      const step = st.steps[st.cur];
+      if (!step || !step.slaDays || step.slaDays <= 0) return;
+      const stepStart = st.stepAt[st.cur];
+      if (!stepStart) return;
+      const elapsed = now - new Date(stepStart).getTime();
+      if (elapsed <= step.slaDays * 864e5) return;
+      if (!d.wfEscalatedSteps) d.wfEscalatedSteps = [];
+      const key = st.cur + ':' + d.wfRoute.startedAt;
+      if (d.wfEscalatedSteps.includes(key)) return;
+      d.wfEscalatedSteps.push(key);
+      const escEmail = AppState.data.settings?.escalationEmail || '';
+      const targets = [...step.approvers];
+      if (escEmail && !targets.includes(escEmail.toLowerCase())) targets.push(escEmail.toLowerCase());
+      if (!AppState.data.notifications) AppState.data.notifications = [];
+      AppState.data.notifications.push({
+        id: 'ESC-' + Date.now() + '-' + Math.floor(Math.random() * 999),
+        type: 'escalation', read: false, at: _wfNow(),
+        title: 'SLA BREACH: ' + (reg.label || dt),
+        message: `${d.id} — step "${step.name}" has exceeded its ${step.slaDays}-day SLA. Awaiting: ${step.approvers.join(', ')}`,
+        targets,
+      });
+      _wfWebhook('sla_breach', dt, d, { step: step.name, slaDays: step.slaDays, elapsedDays: Math.round(elapsed / 864e5 * 10) / 10, approvers: step.approvers, escalationEmail: escEmail || null });
+      AppState.save();
+    });
+  });
 }
 
 // Sidebar badge refresh: buildSidebar() computes the approvals count itself —
@@ -21883,6 +21936,18 @@ ${renderSpPanel()}
         <button class="btn btn-secondary btn-sm" onclick="_testWebhook()"><i class="fas fa-paper-plane"></i> Test</button>
       </div>
     </div>
+    <div class="settings-item" style="flex-direction:column;align-items:flex-start;gap:8px">
+      <div class="settings-item-info"><div class="title"><i class="fas fa-exclamation-triangle" style="color:var(--accent-amber);margin-right:5px"></i>SLA Escalation Email</div><div class="desc">Fallback email for SLA breach alerts. Leave blank to notify only step approvers.</div></div>
+      <input class="form-input" id="sEscalationEmail" placeholder="manager@company.com" value="${settings.escalationEmail||''}" style="width:100%;font-size:11px">
+    </div>
+  </div>
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div><div style="font-size:14px;font-weight:600"><i class="fas fa-users-cog" style="color:var(--accent-purple);margin-right:7px"></i>Approver Roles</div>
+      <div style="font-size:11px;color:var(--text-secondary)">Define named groups for workflow steps. Changes apply to new routes only.</div></div>
+      <button class="btn btn-primary btn-sm" onclick="_arAddRole()"><i class="fas fa-plus"></i> Add Role</button>
+    </div>
+    <div id="approverRolesWrap">${_renderApproverRoles()}</div>
   </div>
   <div class="card" style="grid-column:1/-1">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
@@ -21902,6 +21967,13 @@ ${renderSpPanel()}
       <button class="btn btn-danger" onclick="clearAllData()"><i class="fas fa-trash"></i> Clear All Data</button>
       <button class="btn btn-secondary" onclick="showPatchImport()"><i class="fas fa-bolt"></i> Apply Update Patch</button>
       <button class="btn btn-secondary" onclick="cleanUpStorage()" style="border-color:var(--accent-amber);color:var(--accent-amber)" title="Remove soft-deleted records from local storage to free up space"><i class="fas fa-broom"></i> Clean Up Storage</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-secondary" onclick="archiveProjects()" style="border-color:var(--accent-cyan);color:var(--accent-cyan)" title="Export completed projects older than threshold to JSON and remove from active data"><i class="fas fa-archive"></i> Archive Old Projects</button>
+        <button class="btn btn-secondary" onclick="_restoreArchiveFile()" style="border-color:var(--accent-green);color:var(--accent-green)" title="Restore previously archived projects from JSON file"><i class="fas fa-upload"></i> Restore Archive</button>
+        <span style="font-size:10px;color:var(--text-muted)">after</span>
+        <input class="form-input" id="sArchiveDays" type="number" min="30" value="${settings.archiveAfterDays||180}" style="width:60px;height:28px;font-size:11px">
+        <span style="font-size:10px;color:var(--text-muted)">days</span>
+      </div>
       <button class="btn btn-secondary" onclick="restorePreSyncSnapshot()" title="Undo the last SharePoint sync merge — restores your data to the state just before it"><i class="fas fa-clock-rotate-left"></i> Restore Pre-Sync Snapshot</button>
       <button class="btn btn-secondary" onclick="showSnapshotRestore()" title="Restore data from one of the last 3 automatic local snapshots"><i class="fas fa-history"></i> Restore from Snapshot</button>
       <div id="storageUsageBar" style="margin-top:4px"></div>
@@ -22201,6 +22273,8 @@ AppState.data.settings.currency=$('#sCurrency').value;
 AppState.data.settings.autoBackup=!!document.getElementById('sAutoBackup')?.checked;
 AppState.data.settings.sessionTimeout=parseInt(document.getElementById('sSessionTimeout')?.value??'30')||0;
 AppState.data.settings.webhookUrl=(document.getElementById('sWebhookUrl')?.value||'').trim();
+AppState.data.settings.escalationEmail=(document.getElementById('sEscalationEmail')?.value||'').trim().toLowerCase();
+AppState.data.settings.archiveAfterDays=parseInt(document.getElementById('sArchiveDays')?.value)||180;
 AppState.save();
 if(typeof _startSessionTimer==='function')_startSessionTimer();
 showToast('Settings saved','success');}
@@ -22349,6 +22423,129 @@ function deleteBU(id){
 
 
 
+
+// ═══ APPROVER ROLES CRUD ═════════════════════════════════════
+function _renderApproverRoles(){
+  const roles=AppState.data.settings?.approverRoles||[];
+  if(!roles.length)return'<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:11px"><i class="fas fa-users-cog" style="font-size:20px;display:block;margin-bottom:6px;opacity:.3"></i>No approver roles defined yet.</div>';
+  return roles.map((r,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
+    <i class="fas fa-users" style="color:var(--accent-purple);font-size:13px"></i>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:12px;font-weight:600">${esc(r.name)}</div>
+      <div style="font-size:10px;color:var(--text-muted)">${(r.members||[]).join(', ')||'No members'}</div>
+    </div>
+    <button class="btn btn-secondary btn-sm btn-icon" onclick="_arEditRole('${r.id}')" title="Edit"><i class="fas fa-edit"></i></button>
+    <button class="btn btn-danger btn-sm btn-icon" onclick="_arDeleteRole('${r.id}')" title="Delete"><i class="fas fa-trash"></i></button>
+  </div>`).join('');
+}
+function _arAddRole(){
+  _arShowForm(null);
+}
+function _arEditRole(id){
+  const r=(AppState.data.settings?.approverRoles||[]).find(x=>x.id===id);
+  if(r)_arShowForm(r);
+}
+function _arShowForm(role){
+  $('#genericModalTitle').textContent=role?'Edit Approver Role':'New Approver Role';
+  $('#genericModalBody').innerHTML=`
+    <div class="form-group"><label class="form-label">Role Name</label>
+      <input class="form-input" id="arName" value="${role?.name||''}" placeholder="e.g. Finance Approvers"></div>
+    <div class="form-group"><label class="form-label">Members (emails, one per line)</label>
+      <textarea class="form-input" id="arMembers" rows="4" placeholder="alice@company.com&#10;bob@company.com" style="font-size:11px;font-family:var(--font-mono)">${(role?.members||[]).join('\n')}</textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="_arSaveRole('${role?.id||''}')"><i class="fas fa-save"></i> Save</button>
+    </div>`;
+  openModal('genericModal');
+}
+function _arSaveRole(id){
+  const name=($('#arName')?.value||'').trim();
+  if(!name){showToast('Name is required','error');return;}
+  const members=($('#arMembers')?.value||'').split(/[\n,]+/).map(s=>s.trim().toLowerCase()).filter(s=>s.includes('@'));
+  if(!members.length){showToast('At least one valid email required','error');return;}
+  if(!AppState.data.settings.approverRoles)AppState.data.settings.approverRoles=[];
+  if(id){
+    const r=AppState.data.settings.approverRoles.find(x=>x.id===id);
+    if(r){r.name=name;r.members=members;}
+  }else{
+    AppState.data.settings.approverRoles.push({id:'AR-'+Date.now(),name,members});
+  }
+  AppState.save();
+  closeModal('genericModal');
+  showToast('Approver role saved','success');
+  const w=$('#approverRolesWrap');if(w)w.innerHTML=_renderApproverRoles();
+  if(typeof spWriteAuditLog==='function')spWriteAuditLog('approver_role_saved','settings',id||'new',name,{members:members.join(', ')});
+}
+function _arDeleteRole(id){
+  if(!confirm('Delete this approver role?'))return;
+  AppState.data.settings.approverRoles=(AppState.data.settings.approverRoles||[]).filter(x=>x.id!==id);
+  AppState.save();
+  const w=$('#approverRolesWrap');if(w)w.innerHTML=_renderApproverRoles();
+  showToast('Role deleted','warning');
+}
+
+// ═══ PROJECT ARCHIVING ═══════════════════════════════════════
+function archiveProjects(){
+  if(!(typeof isAdminUser==='function'&&isAdminUser())){showToast('Admin only','error');return;}
+  const days=AppState.data.settings?.archiveAfterDays||180;
+  const cutoff=Date.now()-days*864e5;
+  const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&!p._archived&&(p.status==='completed'||p.status==='archived')&&p.updatedAt&&new Date(p.updatedAt).getTime()<cutoff);
+  if(!projects.length){showToast(`No completed/archived projects older than ${days} days found`,'info');return;}
+  const pIds=new Set(projects.map(p=>p.id));
+  const relKeys=['tasks','costs','qaqc','risks','actions','documents','resourceAllocations','resourceUsageLogs','procurement','procurementLogs','progress','dailyMeetingLogs'];
+  const bundle={archivedAt:new Date().toISOString(),version:APP_VERSION,projects:[],related:{}};
+  bundle.projects=projects;
+  relKeys.forEach(k=>{
+    const recs=(AppState.data[k]||[]).filter(r=>r.projectId&&pIds.has(r.projectId)&&!r._archived);
+    if(recs.length)bundle.related[k]=recs;
+  });
+  const totalRecs=bundle.projects.length+Object.values(bundle.related).reduce((s,a)=>s+a.length,0);
+  if(!confirm(`Archive ${projects.length} project(s) and ${totalRecs-projects.length} related records?\n\nA JSON file will download first, then records are removed from active data.`))return;
+  const blob=new Blob([JSON.stringify(bundle,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='archive_'+new Date().toISOString().slice(0,10)+'.json';a.click();
+  AppState.data.projects=AppState.data.projects.filter(p=>!pIds.has(p.id));
+  relKeys.forEach(k=>{if(!AppState.data[k])return;const before=AppState.data[k].length;AppState.data[k]=AppState.data[k].filter(r=>!r.projectId||!pIds.has(r.projectId));});
+  AppState.save();
+  if(typeof spWriteAuditLog==='function')spWriteAuditLog('archive_projects','projects','batch',`${projects.length} projects`,{ids:projects.map(p=>p.id).join(', ')});
+  showToast(`Archived ${projects.length} project(s) + ${totalRecs-projects.length} records. File downloaded.`,'success',6000);
+  const bar=document.getElementById('storageUsageBar');if(bar&&typeof _storageUsageHTML==='function')bar.innerHTML=_storageUsageHTML();
+}
+function _restoreArchiveFile(){
+  if(!(typeof isAdminUser==='function'&&isAdminUser())){showToast('Admin only','error');return;}
+  const inp=document.createElement('input');inp.type='file';inp.accept='.json';
+  inp.onchange=e=>{
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try{
+        const bundle=JSON.parse(ev.target.result);
+        if(!bundle.projects||!Array.isArray(bundle.projects)){showToast('Invalid archive file','error');return;}
+        const count={proj:0,rec:0};
+        bundle.projects.forEach(p=>{
+          const existing=(AppState.data.projects||[]).find(x=>x.id===p.id);
+          if(existing)Object.assign(existing,p);
+          else{AppState.data.projects.push(p);}
+          count.proj++;
+        });
+        Object.entries(bundle.related||{}).forEach(([k,recs])=>{
+          if(!AppState.data[k])AppState.data[k]=[];
+          recs.forEach(r=>{
+            const existing=AppState.data[k].find(x=>x.id===r.id);
+            if(existing)Object.assign(existing,r);
+            else AppState.data[k].push(r);
+            count.rec++;
+          });
+        });
+        AppState.save();
+        if(typeof spWriteAuditLog==='function')spWriteAuditLog('restore_archive','projects','batch',`${count.proj} projects`,{});
+        showToast(`Restored ${count.proj} project(s) + ${count.rec} records from archive`,'success',5000);
+        try{navigate('settings');}catch(e){}
+      }catch(err){showToast('Failed to parse archive: '+err.message,'error');}
+    };
+    reader.readAsText(file);
+  };
+  inp.click();
+}
 
 function clearDemoData(){
   // Clears all data locally, keeps trades + settings

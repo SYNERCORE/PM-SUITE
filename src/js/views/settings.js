@@ -180,6 +180,18 @@ ${renderSpPanel()}
         <button class="btn btn-secondary btn-sm" onclick="_testWebhook()"><i class="fas fa-paper-plane"></i> Test</button>
       </div>
     </div>
+    <div class="settings-item" style="flex-direction:column;align-items:flex-start;gap:8px">
+      <div class="settings-item-info"><div class="title"><i class="fas fa-exclamation-triangle" style="color:var(--accent-amber);margin-right:5px"></i>SLA Escalation Email</div><div class="desc">Fallback email for SLA breach alerts. Leave blank to notify only step approvers.</div></div>
+      <input class="form-input" id="sEscalationEmail" placeholder="manager@company.com" value="${settings.escalationEmail||''}" style="width:100%;font-size:11px">
+    </div>
+  </div>
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div><div style="font-size:14px;font-weight:600"><i class="fas fa-users-cog" style="color:var(--accent-purple);margin-right:7px"></i>Approver Roles</div>
+      <div style="font-size:11px;color:var(--text-secondary)">Define named groups for workflow steps. Changes apply to new routes only.</div></div>
+      <button class="btn btn-primary btn-sm" onclick="_arAddRole()"><i class="fas fa-plus"></i> Add Role</button>
+    </div>
+    <div id="approverRolesWrap">${_renderApproverRoles()}</div>
   </div>
   <div class="card" style="grid-column:1/-1">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
@@ -199,6 +211,13 @@ ${renderSpPanel()}
       <button class="btn btn-danger" onclick="clearAllData()"><i class="fas fa-trash"></i> Clear All Data</button>
       <button class="btn btn-secondary" onclick="showPatchImport()"><i class="fas fa-bolt"></i> Apply Update Patch</button>
       <button class="btn btn-secondary" onclick="cleanUpStorage()" style="border-color:var(--accent-amber);color:var(--accent-amber)" title="Remove soft-deleted records from local storage to free up space"><i class="fas fa-broom"></i> Clean Up Storage</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-secondary" onclick="archiveProjects()" style="border-color:var(--accent-cyan);color:var(--accent-cyan)" title="Export completed projects older than threshold to JSON and remove from active data"><i class="fas fa-archive"></i> Archive Old Projects</button>
+        <button class="btn btn-secondary" onclick="_restoreArchiveFile()" style="border-color:var(--accent-green);color:var(--accent-green)" title="Restore previously archived projects from JSON file"><i class="fas fa-upload"></i> Restore Archive</button>
+        <span style="font-size:10px;color:var(--text-muted)">after</span>
+        <input class="form-input" id="sArchiveDays" type="number" min="30" value="${settings.archiveAfterDays||180}" style="width:60px;height:28px;font-size:11px">
+        <span style="font-size:10px;color:var(--text-muted)">days</span>
+      </div>
       <button class="btn btn-secondary" onclick="restorePreSyncSnapshot()" title="Undo the last SharePoint sync merge — restores your data to the state just before it"><i class="fas fa-clock-rotate-left"></i> Restore Pre-Sync Snapshot</button>
       <button class="btn btn-secondary" onclick="showSnapshotRestore()" title="Restore data from one of the last 3 automatic local snapshots"><i class="fas fa-history"></i> Restore from Snapshot</button>
       <div id="storageUsageBar" style="margin-top:4px"></div>
@@ -498,6 +517,8 @@ AppState.data.settings.currency=$('#sCurrency').value;
 AppState.data.settings.autoBackup=!!document.getElementById('sAutoBackup')?.checked;
 AppState.data.settings.sessionTimeout=parseInt(document.getElementById('sSessionTimeout')?.value??'30')||0;
 AppState.data.settings.webhookUrl=(document.getElementById('sWebhookUrl')?.value||'').trim();
+AppState.data.settings.escalationEmail=(document.getElementById('sEscalationEmail')?.value||'').trim().toLowerCase();
+AppState.data.settings.archiveAfterDays=parseInt(document.getElementById('sArchiveDays')?.value)||180;
 AppState.save();
 if(typeof _startSessionTimer==='function')_startSessionTimer();
 showToast('Settings saved','success');}
@@ -646,6 +667,129 @@ function deleteBU(id){
 
 
 
+
+// ═══ APPROVER ROLES CRUD ═════════════════════════════════════
+function _renderApproverRoles(){
+  const roles=AppState.data.settings?.approverRoles||[];
+  if(!roles.length)return'<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:11px"><i class="fas fa-users-cog" style="font-size:20px;display:block;margin-bottom:6px;opacity:.3"></i>No approver roles defined yet.</div>';
+  return roles.map((r,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
+    <i class="fas fa-users" style="color:var(--accent-purple);font-size:13px"></i>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:12px;font-weight:600">${esc(r.name)}</div>
+      <div style="font-size:10px;color:var(--text-muted)">${(r.members||[]).join(', ')||'No members'}</div>
+    </div>
+    <button class="btn btn-secondary btn-sm btn-icon" onclick="_arEditRole('${r.id}')" title="Edit"><i class="fas fa-edit"></i></button>
+    <button class="btn btn-danger btn-sm btn-icon" onclick="_arDeleteRole('${r.id}')" title="Delete"><i class="fas fa-trash"></i></button>
+  </div>`).join('');
+}
+function _arAddRole(){
+  _arShowForm(null);
+}
+function _arEditRole(id){
+  const r=(AppState.data.settings?.approverRoles||[]).find(x=>x.id===id);
+  if(r)_arShowForm(r);
+}
+function _arShowForm(role){
+  $('#genericModalTitle').textContent=role?'Edit Approver Role':'New Approver Role';
+  $('#genericModalBody').innerHTML=`
+    <div class="form-group"><label class="form-label">Role Name</label>
+      <input class="form-input" id="arName" value="${role?.name||''}" placeholder="e.g. Finance Approvers"></div>
+    <div class="form-group"><label class="form-label">Members (emails, one per line)</label>
+      <textarea class="form-input" id="arMembers" rows="4" placeholder="alice@company.com&#10;bob@company.com" style="font-size:11px;font-family:var(--font-mono)">${(role?.members||[]).join('\n')}</textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="_arSaveRole('${role?.id||''}')"><i class="fas fa-save"></i> Save</button>
+    </div>`;
+  openModal('genericModal');
+}
+function _arSaveRole(id){
+  const name=($('#arName')?.value||'').trim();
+  if(!name){showToast('Name is required','error');return;}
+  const members=($('#arMembers')?.value||'').split(/[\n,]+/).map(s=>s.trim().toLowerCase()).filter(s=>s.includes('@'));
+  if(!members.length){showToast('At least one valid email required','error');return;}
+  if(!AppState.data.settings.approverRoles)AppState.data.settings.approverRoles=[];
+  if(id){
+    const r=AppState.data.settings.approverRoles.find(x=>x.id===id);
+    if(r){r.name=name;r.members=members;}
+  }else{
+    AppState.data.settings.approverRoles.push({id:'AR-'+Date.now(),name,members});
+  }
+  AppState.save();
+  closeModal('genericModal');
+  showToast('Approver role saved','success');
+  const w=$('#approverRolesWrap');if(w)w.innerHTML=_renderApproverRoles();
+  if(typeof spWriteAuditLog==='function')spWriteAuditLog('approver_role_saved','settings',id||'new',name,{members:members.join(', ')});
+}
+function _arDeleteRole(id){
+  if(!confirm('Delete this approver role?'))return;
+  AppState.data.settings.approverRoles=(AppState.data.settings.approverRoles||[]).filter(x=>x.id!==id);
+  AppState.save();
+  const w=$('#approverRolesWrap');if(w)w.innerHTML=_renderApproverRoles();
+  showToast('Role deleted','warning');
+}
+
+// ═══ PROJECT ARCHIVING ═══════════════════════════════════════
+function archiveProjects(){
+  if(!(typeof isAdminUser==='function'&&isAdminUser())){showToast('Admin only','error');return;}
+  const days=AppState.data.settings?.archiveAfterDays||180;
+  const cutoff=Date.now()-days*864e5;
+  const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&!p._archived&&(p.status==='completed'||p.status==='archived')&&p.updatedAt&&new Date(p.updatedAt).getTime()<cutoff);
+  if(!projects.length){showToast(`No completed/archived projects older than ${days} days found`,'info');return;}
+  const pIds=new Set(projects.map(p=>p.id));
+  const relKeys=['tasks','costs','qaqc','risks','actions','documents','resourceAllocations','resourceUsageLogs','procurement','procurementLogs','progress','dailyMeetingLogs'];
+  const bundle={archivedAt:new Date().toISOString(),version:APP_VERSION,projects:[],related:{}};
+  bundle.projects=projects;
+  relKeys.forEach(k=>{
+    const recs=(AppState.data[k]||[]).filter(r=>r.projectId&&pIds.has(r.projectId)&&!r._archived);
+    if(recs.length)bundle.related[k]=recs;
+  });
+  const totalRecs=bundle.projects.length+Object.values(bundle.related).reduce((s,a)=>s+a.length,0);
+  if(!confirm(`Archive ${projects.length} project(s) and ${totalRecs-projects.length} related records?\n\nA JSON file will download first, then records are removed from active data.`))return;
+  const blob=new Blob([JSON.stringify(bundle,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='archive_'+new Date().toISOString().slice(0,10)+'.json';a.click();
+  AppState.data.projects=AppState.data.projects.filter(p=>!pIds.has(p.id));
+  relKeys.forEach(k=>{if(!AppState.data[k])return;const before=AppState.data[k].length;AppState.data[k]=AppState.data[k].filter(r=>!r.projectId||!pIds.has(r.projectId));});
+  AppState.save();
+  if(typeof spWriteAuditLog==='function')spWriteAuditLog('archive_projects','projects','batch',`${projects.length} projects`,{ids:projects.map(p=>p.id).join(', ')});
+  showToast(`Archived ${projects.length} project(s) + ${totalRecs-projects.length} records. File downloaded.`,'success',6000);
+  const bar=document.getElementById('storageUsageBar');if(bar&&typeof _storageUsageHTML==='function')bar.innerHTML=_storageUsageHTML();
+}
+function _restoreArchiveFile(){
+  if(!(typeof isAdminUser==='function'&&isAdminUser())){showToast('Admin only','error');return;}
+  const inp=document.createElement('input');inp.type='file';inp.accept='.json';
+  inp.onchange=e=>{
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try{
+        const bundle=JSON.parse(ev.target.result);
+        if(!bundle.projects||!Array.isArray(bundle.projects)){showToast('Invalid archive file','error');return;}
+        const count={proj:0,rec:0};
+        bundle.projects.forEach(p=>{
+          const existing=(AppState.data.projects||[]).find(x=>x.id===p.id);
+          if(existing)Object.assign(existing,p);
+          else{AppState.data.projects.push(p);}
+          count.proj++;
+        });
+        Object.entries(bundle.related||{}).forEach(([k,recs])=>{
+          if(!AppState.data[k])AppState.data[k]=[];
+          recs.forEach(r=>{
+            const existing=AppState.data[k].find(x=>x.id===r.id);
+            if(existing)Object.assign(existing,r);
+            else AppState.data[k].push(r);
+            count.rec++;
+          });
+        });
+        AppState.save();
+        if(typeof spWriteAuditLog==='function')spWriteAuditLog('restore_archive','projects','batch',`${count.proj} projects`,{});
+        showToast(`Restored ${count.proj} project(s) + ${count.rec} records from archive`,'success',5000);
+        try{navigate('settings');}catch(e){}
+      }catch(err){showToast('Failed to parse archive: '+err.message,'error');}
+    };
+    reader.readAsText(file);
+  };
+  inp.click();
+}
 
 function clearDemoData(){
   // Clears all data locally, keeps trades + settings
