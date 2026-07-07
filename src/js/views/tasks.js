@@ -438,11 +438,11 @@ function _tFormRecalc(source){
   const dur=parseFloat(durEl.value);
 
   if(source==='start'){
-    // end = start + (dur-1) working days  [inclusive model: dur=1 → same day]
-    if(!isNaN(dur)&&dur>=1&&s) endEl.value=addWD(s,Math.max(0,dur-1));
+    // end = start + (ceil(dur)-1) working days  [inclusive model: dur<=1 → same day, 1.5 → 2 days]
+    if(!isNaN(dur)&&dur>0&&s) endEl.value=addWD(s,Math.max(0,Math.ceil(dur)-1));
     else if(e&&s>e) endEl.value=s;
   } else if(source==='dur'){
-    if(!isNaN(dur)&&dur>=1&&s) endEl.value=addWD(s,Math.max(0,dur-1));
+    if(!isNaN(dur)&&dur>0&&s) endEl.value=addWD(s,Math.max(0,Math.ceil(dur)-1));
   } else if(source==='end'){
     if(s&&e){
       if(e<s){endEl.value=s;durEl.value=1;}
