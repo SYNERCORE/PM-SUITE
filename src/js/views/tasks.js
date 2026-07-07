@@ -203,7 +203,7 @@ $('#taskModalTitle').textContent=id?'Edit Task':'New Task';
 const _hasPred=!!(t?.predecessors||'').trim();
 const _isMile=!!t?.milestone;
 const _hpd=_getTaskProjHPD(t?.projectId||taskProjectFilter||'');
-const _durVal=t?.durationHrs>0?+(t.durationHrs/_hpd).toFixed(1):(_isMile?0:'');
+const _durVal=t?.durationHrs>0?+(t.durationHrs/_hpd).toFixed(2).replace(/\.?0+$/,''):(_isMile?0:'');
 const _isSummary=!!(id&&_taskHasChildren(id));
 // For successor tasks: start/end are CPM-computed. For summary tasks: rolled up from children.
 const _dateRO=(_hasPred||_isSummary)?'readonly style="opacity:.55;cursor:not-allowed;background:var(--bg-secondary)"':'';
@@ -219,7 +219,7 @@ $('#taskModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">End Date ${_dateNote}</label><input class="form-input" type="date" id="tEnd" value="${t?.endDate||''}" ${_dateRO} onchange="_tFormRecalc('end')"></div>
 <div class="form-group"><label class="form-label">Planned Hours</label><input class="form-input" type="number" id="tPH" value="${t?.plannedHrs||0}"></div>
 <div class="form-group"><label class="form-label">Actual Hours</label><input class="form-input" type="number" id="tAH" value="${t?.actualHrs||0}"></div>
-<div class="form-group"><label class="form-label">Duration (days) <span style="font-size:10px;color:var(--text-muted)">— working days</span></label><input class="form-input" type="number" id="tDur" step="0.5" min="0" value="${_durVal}" placeholder="e.g. 5" onchange="_tFormRecalc('dur')" ${_isMile?'readonly style="opacity:.55"':''}></div>
+<div class="form-group"><label class="form-label">Duration (days) <span style="font-size:10px;color:var(--text-muted)">— working days</span></label><input class="form-input" type="number" id="tDur" step="0.125" min="0" value="${_durVal}" placeholder="e.g. 5" onchange="_tFormRecalc('dur')" ${_isMile?'readonly style="opacity:.55"':''}></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Predecessors <span style="font-size:10px;color:var(--text-muted)">e.g. TSK-001 FS, TSK-002 SS+2d</span></label><div style="display:flex;gap:6px"><input class="form-input" id="tPred" value="${t?.predecessors||''}" placeholder="Leave blank if no dependencies" style="flex:1" onchange="_tFormRecalc('pred')"><button type="button" class="btn btn-secondary btn-sm" style="white-space:nowrap;padding:0 10px" onclick="showPredPicker('${id||''}')"><i class="fas fa-list-ul"></i> Pick</button></div></div>
 <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="tStat">${['todo','inprogress','done','blocked'].map(s=>`<option value="${s}" ${(t?.status||defStatus)===s?'selected':''}>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Priority</label><select class="form-select" id="tPri">${['critical','high','medium','low'].map(s=>`<option value="${s}" ${t?.priority===s?'selected':''}>${s}</option>`).join('')}</select></div>
