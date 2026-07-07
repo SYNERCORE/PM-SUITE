@@ -14143,6 +14143,21 @@ function _applySummaryRollups(projId){
   }
 }
 
+function _recalcProjectProgress(projId){
+  const p=(AppState.data.projects||[]).find(x=>x.id===projId);
+  if(!p)return;
+  const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===projId&&!t._deleted);
+  if(!tasks.length)return;
+  const roots=tasks.filter(t=>!t.parentId||!tasks.find(x=>x.id===t.parentId));
+  if(!roots.length)return;
+  let wSum=0,pSum=0;
+  roots.forEach(t=>{
+    const w=Math.max(1,t.durationHrs||((t.startDate&&t.endDate&&typeof daysBetween==='function')?(daysBetween(t.startDate,t.endDate)+1)*8:8));
+    wSum+=w;pSum+=w*(t.progress||0);
+  });
+  p.progress=wSum?Math.round(pSum/wSum):0;
+}
+
 function _getTaskProjHPD(projectId) {
   const p = (AppState.data.projects||[]).find(p => p.id === projectId);
   return p?.calendar?.hoursPerDay || 8;
@@ -14197,7 +14212,7 @@ let dragTaskId=null;
 function dropTask(e,status){
 if(!dragTaskId)return;
 const t=(AppState.data.tasks||[]).find(t=>t.id===dragTaskId);
-if(t){t.status=status;if(status==='done')t.progress=100;AppState.save();renderTaskView();showToast('Task moved','success');}
+if(t){t.status=status;if(status==='done')t.progress=100;_applySummaryRollups(t.projectId);_recalcProjectProgress(t.projectId);AppState.save();renderTaskView();showToast('Task moved','success');}
 dragTaskId=null;}
 
 function renderTaskTable(){
@@ -14321,6 +14336,7 @@ if(id){const i=(AppState.data.tasks||[]).findIndex(x=>x.id===id);AppState.data.t
 else AppState.data.tasks.push(t);
 _applyCPMDates(_tProjId);
 _applySummaryRollups(_tProjId);
+_recalcProjectProgress(_tProjId);
 AppState.save();closeModal('taskModal');
 if(typeof detailProjectId!=='undefined'&&detailProjectId&&typeof renderDetailTasks==='function'){renderDetailTasks();}else{renderTaskView();}
 showToast(id?'Task updated':'Task created','success');}
