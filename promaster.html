@@ -14824,55 +14824,82 @@ function runFullCPM(tasks, project) {
   }
 
   // ── Forward Pass ──────────────────────────────────────────────
+  // Track hours-within-day so fractional-duration tasks can share a working day
+  // (two 0.5-day FS tasks fit into one 8-hour day; a 0.25-day pred → 0.75-day
+  // succ starts same day at hour 2).
+  const hpd = cal.hoursPerDay || 8;
+  const durHours = (t) => getDurDays(t) * hpd;
+  // Advance (date, hoursOffset) forward by `hours` on the given calendar.
+  const walkHours = (date, offset, hours) => {
+    if (hours <= 0) return { date, offset };
+    let remaining = offset + hours;
+    let d = date;
+    while (remaining > hpd + 1e-9) {
+      remaining -= hpd;
+      d = addWorkingDays(d, 1, cal);
+    }
+    return { date: d, offset: remaining };
+  };
+
   for (const id of order) {
     const t    = map.get(id);
     const preds = parsePredecessors(t.predecessors || '');
-    const dur  = getDurDays(t);
+    const dHrs = durHours(t);
 
-    // FIX: Anchor tasks use their stored startDate.
-    // Successor tasks start from null — predecessor constraints are the ONLY
-    // determinant. projectStart must NOT act as a floor for successor tasks.
     let es = (preds.length === 0 && t.startDate) ? t.startDate : null;
+    let startHrs = 0;
 
     for (const p of preds) {
       const pred = map.get(p.id);
       if (!pred || pred._ES === undefined) continue;
       const lag = p.lagDays || 0;
-      let constraint;
+      let constraintDate, constraintHrs = 0;
 
       switch (p.type) {
-        case 'FS':
-          // Successor starts the working day AFTER predecessor finishes (+ lag)
-          // lag=0 → next day; lag=-1 → same day (1-day lead/overlap)
-          constraint = addWorkingDays(pred._EF, lag + 1, cal);
+        case 'FS': {
+          const predEndHrs = pred._endHrs ?? hpd;
+          // Same-day chaining: no lag AND predecessor didn't consume the full day
+          if (lag === 0 && predEndHrs < hpd - 1e-9) {
+            constraintDate = pred._EF;
+            constraintHrs = predEndHrs;
+          } else {
+            constraintDate = addWorkingDays(pred._EF, lag + 1, cal);
+            constraintHrs = 0;
+          }
           break;
+        }
         case 'SS':
-          // Successor starts same day as predecessor (+ lag)
-          constraint = addWorkingDays(pred._ES, lag, cal);
+          constraintDate = addWorkingDays(pred._ES, lag, cal);
+          constraintHrs = pred._startHrs ?? 0;
           break;
         case 'FF':
-          // Both finish together: succ.EF >= pred.EF + lag
-          // succ.ES = succ.EF - (dur-1)
-          constraint = addWorkingDays(addWorkingDays(pred._EF, lag, cal), -Math.max(0, dur - 1), cal);
+          constraintDate = addWorkingDays(addWorkingDays(pred._EF, lag, cal), -Math.max(0, getDurDays(t) - 1), cal);
           break;
         case 'SF':
-          // succ.EF >= pred.ES + lag → succ.ES = succ.EF - (dur-1)
-          constraint = addWorkingDays(addWorkingDays(pred._ES, lag, cal), -Math.max(0, dur - 1), cal);
+          constraintDate = addWorkingDays(addWorkingDays(pred._ES, lag, cal), -Math.max(0, getDurDays(t) - 1), cal);
           break;
         default:
-          constraint = addWorkingDays(pred._EF, lag + 1, cal);
+          constraintDate = addWorkingDays(pred._EF, lag + 1, cal);
       }
 
-      if (es === null || constraint > es) es = constraint;
+      if (es === null || constraintDate > es || (constraintDate === es && constraintHrs > startHrs)) {
+        es = constraintDate;
+        startHrs = constraintHrs;
+      }
     }
 
-    // Fallback: if no valid predecessor constraints resolved, use project start
     if (!es) es = projectStart;
 
     t._ES = es;
-    // FIX: Inclusive duration model — EF = ES + (dur-1) working days
-    // dur=0 (milestone): EF = ES  |  dur=1: EF = ES  |  dur=5 Mon: EF = Fri
-    t._EF = addWorkingDays(es, Math.max(0, dur - 1), cal);
+    t._startHrs = startHrs;
+    if (dHrs <= 0) {
+      t._EF = es;
+      t._endHrs = startHrs;
+    } else {
+      const end = walkHours(es, startHrs, dHrs);
+      t._EF = end.date;
+      t._endHrs = end.offset;
+    }
     map.set(id, t);
   }
 
