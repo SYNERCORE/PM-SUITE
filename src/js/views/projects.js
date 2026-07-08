@@ -1464,7 +1464,10 @@ function renderDetailTasks(){
   <div class="card">
     <div class="section-header" style="margin-bottom:12px">
       <div class="section-title">Task List — ${p?.name||detailProjectId}</div>
-      <button class="btn btn-primary btn-sm" onclick="taskProjectFilter='${detailProjectId}';showTaskForm(null,'todo')"><i class="fas fa-plus"></i> Add Task</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-secondary btn-sm" onclick="showImportFromProject('${detailProjectId}')"><i class="fas fa-copy"></i> Import from Project</button>
+        <button class="btn btn-primary btn-sm" onclick="taskProjectFilter='${detailProjectId}';showTaskForm(null,'todo')"><i class="fas fa-plus"></i> Add Task</button>
+      </div>
     </div>
     <div class="table-wrap"><table>
       <thead><tr><th>WBS</th><th>Task Name</th><th>Assignee</th><th>Dept</th><th>Start</th><th>End</th><th>Dur (d)</th><th>Planned Hrs</th><th>Actual Hrs</th><th>Progress</th><th>Status</th><th>Priority</th><th>Milestone</th><th></th></tr></thead>

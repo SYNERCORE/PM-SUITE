@@ -10181,7 +10181,10 @@ function renderDetailTasks(){
   <div class="card">
     <div class="section-header" style="margin-bottom:12px">
       <div class="section-title">Task List — ${p?.name||detailProjectId}</div>
-      <button class="btn btn-primary btn-sm" onclick="taskProjectFilter='${detailProjectId}';showTaskForm(null,'todo')"><i class="fas fa-plus"></i> Add Task</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-secondary btn-sm" onclick="showImportFromProject('${detailProjectId}')"><i class="fas fa-copy"></i> Import from Project</button>
+        <button class="btn btn-primary btn-sm" onclick="taskProjectFilter='${detailProjectId}';showTaskForm(null,'todo')"><i class="fas fa-plus"></i> Add Task</button>
+      </div>
     </div>
     <div class="table-wrap"><table>
       <thead><tr><th>WBS</th><th>Task Name</th><th>Assignee</th><th>Dept</th><th>Start</th><th>End</th><th>Dur (d)</th><th>Planned Hrs</th><th>Actual Hrs</th><th>Progress</th><th>Status</th><th>Priority</th><th>Milestone</th><th></th></tr></thead>
@@ -14553,6 +14556,125 @@ function _tFormRecalc(source){
       else{const d=diffWD(s,e)+1;durEl.value=d>=1?d:1;}
     }
   }
+}
+
+// ── Task Import ─────────────────────────────────────────────
+// Copy tasks from another project into the current one. Useful when a
+// repeating project template lives in an old job — pick the source, pick
+// the tasks, choose a start date to rebase timelines against, and go.
+let _taskImportTargetProj='';
+function showImportFromProject(targetProjId){
+  _taskImportTargetProj=targetProjId;
+  const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.id!==targetProjId);
+  if(!projects.length){showToast('No other projects to import from','error');return;}
+  const today=new Date().toISOString().slice(0,10);
+  let m=$('#taskImportModal');
+  if(!m){
+    m=document.createElement('div');
+    m.id='taskImportModal';
+    m.className='modal-overlay';
+    m.innerHTML=`<div class="modal" style="width:760px;max-width:96vw"><div class="modal-header"><h3 class="modal-title"><i class="fas fa-file-import"></i> Import Tasks</h3><button class="btn btn-secondary btn-sm btn-icon" onclick="$('#taskImportModal')?.classList.remove('open')"><i class="fas fa-times"></i></button></div><div class="modal-body" id="taskImportBody"></div></div>`;
+    document.body.appendChild(m);
+  }
+  $('#taskImportBody').innerHTML=`
+    <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div class="form-group"><label class="form-label">Source Project</label>
+        <select class="form-select" id="tiSrc" onchange="_tiRefreshList()">
+          <option value="">— Select project —</option>
+          ${projects.map(p=>`<option value="${p.id}">${p.id}${p.name?' — '+p.name.substring(0,40):''}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label class="form-label">Rebase Start Date <span style="font-size:10px;color:var(--text-muted)">— earliest task starts here</span></label>
+        <input class="form-input" type="date" id="tiStart" value="${today}"></div>
+    </div>
+    <div style="display:flex;gap:10px;font-size:11px;color:var(--text-secondary);margin-bottom:8px">
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="tiKeepPreds" checked> Copy predecessors</label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="tiKeepAssign"> Copy assignees</label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="tiResetProgress" checked> Reset progress & status</label>
+    </div>
+    <div id="tiListWrap" style="max-height:340px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:6px 8px;background:var(--bg-secondary)">
+      <div style="font-size:11px;color:var(--text-muted);padding:20px;text-align:center">Select a source project to see its tasks.</div>
+    </div>
+    <div class="modal-footer" style="margin-top:12px">
+      <button class="btn btn-secondary" onclick="$('#taskImportModal')?.classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" onclick="_tiApply()"><i class="fas fa-check"></i> Import Selected</button>
+    </div>`;
+  m.classList.add('open');
+}
+
+function _tiRefreshList(){
+  const srcId=$('#tiSrc')?.value;
+  const wrap=$('#tiListWrap');if(!wrap)return;
+  if(!srcId){wrap.innerHTML=`<div style="font-size:11px;color:var(--text-muted);padding:20px;text-align:center">Select a source project to see its tasks.</div>`;return;}
+  const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===srcId&&!t._deleted);
+  if(!tasks.length){wrap.innerHTML=`<div style="font-size:11px;color:var(--text-muted);padding:20px;text-align:center">No tasks in that project.</div>`;return;}
+  const ordered=typeof _orderTasksHier==='function'?_orderTasksHier(tasks):tasks.map(t=>({t,depth:0}));
+  wrap.innerHTML=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0 8px;border-bottom:1px solid var(--border);margin-bottom:6px">
+    <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px"><input type="checkbox" id="tiAll" checked onchange="document.querySelectorAll('.ti-chk').forEach(c=>c.checked=this.checked)"> Select all (${tasks.length})</label>
+  </div>`+
+  ordered.map(({t,depth})=>`<label style="display:flex;align-items:center;gap:8px;padding:4px 4px;border-bottom:1px solid var(--border-subtle);cursor:pointer">
+    <input type="checkbox" class="ti-chk" data-id="${t.id}" checked>
+    <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);min-width:50px">${t.wbs||t.id}</span>
+    <span style="font-size:11px;padding-left:${depth*14}px">${depth>0?'↳ ':''}${(t.name||'').substring(0,80)}</span>
+    <span style="margin-left:auto;font-size:10px;color:var(--text-muted);font-family:var(--font-mono)">${t.startDate||''}${t.endDate&&t.endDate!==t.startDate?' → '+t.endDate:''}</span>
+  </label>`).join('');
+}
+
+function _tiApply(){
+  const srcId=$('#tiSrc')?.value; if(!srcId){showToast('Pick a source project','error');return;}
+  const rebase=$('#tiStart')?.value; if(!rebase){showToast('Pick a rebase start date','error');return;}
+  const keepPreds=$('#tiKeepPreds')?.checked;
+  const keepAssign=$('#tiKeepAssign')?.checked;
+  const resetProgress=$('#tiResetProgress')?.checked;
+  const selectedIds=new Set([...document.querySelectorAll('.ti-chk')].filter(c=>c.checked).map(c=>c.dataset.id));
+  if(!selectedIds.size){showToast('Select at least one task','error');return;}
+  const src=(AppState.data.tasks||[]).filter(t=>t.projectId===srcId&&!t._deleted&&selectedIds.has(t.id));
+
+  // Compute offset in calendar days from earliest selected start to rebase date
+  const starts=src.map(t=>t.startDate).filter(Boolean).sort();
+  const anchor=starts[0]||rebase;
+  const msPerDay=86400000;
+  const offsetDays=Math.round((new Date(rebase+'T00:00:00')-new Date(anchor+'T00:00:00'))/msPerDay);
+  const shift=(d)=>{if(!d)return d;const nd=new Date(d+'T00:00:00');nd.setDate(nd.getDate()+offsetDays);return nd.getFullYear()+'-'+String(nd.getMonth()+1).padStart(2,'0')+'-'+String(nd.getDate()).padStart(2,'0');};
+
+  // ID remap so parent/predecessor references stay internally consistent
+  const idMap={};
+  src.forEach(t=>{idMap[t.id]='TSK-'+(Date.now()%100000+Math.floor(Math.random()*1000)).toString().padStart(5,'0');});
+  const remapPred=(str)=>{
+    if(!str||!keepPreds)return '';
+    return str.split(',').map(s=>s.trim()).filter(Boolean).map(entry=>{
+      const m=entry.match(/^([A-Za-z0-9_-]*[0-9])(\s*(?:FS|SS|FF|SF)?\s*[+-]?\d*d?)?$/i);
+      if(!m)return entry;
+      const oldId=m[1];const rest=m[2]||'';
+      return (idMap[oldId]||oldId)+rest;
+    }).join(', ');
+  };
+
+  const newTasks=src.map(t=>({
+    ...t,
+    id:idMap[t.id],
+    projectId:_taskImportTargetProj,
+    startDate:shift(t.startDate),
+    endDate:shift(t.endDate),
+    parentId:t.parentId?(idMap[t.parentId]||''):'',
+    predecessors:remapPred(t.predecessors),
+    assignee:keepAssign?t.assignee:'',
+    progress:resetProgress?0:(t.progress||0),
+    status:resetProgress?'todo':(t.status||'todo'),
+    actualHrs:resetProgress?0:(t.actualHrs||0),
+    wbs:'',
+    createdAt:new Date().toISOString()
+  }));
+
+  AppState.data.tasks.push(...newTasks);
+  if(typeof _recalcAllWbs==='function')_recalcAllWbs(_taskImportTargetProj);
+  if(typeof _applyCPMDates==='function')_applyCPMDates(_taskImportTargetProj);
+  if(typeof _applySummaryRollups==='function')_applySummaryRollups(_taskImportTargetProj);
+  if(typeof _recalcProjectProgress==='function')_recalcProjectProgress(_taskImportTargetProj);
+  AppState.save();
+  $('#taskImportModal')?.classList.remove('open');
+  showToast(`Imported ${newTasks.length} task${newTasks.length===1?'':'s'}`,'success');
+  if(typeof renderDetailTasks==='function'&&typeof detailProjectId!=='undefined'&&detailProjectId===_taskImportTargetProj)renderDetailTasks();
+  else if(typeof renderTaskView==='function')renderTaskView();
 }
 
 function showPredPicker(currentTaskId){
