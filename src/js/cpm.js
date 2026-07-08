@@ -193,12 +193,13 @@ function runFullCPM(tasks, project) {
       switch (p.type) {
         case 'FS': {
           const predEndHrs = pred._endHrs ?? hpd;
-          // Same-day fractional chaining only when BOTH the predecessor tail
-          // and the successor fit within one day — a whole-day successor should
-          // start on the next calendar day even if pred ends mid-day.
-          const succSubDay = dHrs > 0 && dHrs < hpd - 1e-9;
+          // Chain within the predecessor's remaining hours only when BOTH the
+          // predecessor tail is partial AND the successor has a fractional
+          // component (dur is not a whole number of days). Whole-day
+          // successors snap to the next calendar day so a 1-day dur stays 1.
+          const succHasFraction = dHrs > 0 && (dHrs % hpd) > 1e-6;
           const predPartial = predEndHrs < hpd - 1e-9;
-          if (lag === 0 && predPartial && succSubDay) {
+          if (lag === 0 && predPartial && succHasFraction) {
             constraintDate = pred._EF;
             constraintHrs = predEndHrs;
           } else {
