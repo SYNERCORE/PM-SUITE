@@ -1343,7 +1343,7 @@ try{
 let mlTab='all', mlSearch='', mlStatusFilter='all', mlProjectFilter='all';
 let procTab='list', procSearch='', procStatusFilter='all', procProjFilter='all';
 let detailProjectId=null, detailTab='overview';
-let docSearch='', docStatusFilter='all', docProjFilter='all', docCatFilter='all';
+let docSearch='', docStatusFilter='all', docProjFilter='all', docCatFilter='all', docGroupBy='status', docCollapsed={};
 let ganttZoom=100, ganttFrom='', ganttTo='', ganttProjFilter='all', ganttStatusFilter='all';
 
 
@@ -19260,6 +19260,9 @@ function renderDocuments(){
       <option value="all">All Categories</option>
       ${cats.map(c=>`<option value="${c}" ${docCatFilter===c?'selected':''}>${c}</option>`).join('')}
     </select>
+    <select class="form-select" style="height:32px;width:180px" title="Group documents by..." onchange="docGroupBy=this.value;docCollapsed={};renderDocTable()">
+      ${[['status','Group: Status'],['project','Group: Project'],['projStatus','Group: Project → Status'],['none','No grouping']].map(([v,l])=>`<option value="${v}" ${docGroupBy===v?'selected':''}>${l}</option>`).join('')}
+    </select>
     <button class="btn btn-secondary btn-sm" onclick="docSearch='';docStatusFilter='all';docProjFilter='all';docCatFilter='all';$('#docSearchInput').value='';renderDocTable()">
       <i class="fas fa-times"></i> Clear
     </button>
@@ -19290,6 +19293,108 @@ function renderDocTable(){
   if(!el)return;
   if(!docs.length){el.innerHTML=`<div class="empty-state" style="padding:30px"><i class="fas fa-folder-open" style="font-size:30px;margin-bottom:10px;display:block;opacity:.3"></i><p>No documents found.</p><button class="btn btn-primary" onclick="uploadDoc()"><i class="fas fa-upload"></i> Upload Document</button></div>`;return;}
 
+  const projMap=Object.fromEntries((AppState.data.projects||[]).map(p=>[p.id,p]));
+  const statusLabel=s=>({approved:'Approved',review:'In Review',issued:'Issued',draft:'Draft',superseded:'Superseded'})[s]||(s||'Unknown');
+  const statusColor=s=>({approved:'#3fb950',review:'#f0a450',issued:'#bc8cff',draft:'var(--text-muted)',superseded:'#f04040'})[s]||'var(--text-muted)';
+  const statusOrder=['approved','review','issued','draft','superseded'];
+
+  const buildGroups=()=>{
+    if(docGroupBy==='none')return [{key:'all',label:'All Documents ('+docs.length+')',docs}];
+    if(docGroupBy==='status'){
+      const byS={};docs.forEach(d=>{const s=d.status||'draft';(byS[s]=byS[s]||[]).push(d);});
+      return statusOrder.filter(s=>byS[s]).concat(Object.keys(byS).filter(s=>!statusOrder.includes(s)))
+        .map(s=>({key:'s:'+s,label:statusLabel(s)+' ('+byS[s].length+')',color:statusColor(s),docs:byS[s]}));
+    }
+    if(docGroupBy==='project'){
+      const byP={};docs.forEach(d=>{const p=d.projectId||'—';(byP[p]=byP[p]||[]).push(d);});
+      return Object.keys(byP).sort().map(p=>({key:'p:'+p,label:(projMap[p]?.name?p+' — '+projMap[p].name.substring(0,40):p)+' ('+byP[p].length+')',docs:byP[p]}));
+    }
+    if(docGroupBy==='projStatus'){
+      const byP={};docs.forEach(d=>{const p=d.projectId||'—';(byP[p]=byP[p]||[]).push(d);});
+      return Object.keys(byP).sort().map(p=>{
+        const byS={};byP[p].forEach(d=>{const s=d.status||'draft';(byS[s]=byS[s]||[]).push(d);});
+        const subGroups=statusOrder.filter(s=>byS[s]).concat(Object.keys(byS).filter(s=>!statusOrder.includes(s)))
+          .map(s=>({key:'ps:'+p+':'+s,label:statusLabel(s)+' ('+byS[s].length+')',color:statusColor(s),docs:byS[s]}));
+        return {key:'p:'+p,label:(projMap[p]?.name?p+' — '+projMap[p].name.substring(0,40):p)+' ('+byP[p].length+')',subGroups};
+      });
+    }
+    return [{key:'all',label:'All',docs}];
+  };
+
+  const rowHtml=(d)=>{
+      const ext=(d.fileType||d.name?.split('.').pop()||'').toLowerCase();
+      const icon=iconMap[ext]||'fa-file-alt';
+      const color=colorMap[ext]||'var(--text-secondary)';
+      const hasFile=!!(d.fileData||d.fileUrl||d.fileWebUrl||(d.spDriveId&&d.spItemId));
+      const isLegacy=!!d.legacyFile;
+      const isAdmin=(_currentUserProfile&&_currentUserProfile.isAdmin)||false;
+      const hasPendingDeletion=!!d.deletionRequested;
+      return`<tr onclick="showDocDetail('${d.id}')" style="cursor:pointer${hasPendingDeletion?';background:rgba(240,164,80,.05)':''}">
+        <td style="font-family:var(--font-mono);font-size:10px;font-weight:700;color:var(--accent-blue)">${d.number||d.id}</td>
+        <td><span class="badge badge-gray">Rev ${d.rev||'A'}</span></td>
+        <td>
+          <div style="display:flex;align-items:center;gap:8px">
+            <i class="fas ${icon}" style="color:${color};font-size:16px;flex-shrink:0"></i>
+            <div>
+              <div style="font-size:12px;font-weight:500">${d.name}</div>
+              ${d.description?`<div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">${d.description}</div>`:''}
+            </div>
+          </div>
+        </td>
+        <td><span class="badge badge-blue">${d.projectId}</span></td>
+        <td><span class="badge badge-purple">${d.category}</span></td>
+        <td>
+          <div style="display:flex;align-items:center;gap:5px">
+            ${d.author?`<div style="width:22px;height:22px;border-radius:50%;background:${stringToColor(d.author)};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff">${d.author.charAt(0).toUpperCase()}</div>`:''}
+            <span style="font-size:11px">${d.author||'—'}</span>
+          </div>
+        </td>
+        <td style="font-size:11px;font-family:var(--font-mono)">${d.date||'—'}</td>
+        <td style="font-size:11px;color:var(--text-secondary)">${d.size||'—'}</td>
+        <td onclick="event.stopPropagation()">${sBadge(d.status)}${hasPendingDeletion?`<div style="font-size:9px;color:var(--accent-amber);margin-top:3px"><i class="fas fa-clock" style="margin-right:3px"></i>Delete pending</div>`:''}${isLegacy?`<div style="font-size:9px;color:var(--accent-amber);margin-top:3px"><i class="fas fa-exclamation-triangle" style="margin-right:3px"></i>Re-upload needed</div>`:''}</td>
+        <td onclick="event.stopPropagation()">
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm btn-icon" onclick="showDocDetail('${d.id}')" title="Edit details"><i class="fas fa-edit"></i></button>
+            ${hasFile?`
+              <button class="btn btn-success btn-sm btn-icon" onclick="downloadDoc('${d.id}')" title="Download"><i class="fas fa-download"></i></button>
+              <button class="btn btn-secondary btn-sm btn-icon" onclick="viewDoc('${d.id}')" title="View file"><i class="fas fa-eye"></i></button>
+            `:isLegacy?`
+              <button class="btn btn-warning btn-sm btn-icon" onclick="attachFileToDoc('${d.id}')" title="Re-upload file (legacy)"><i class="fas fa-cloud-upload-alt"></i></button>
+            `:`
+              <button class="btn btn-secondary btn-sm btn-icon" onclick="attachFileToDoc('${d.id}')" title="Attach file"><i class="fas fa-paperclip"></i></button>
+            `}
+            ${isAdmin?`
+              <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDoc('${d.id}')" title="Delete document (Admin)"><i class="fas fa-trash"></i></button>
+            `:hasPendingDeletion?`
+              <button class="btn btn-warning btn-sm btn-icon" onclick="cancelDeletionRequest('${d.id}')" title="Cancel deletion request"><i class="fas fa-undo"></i></button>
+            `:`
+              <button class="btn btn-secondary btn-sm btn-icon" onclick="requestDocDeletion('${d.id}')" title="Request deletion"><i class="fas fa-flag"></i></button>
+            `}
+          </div>
+        </td>
+      </tr>`;
+  };
+
+  const tableFor=(rows)=>`<div class="table-wrap"><table>
+    <thead><tr><th>Doc No.</th><th>Rev</th><th>Document Name</th><th>Project</th><th>Category</th><th>Author</th><th>Date</th><th>Size</th><th>Status</th><th style="min-width:120px">Actions</th></tr></thead>
+    <tbody>${rows.map(rowHtml).join('')}</tbody>
+  </table></div>`;
+
+  const groupCard=(g,depth)=>{
+    const collapsed=!!docCollapsed[g.key];
+    const bar=`<div onclick="docCollapsed['${g.key}']=!docCollapsed['${g.key}'];renderDocTable()" style="cursor:pointer;padding:8px 12px;background:var(--bg-secondary);border-radius:6px;display:flex;align-items:center;gap:8px;margin:${depth?'8px 0 6px':'12px 0 6px'};font-size:${depth?'12px':'13px'};font-weight:600${g.color?';border-left:3px solid '+g.color:''}">
+      <i class="fas fa-chevron-${collapsed?'right':'down'}" style="font-size:10px;color:var(--text-muted)"></i>
+      <span>${g.label}</span></div>`;
+    if(collapsed) return bar;
+    if(g.subGroups) return bar+'<div style="padding-left:14px">'+g.subGroups.map(sg=>groupCard(sg,depth+1)).join('')+'</div>';
+    return bar+tableFor(g.docs);
+  };
+
+  if(docGroupBy==='none'){el.innerHTML=tableFor(_pgSlice('documents',docs));return;}
+  el.innerHTML=buildGroups().map(g=>groupCard(g,0)).join('');
+  return;
+
+  // Legacy unreachable path kept for reference:
   el.innerHTML=`<div class="table-wrap"><table>
     <thead><tr>
       <th>Doc No.</th><th>Rev</th><th>Document Name</th><th>Project</th>

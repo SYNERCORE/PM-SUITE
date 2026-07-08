@@ -807,7 +807,7 @@ try{
 let mlTab='all', mlSearch='', mlStatusFilter='all', mlProjectFilter='all';
 let procTab='list', procSearch='', procStatusFilter='all', procProjFilter='all';
 let detailProjectId=null, detailTab='overview';
-let docSearch='', docStatusFilter='all', docProjFilter='all', docCatFilter='all';
+let docSearch='', docStatusFilter='all', docProjFilter='all', docCatFilter='all', docGroupBy='status', docCollapsed={};
 let ganttZoom=100, ganttFrom='', ganttTo='', ganttProjFilter='all', ganttStatusFilter='all';
 
 
