@@ -288,11 +288,12 @@ function renderDailyMeeting() {
       const viewDate = new Date(_dmViewDate);
       const completionDate = p.status === 'completed' && p.completedDate ? new Date(p.completedDate) : null;
       const durationActualEnd = completionDate || (p.status === 'completed' ? endDate : viewDate);
+      // Inclusive day count: start == end → 1 day, not 0
       const durActual = startDate && durationActualEnd
-        ? Math.max(0, Math.ceil((durationActualEnd - startDate) / (1000 * 60 * 60 * 24)))
+        ? Math.max(0, Math.ceil((durationActualEnd - startDate) / (1000 * 60 * 60 * 24)) + 1)
         : '—';
       const durPlan = startDate && endDate
-        ? Math.max(0, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)))
+        ? Math.max(0, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1)
         : '—';
 
       const statusColors = {
