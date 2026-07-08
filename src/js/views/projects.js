@@ -1,7 +1,4 @@
 function renderProjects() {
-  // If we arrived here via the sidebar (not showProjectDetail), drop the
-  // pinned detailProjectId so the master list actually shows.
-  if (detailProjectId && !window._openingProjectDetail) { detailProjectId = null; }
   if (detailProjectId) { renderProjectDetail(); return; }
   const el = $('#projects');
   const totalProjects = (AppState.data.projects||[]).filter(p => p && !p._deleted && p.status !== 'prospect').length;
@@ -701,9 +698,7 @@ function showProjectDetail(id){
 if (typeof markRecordEditing === 'function') markRecordEditing('projects', id);
   detailProjectId=id;
   detailTab='overview';
-  window._openingProjectDetail=true;
   navigate('projects');
-  window._openingProjectDetail=false;
   renderProjectDetail();
 }
 

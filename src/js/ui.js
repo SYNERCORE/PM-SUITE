@@ -22,10 +22,18 @@ risks:(AppState.data.risks||[]).filter(r=>r.status==='active').length,
 approvals:(typeof wfPendingForMe==='function'?wfPendingForMe().length:0)}[item.id];
 if(item.id==='workflows'&&!_isAdm)return; // Workflow Editor is admin-only
 if(!_isAdm&&(_userPerms[item.id]==='none'))return; // no access
-html+=`<div class="nav-item ${AppState.currentPage===item.id?'active':''}" onclick="navigate('${item.id}')" id="nav-${item.id}">
+html+=`<div class="nav-item ${AppState.currentPage===item.id?'active':''}" onclick="_navFromSidebar('${item.id}')" id="nav-${item.id}">
 <span class="nav-icon"><i class="${item.icon}"></i></span><span class="nav-label">${item.label}</span>
 ${badge?`<span class="nav-badge">${badge}</span>`:''}</div>`;});
 $('#sidebarNav').innerHTML=html;}
+
+// Sidebar-triggered navigation: drops any pinned detail view so clicking
+// "Projects" returns to the master list even while a project is open.
+// Programmatic navigate() calls (e.g. from SP sync re-render) do NOT clear it.
+function _navFromSidebar(pid){
+  if(pid==='projects' && typeof detailProjectId!=='undefined' && detailProjectId) detailProjectId=null;
+  navigate(pid);
+}
 
 function navigate(pid){
 AppState.currentPage=pid;

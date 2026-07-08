@@ -1974,10 +1974,18 @@ risks:(AppState.data.risks||[]).filter(r=>r.status==='active').length,
 approvals:(typeof wfPendingForMe==='function'?wfPendingForMe().length:0)}[item.id];
 if(item.id==='workflows'&&!_isAdm)return; // Workflow Editor is admin-only
 if(!_isAdm&&(_userPerms[item.id]==='none'))return; // no access
-html+=`<div class="nav-item ${AppState.currentPage===item.id?'active':''}" onclick="navigate('${item.id}')" id="nav-${item.id}">
+html+=`<div class="nav-item ${AppState.currentPage===item.id?'active':''}" onclick="_navFromSidebar('${item.id}')" id="nav-${item.id}">
 <span class="nav-icon"><i class="${item.icon}"></i></span><span class="nav-label">${item.label}</span>
 ${badge?`<span class="nav-badge">${badge}</span>`:''}</div>`;});
 $('#sidebarNav').innerHTML=html;}
+
+// Sidebar-triggered navigation: drops any pinned detail view so clicking
+// "Projects" returns to the master list even while a project is open.
+// Programmatic navigate() calls (e.g. from SP sync re-render) do NOT clear it.
+function _navFromSidebar(pid){
+  if(pid==='projects' && typeof detailProjectId!=='undefined' && detailProjectId) detailProjectId=null;
+  navigate(pid);
+}
 
 function navigate(pid){
 AppState.currentPage=pid;
@@ -8716,9 +8724,6 @@ function _groupProjects(projects) {
 </script>
 <script>
 function renderProjects() {
-  // If we arrived here via the sidebar (not showProjectDetail), drop the
-  // pinned detailProjectId so the master list actually shows.
-  if (detailProjectId && !window._openingProjectDetail) { detailProjectId = null; }
   if (detailProjectId) { renderProjectDetail(); return; }
   const el = $('#projects');
   const totalProjects = (AppState.data.projects||[]).filter(p => p && !p._deleted && p.status !== 'prospect').length;
@@ -9418,9 +9423,7 @@ function showProjectDetail(id){
 if (typeof markRecordEditing === 'function') markRecordEditing('projects', id);
   detailProjectId=id;
   detailTab='overview';
-  window._openingProjectDetail=true;
   navigate('projects');
-  window._openingProjectDetail=false;
   renderProjectDetail();
 }
 
