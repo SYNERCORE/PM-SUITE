@@ -45,7 +45,7 @@ function renderDocuments(){
       ${cats.map(c=>`<option value="${c}" ${docCatFilter===c?'selected':''}>${c}</option>`).join('')}
     </select>
     <select class="form-select" style="height:32px;width:180px" title="Group documents by..." onchange="docGroupBy=this.value;docCollapsed={};renderDocTable()">
-      ${[['status','Group: Status'],['project','Group: Project'],['projStatus','Group: Project → Status'],['none','No grouping']].map(([v,l])=>`<option value="${v}" ${docGroupBy===v?'selected':''}>${l}</option>`).join('')}
+      ${[['status','Group: Status'],['project','Group: Project'],['projStatus','Group: Project → Status'],['projStateProjStatus','Group: Project Status → Project → Doc Status'],['none','No grouping']].map(([v,l])=>`<option value="${v}" ${docGroupBy===v?'selected':''}>${l}</option>`).join('')}
     </select>
     <button class="btn btn-secondary btn-sm" onclick="docSearch='';docStatusFilter='all';docProjFilter='all';docCatFilter='all';$('#docSearchInput').value='';renderDocTable()">
       <i class="fas fa-times"></i> Clear
@@ -100,6 +100,25 @@ function renderDocTable(){
         const subGroups=statusOrder.filter(s=>byS[s]).concat(Object.keys(byS).filter(s=>!statusOrder.includes(s)))
           .map(s=>({key:'ps:'+p+':'+s,label:statusLabel(s)+' ('+byS[s].length+')',color:statusColor(s),docs:byS[s]}));
         return {key:'p:'+p,label:(projMap[p]?.name?p+' — '+projMap[p].name.substring(0,40):p)+' ('+byP[p].length+')',subGroups};
+      });
+    }
+    if(docGroupBy==='projStateProjStatus'){
+      // Project Status → Project → Doc Status
+      const projStatusOrder=['active','planned','on-hold','completed','archived'];
+      const projStatusLabel=ps=>(typeof _PROJ_STATUS_LABELS!=='undefined'&&_PROJ_STATUS_LABELS[ps])||(ps?ps.toUpperCase():'UNSPECIFIED');
+      const projStatusColor=ps=>(typeof _PROJ_STATUS_COLORS!=='undefined'&&_PROJ_STATUS_COLORS[ps])||'var(--text-muted)';
+      const byPs={};
+      docs.forEach(d=>{const ps=(projMap[d.projectId]?.status)||'unspecified';(byPs[ps]=byPs[ps]||[]).push(d);});
+      return projStatusOrder.filter(ps=>byPs[ps]).concat(Object.keys(byPs).filter(ps=>!projStatusOrder.includes(ps))).map(ps=>{
+        const psDocs=byPs[ps];
+        const byP={};psDocs.forEach(d=>{const p=d.projectId||'—';(byP[p]=byP[p]||[]).push(d);});
+        const projGroups=Object.keys(byP).sort().map(p=>{
+          const byS={};byP[p].forEach(d=>{const s=d.status||'draft';(byS[s]=byS[s]||[]).push(d);});
+          const statusGroups=statusOrder.filter(s=>byS[s]).concat(Object.keys(byS).filter(s=>!statusOrder.includes(s)))
+            .map(s=>({key:'psps:'+ps+':'+p+':'+s,label:statusLabel(s)+' ('+byS[s].length+')',color:statusColor(s),docs:byS[s]}));
+          return {key:'psp:'+ps+':'+p,label:(projMap[p]?.name?p+' — '+projMap[p].name.substring(0,40):p)+' ('+byP[p].length+')',subGroups:statusGroups};
+        });
+        return {key:'psg:'+ps,label:projStatusLabel(ps)+' ('+psDocs.length+')',color:projStatusColor(ps),subGroups:projGroups};
       });
     }
     return [{key:'all',label:'All',docs}];
