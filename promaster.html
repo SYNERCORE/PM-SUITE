@@ -9501,7 +9501,15 @@ function renderProjectDetail(){
         ['fa-calendar-alt','Start Date',p.startDate],
         ['fa-calendar-check','End Date',p.endDate],
         ['fa-dollar-sign','Contract Budget',fmtCur(p.budget)],
-        ['fa-clock','Days Remaining',dl<0?'<span style="color:var(--accent-red)">'+Math.abs(dl)+'d overdue</span>':dl+'d left'],
+        (p.status==='completed'&&p.completedDate&&p.endDate)?(function(){
+          const diff=(typeof daysBetween==='function')?daysBetween(p.completedDate,p.endDate):Math.round((new Date(p.endDate)-new Date(p.completedDate))/86400000);
+          // diff > 0 → finished BEFORE planned end (ahead of schedule)
+          // diff < 0 → finished AFTER planned end (delayed)
+          // diff = 0 → on time
+          if(diff>0)return['fa-check-circle','Schedule Variance','<span style="color:#3fb950">'+diff+'d ahead</span><br><span style="font-size:9px;color:rgba(255,255,255,.5);font-weight:400">Completed '+p.completedDate+'</span>'];
+          if(diff<0)return['fa-exclamation-triangle','Schedule Variance','<span style="color:var(--accent-red)">'+Math.abs(diff)+'d delayed</span><br><span style="font-size:9px;color:rgba(255,255,255,.5);font-weight:400">Completed '+p.completedDate+'</span>'];
+          return['fa-check','Schedule Variance','<span style="color:#3fb950">On time</span><br><span style="font-size:9px;color:rgba(255,255,255,.5);font-weight:400">Completed '+p.completedDate+'</span>'];
+        })():['fa-clock','Days Remaining',dl<0?'<span style="color:var(--accent-red)">'+Math.abs(dl)+'d overdue</span>':dl+'d left'],
       ].map(([ic,label,val])=>`
       <div>
         <div style="font-size:10px;color:rgba(255,255,255,.5);margin-bottom:3px"><i class="fas ${ic}" style="margin-right:4px"></i>${label}</div>
@@ -10157,7 +10165,14 @@ function saveDetailOverview(){
   p.discipline=$('#dp_disc').value;
   p.phase=$('#dp_phase').value;
   p.riskLevel=$('#dp_risk').value;
+  const _prevStatus=p.status;
   p.status=$('#dp_status').value;
+  if(p.status==='completed'&&_prevStatus!=='completed'&&!p.completedDate){
+    p.completedDate=new Date().toISOString().slice(0,10);
+  } else if(p.status!=='completed'){
+    // Reopening a project — drop the recorded completion date
+    p.completedDate='';
+  }
   p.priority=$('#dp_priority').value;
   p.startDate=$('#dp_start').value;
   p.endDate=$('#dp_end').value;
