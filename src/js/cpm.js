@@ -193,8 +193,12 @@ function runFullCPM(tasks, project) {
       switch (p.type) {
         case 'FS': {
           const predEndHrs = pred._endHrs ?? hpd;
-          // Same-day chaining: no lag AND predecessor didn't consume the full day
-          if (lag === 0 && predEndHrs < hpd - 1e-9) {
+          // Same-day fractional chaining only when BOTH the predecessor tail
+          // and the successor fit within one day — a whole-day successor should
+          // start on the next calendar day even if pred ends mid-day.
+          const succSubDay = dHrs > 0 && dHrs < hpd - 1e-9;
+          const predPartial = predEndHrs < hpd - 1e-9;
+          if (lag === 0 && predPartial && succSubDay) {
             constraintDate = pred._EF;
             constraintHrs = predEndHrs;
           } else {
@@ -204,8 +208,10 @@ function runFullCPM(tasks, project) {
           break;
         }
         case 'SS':
+          // SS aligns starts by calendar day; ignore predecessor's hour offset
+          // so a whole-day successor doesn't inherit a fractional startHrs.
           constraintDate = addWorkingDays(pred._ES, lag, cal);
-          constraintHrs = pred._startHrs ?? 0;
+          constraintHrs = 0;
           break;
         case 'FF':
           constraintDate = addWorkingDays(addWorkingDays(pred._EF, lag, cal), -Math.max(0, getDurDays(t) - 1), cal);
