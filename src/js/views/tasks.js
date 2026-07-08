@@ -282,7 +282,7 @@ const t={
   assignee:$('#tAss').value,dept:$('#tDept').value,
   startDate:_isMileSave?$('#tStart').value:$('#tStart').value,
   endDate:_isMileSave?$('#tStart').value:$('#tEnd').value, // milestone: end=start
-  plannedHrs:parseFloat($('#tPH').value)||0,actualHrs:parseFloat($('#tAH').value)||0,
+  plannedHrs:(parseFloat($('#tPH').value)||0)||(_isMileSave?0:(_tDurDays>0?_tDurDays*_tHPD:0)),actualHrs:parseFloat($('#tAH').value)||0,
   status:$('#tStat').value,priority:$('#tPri').value,
   progress:parseInt($('#tProg').value)||0,
   milestone:_isMileSave,
@@ -438,6 +438,14 @@ function _tFormRecalc(source){
 
   const s=startEl.value, e=endEl.value;
   const dur=parseFloat(durEl.value);
+
+  // Live-sync Planned Hours from duration (only if user hasn't edited it manually)
+  const phEl=$('#tPH');
+  if(phEl && !isNaN(dur) && dur>0 && (source==='dur'||source==='start'||source==='end')){
+    const hpd=_getTaskProjHPD(projId);
+    const cur=parseFloat(phEl.value)||0;
+    if(cur===0 || Math.abs(cur-dur*hpd)<hpd) phEl.value=+(dur*hpd).toFixed(2);
+  }
 
   if(source==='start'){
     // end = start + (ceil(dur)-1) working days  [inclusive model: dur<=1 → same day, 1.5 → 2 days]

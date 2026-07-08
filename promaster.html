@@ -10164,6 +10164,8 @@ function saveDetailOverview(){
 
 function renderDetailTasks(){
   if(typeof _recalcAllWbs==='function'){const pool=(AppState.data.tasks||[]).filter(t=>t.projectId===detailProjectId&&!t._deleted);if(pool.some(t=>!t.wbs)){_recalcAllWbs(detailProjectId);AppState.save();}}
+  // Backfill Planned Hrs from durationHrs when never set
+  {const hpd=(typeof _getTaskProjHPD==='function')?_getTaskProjHPD(detailProjectId):8;let dirty=false;(AppState.data.tasks||[]).filter(t=>t.projectId===detailProjectId&&!t._deleted&&!t.milestone&&t.durationHrs>0&&(!t.plannedHrs||t.plannedHrs===0)).forEach(t=>{t.plannedHrs=+t.durationHrs.toFixed(2);dirty=true;});if(dirty)AppState.save();}
   const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===detailProjectId&&!t._deleted);
   const p=(AppState.data.projects||[]).find(x=>x.id===detailProjectId);
   const done=tasks.filter(t=>t.status==='done').length;
@@ -10182,14 +10184,14 @@ function renderDetailTasks(){
       <button class="btn btn-primary btn-sm" onclick="taskProjectFilter='${detailProjectId}';showTaskForm(null,'todo')"><i class="fas fa-plus"></i> Add Task</button>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>WBS</th><th>Task Name</th><th>Assignee</th><th>Dept</th><th>Start</th><th>End</th><th>Planned Hrs</th><th>Actual Hrs</th><th>Progress</th><th>Status</th><th>Priority</th><th>Milestone</th><th></th></tr></thead>
+      <thead><tr><th>WBS</th><th>Task Name</th><th>Assignee</th><th>Dept</th><th>Start</th><th>End</th><th>Dur (d)</th><th>Planned Hrs</th><th>Actual Hrs</th><th>Progress</th><th>Status</th><th>Priority</th><th>Milestone</th><th></th></tr></thead>
       <tbody id="detailTaskBody">${renderDetailTaskRows(tasks)}</tbody>
     </table></div>
   </div>`;
 }
 
 function renderDetailTaskRows(tasks){
-  if(!tasks.length)return`<tr><td colspan="13"><div class="empty-state"><i class="fas fa-tasks"></i><p>No tasks yet. Click "Add Task" to create one.</p></div></td></tr>`;
+  if(!tasks.length)return`<tr><td colspan="14"><div class="empty-state"><i class="fas fa-tasks"></i><p>No tasks yet. Click "Add Task" to create one.</p></div></td></tr>`;
   const ordered=typeof _orderTasksHier==='function'?_orderTasksHier(tasks):tasks.map(t=>({t,depth:0}));
   return ordered.map(({t,depth})=>{const isSum=typeof _taskHasChildren==='function'&&_taskHasChildren(t.id,tasks);return`<tr>
     <td style="font-size:10px;font-family:var(--font-mono);color:var(--text-muted)">${t.wbs||t.id}</td>
@@ -10198,6 +10200,7 @@ function renderDetailTaskRows(tasks){
     <td style="font-size:11px;color:var(--text-secondary)">${t.dept}</td>
     <td style="font-size:11px;font-family:var(--font-mono)">${t.startDate}</td>
     <td style="font-size:11px;font-family:var(--font-mono);color:${isOverdue(t.endDate)&&t.status!=='done'?'var(--accent-red)':'inherit'}">${t.endDate}</td>
+    <td style="font-family:var(--font-mono);font-size:11px;text-align:center">${t.milestone?'—':(t.durationHrs?+((t.durationHrs/(_getTaskProjHPD?.(t.projectId)||8)).toFixed(2)):'')}</td>
     <td style="font-family:var(--font-mono);font-size:11px;text-align:center">${t.plannedHrs}</td>
     <td style="font-family:var(--font-mono);font-size:11px;text-align:center;color:${t.actualHrs>t.plannedHrs?'var(--accent-red)':'inherit'}">${t.actualHrs}</td>
     <td><div style="display:flex;align-items:center;gap:5px;min-width:90px"><div class="progress-bar" style="flex:1;height:5px"><div class="progress-fill" style="width:${t.progress}%;background:${pColor(t.progress)}"></div></div><span style="font-size:10px;font-family:var(--font-mono)">${t.progress}%</span></div></td>
@@ -14372,7 +14375,7 @@ const t={
   assignee:$('#tAss').value,dept:$('#tDept').value,
   startDate:_isMileSave?$('#tStart').value:$('#tStart').value,
   endDate:_isMileSave?$('#tStart').value:$('#tEnd').value, // milestone: end=start
-  plannedHrs:parseFloat($('#tPH').value)||0,actualHrs:parseFloat($('#tAH').value)||0,
+  plannedHrs:(parseFloat($('#tPH').value)||0)||(_isMileSave?0:(_tDurDays>0?_tDurDays*_tHPD:0)),actualHrs:parseFloat($('#tAH').value)||0,
   status:$('#tStat').value,priority:$('#tPri').value,
   progress:parseInt($('#tProg').value)||0,
   milestone:_isMileSave,
@@ -14528,6 +14531,14 @@ function _tFormRecalc(source){
 
   const s=startEl.value, e=endEl.value;
   const dur=parseFloat(durEl.value);
+
+  // Live-sync Planned Hours from duration (only if user hasn't edited it manually)
+  const phEl=$('#tPH');
+  if(phEl && !isNaN(dur) && dur>0 && (source==='dur'||source==='start'||source==='end')){
+    const hpd=_getTaskProjHPD(projId);
+    const cur=parseFloat(phEl.value)||0;
+    if(cur===0 || Math.abs(cur-dur*hpd)<hpd) phEl.value=+(dur*hpd).toFixed(2);
+  }
 
   if(source==='start'){
     // end = start + (ceil(dur)-1) working days  [inclusive model: dur<=1 → same day, 1.5 → 2 days]
