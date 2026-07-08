@@ -10186,7 +10186,9 @@ function renderDetailTasks(){
   <div class="card">
     <div class="section-header" style="margin-bottom:12px">
       <div class="section-title">Task List — ${p?.name||detailProjectId}</div>
-      <div style="display:flex;gap:6px">
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="exportTasksExcel('${detailProjectId}')" title="Export tasks to CSV (opens in Excel)"><i class="fas fa-file-export"></i> Export</button>
+        <button class="btn btn-secondary btn-sm" onclick="taskProjectFilter='${detailProjectId}';showTaskImport()" title="Import tasks from CSV / Excel"><i class="fas fa-file-import"></i> Import CSV</button>
         <button class="btn btn-secondary btn-sm" onclick="showImportFromProject('${detailProjectId}')"><i class="fas fa-copy"></i> Import from Project</button>
         <button class="btn btn-primary btn-sm" onclick="taskProjectFilter='${detailProjectId}';showTaskForm(null,'todo')"><i class="fas fa-plus"></i> Add Task</button>
       </div>
