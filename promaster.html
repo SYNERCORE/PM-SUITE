@@ -14196,12 +14196,24 @@ function _recalcProjectProgress(projId){
   if(!tasks.length)return;
   const roots=tasks.filter(t=>!t.parentId||!tasks.find(x=>x.id===t.parentId));
   if(!roots.length)return;
-  let wSum=0,pSum=0;
+  let wSum=0,pSum=0,plSum=0;
+  const today=new Date();today.setHours(0,0,0,0);
+  const parseYMD=(s)=>{if(!s)return null;const d=new Date(s+'T00:00:00');return isNaN(d)?null:d;};
   roots.forEach(t=>{
     const w=Math.max(1,t.durationHrs||((t.startDate&&t.endDate&&typeof daysBetween==='function')?(daysBetween(t.startDate,t.endDate)+1)*8:8));
     wSum+=w;pSum+=w*(t.progress||0);
+    // Planned % at "today" for this task: 0 before start, 100 after end, linear in between.
+    const s=parseYMD(t.startDate), e=parseYMD(t.endDate||t.startDate);
+    let taskPlanned=0;
+    if(s&&e){
+      if(today<=s)taskPlanned=0;
+      else if(today>=e)taskPlanned=100;
+      else{const span=e-s||1;taskPlanned=Math.round(((today-s)/span)*100);}
+    }
+    plSum+=w*taskPlanned;
   });
   p.progress=wSum?Math.round(pSum/wSum):0;
+  p.plannedProgress=wSum?Math.round(plSum/wSum):0;
 }
 
 function _getTaskProjHPD(projectId) {
