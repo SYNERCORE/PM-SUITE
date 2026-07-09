@@ -869,6 +869,13 @@ function _setDropdown(key,values){
   if(!AppState.data.settings)AppState.data.settings={};
   if(!AppState.data.settings.dropdowns)AppState.data.settings.dropdowns={};
   AppState.data.settings.dropdowns[key]=values;
+  // When an admin edits a dropdown, bump the local _adminPushedAt so a subsequent
+  // SP poll doesn't overwrite the just-typed change with the older remote copy.
+  // Non-admins keep _adminPushedAt untouched so their local edits will still be
+  // superseded by any real admin push from SharePoint.
+  if(typeof isAdminUser==='function' && isAdminUser()){
+    AppState.data.settings.dropdowns._adminPushedAt=Date.now();
+  }
   AppState.save();
 }
 
