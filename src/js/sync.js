@@ -1970,6 +1970,7 @@ async function connectSharePoint() {
             if (typeof migrateData === 'function') migrateData();
             if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
     try { _spFlushMergeConflicts(); } catch(e) {}
+            if (typeof _restoreDropdownBackup === 'function') _restoreDropdownBackup();
             AppState.save();
             _spOfflineQueue = false;
             localStorage.removeItem('shic_sp_offlinequeue');
@@ -2323,6 +2324,7 @@ function _spApplyRemote(data, _ts, _by) {
       }
     }
     AppState.data = Object.assign(getDefaultData(), merged);
+    if (typeof _restoreDropdownBackup === 'function') _restoreDropdownBackup();
     if (typeof migrateData === 'function') migrateData();
     if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
     try { _spFlushMergeConflicts(); } catch(e) {}

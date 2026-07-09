@@ -817,6 +817,9 @@ load(){
     }
   }
   if(!this.data)this.data=getDefaultData();
+  // Restore dedicated dropdown backup if any (survives quota trimming, stale
+  // IDB adopt, and SP overwrites that skipped the newer local edits).
+  try{if(typeof _restoreDropdownBackup==='function')_restoreDropdownBackup();}catch(e){}
 },
 ensureData(){if(!this.data)this.load();if(!this.data)this.data=getDefaultData();return this.data;}};
 // ── localStorage quota handler ──────────────────────────────
@@ -944,6 +947,7 @@ async function _idbAdoptIfFuller(){
     if(idbCount<=curCount)return false;
     AppState.data=Object.assign(getDefaultData(),parsed);
     if(typeof migrateData==='function')migrateData();
+    if(typeof _restoreDropdownBackup==='function')_restoreDropdownBackup();
     AppState.save();
     try{renderPage(AppState.currentPage||'dashboard');}catch(e){}
     try{buildSidebar();}catch(e){}
@@ -1459,6 +1463,8 @@ function _getDropdown(key){
   return(custom&&custom.length>0)?custom:[...reg.defaults];
 }
 
+const _DROPDOWN_BACKUP_KEY='shic_dropdowns_backup';
+
 function _setDropdown(key,values){
   if(!AppState.data.settings)AppState.data.settings={};
   if(!AppState.data.settings.dropdowns)AppState.data.settings.dropdowns={};
@@ -1475,7 +1481,34 @@ function _setDropdown(key,values){
     try{ localStorage.setItem('shic_sp_offlinequeue','1'); }catch(e){}
     if(typeof _spOfflineQueue!=='undefined') _spOfflineQueue=true;
   }
+  // Dedicated synchronous backup: even if the main data path (localStorage debounce,
+  // IndexedDB debounce, encryption, or SP merge) misses this edit, we can restore it
+  // from this key on next boot. Written every time, admin or not.
+  try{
+    const backup={dropdowns:AppState.data.settings.dropdowns,at:Date.now()};
+    localStorage.setItem(_DROPDOWN_BACKUP_KEY,JSON.stringify(backup));
+  }catch(e){}
   AppState.save();
+}
+
+// Restore dropdowns from the dedicated backup key when they've gone missing or
+// are older than the backup. Called on boot and after any SP pull replaces
+// AppState.data. Safe to call any time — no-ops when live data is fresher.
+function _restoreDropdownBackup(){
+  try{
+    const raw=localStorage.getItem(_DROPDOWN_BACKUP_KEY);
+    if(!raw)return;
+    const b=JSON.parse(raw);
+    if(!b||!b.dropdowns)return;
+    if(!AppState.data)AppState.data=getDefaultData();
+    if(!AppState.data.settings)AppState.data.settings={};
+    const liveAt=AppState.data.settings.dropdowns?._adminPushedAt||0;
+    const backupAt=b.dropdowns._adminPushedAt||b.at||0;
+    if(backupAt>liveAt){
+      AppState.data.settings.dropdowns=b.dropdowns;
+      try{AppState.save();}catch(e){}
+    }
+  }catch(e){}
 }
 
 function getDefaultData(){
@@ -5676,6 +5709,7 @@ async function connectSharePoint() {
             if (typeof migrateData === 'function') migrateData();
             if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
     try { _spFlushMergeConflicts(); } catch(e) {}
+            if (typeof _restoreDropdownBackup === 'function') _restoreDropdownBackup();
             AppState.save();
             _spOfflineQueue = false;
             localStorage.removeItem('shic_sp_offlinequeue');
@@ -6029,6 +6063,7 @@ function _spApplyRemote(data, _ts, _by) {
       }
     }
     AppState.data = Object.assign(getDefaultData(), merged);
+    if (typeof _restoreDropdownBackup === 'function') _restoreDropdownBackup();
     if (typeof migrateData === 'function') migrateData();
     if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
     try { _spFlushMergeConflicts(); } catch(e) {}
