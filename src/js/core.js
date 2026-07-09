@@ -933,6 +933,11 @@ function _setDropdown(key,values){
   // superseded by any real admin push from SharePoint.
   if(typeof isAdminUser==='function' && isAdminUser()){
     AppState.data.settings.dropdowns._adminPushedAt=Date.now();
+    // Force the offline-queue flag so a future poll takes the merge path (which
+    // preserves local settings), even if SP wasn't connected at edit time or a
+    // prior push already cleared the flag. Survives hard refresh via localStorage.
+    try{ localStorage.setItem('shic_sp_offlinequeue','1'); }catch(e){}
+    if(typeof _spOfflineQueue!=='undefined') _spOfflineQueue=true;
   }
   AppState.save();
 }

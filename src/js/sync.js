@@ -2360,6 +2360,19 @@ function _spApplyRemote(data, _ts, _by) {
         // Keep local sub-list data (it was already merged from sub-list pull)
         if (Array.isArray(AppState.data[k])) merged[k] = AppState.data[k];
       });
+      // ── Dropdown protection: even on the "no local edits" branch, keep local
+      //    dropdowns when this admin's _adminPushedAt is >= the remote's. Guards
+      //    against wholesale settings replacement wiping just-typed edits when
+      //    the offline-queue flag was cleared by a prior push.
+      {
+        const _rDrop = data.settings?.dropdowns || {};
+        const _lDrop = AppState.data.settings?.dropdowns || {};
+        const _rPA = _rDrop._adminPushedAt || 0;
+        const _lPA = _lDrop._adminPushedAt || 0;
+        if (_lPA >= _rPA && Object.keys(_lDrop).length > 0) {
+          merged.settings = Object.assign({}, merged.settings || {}, { dropdowns: _lDrop });
+        }
+      }
       AppState.data = Object.assign(getDefaultData(), merged);
     }
     if (typeof migrateData === 'function') migrateData();
