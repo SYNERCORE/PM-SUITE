@@ -119,9 +119,9 @@ function renderReports(){
     </div>`;
   }
 
-  // Filter projects based on report scope
+  // Filter projects based on report scope + active time-filter period
   function getProjectsForScope(buId) {
-    const all = AppState.data.projects || [];
+    const all = (AppState.data.projects || []).filter(p => _tfProjectInRange(p));
     if (buId === 'all') return all;
     if (buId === '') return all.filter(p => !p.businessUnit);
     return all.filter(p => p.businessUnit === buId);
@@ -154,12 +154,13 @@ function renderReports(){
   const allCosts = AppState.data.costs || [];
 
   $('#reports').innerHTML = `
-  <div class="section-header" style="margin-bottom:14px">
+  <div class="section-header" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
     <div>
       <div class="section-title">Reports & Analytics</div>
-      <div class="section-sub">Consolidated &amp; per Business Unit reports</div>
+      <div class="section-sub">Consolidated &amp; per Business Unit reports · <strong>${_tfRange().label}</strong></div>
     </div>
-    <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      ${_tfFilterHTML('renderReports()')}
       <button class="btn btn-secondary btn-sm" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
       <button class="btn btn-primary btn-sm" onclick="exportReportCSV('All')"><i class="fas fa-file-csv"></i> Export CSV</button>
     </div>

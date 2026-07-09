@@ -1346,6 +1346,64 @@ let detailProjectId=null, detailTab='overview';
 let docSearch='', docStatusFilter='all', docProjFilter='all', docCatFilter='all', docGroupBy='status', docCollapsed={};
 let ganttZoom=100, ganttFrom='', ganttTo='', ganttProjFilter='all', ganttStatusFilter='all';
 
+// ── Shared time filter for KPI / Analytics / Reports ─────────
+// mode: 'year' (whole year) | 'month' (single month within year)
+let _tfMode='year', _tfYear=new Date().getFullYear(), _tfMonth=new Date().getMonth()+1;
+
+function _tfRange(){
+  const y=_tfYear||new Date().getFullYear();
+  if(_tfMode==='month'){
+    const m=Math.max(1,Math.min(12,_tfMonth||1));
+    const start=new Date(y,m-1,1);
+    const end=new Date(y,m,0); // last day of month
+    end.setHours(23,59,59,999);
+    const label=start.toLocaleString('en',{month:'long'})+' '+y;
+    return{start,end,label,ymd:(d)=>d.toISOString().slice(0,10)};
+  }
+  const start=new Date(y,0,1);
+  const end=new Date(y,11,31,23,59,59,999);
+  return{start,end,label:String(y),ymd:(d)=>d.toISOString().slice(0,10)};
+}
+
+function _tfInRange(dateStr){
+  if(!dateStr)return false;
+  const d=new Date(dateStr+'T00:00:00');
+  if(isNaN(d))return false;
+  const r=_tfRange();
+  return d>=r.start&&d<=r.end;
+}
+
+// A project is "in scope" for the period if its execution window overlaps the range.
+function _tfProjectInRange(p){
+  if(!p)return false;
+  const r=_tfRange();
+  const s=p.startDate?new Date(p.startDate+'T00:00:00'):null;
+  const e=p.endDate?new Date(p.endDate+'T00:00:00'):(p.completedDate?new Date(p.completedDate+'T00:00:00'):new Date());
+  if(!s)return false;
+  return s<=r.end&&e>=r.start;
+}
+
+function _tfFilterHTML(onchange){
+  const years=[];
+  const cy=new Date().getFullYear();
+  for(let y=cy-5;y<=cy+2;y++)years.push(y);
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+    <span style="font-size:11px;color:var(--text-muted);font-weight:600"><i class="fas fa-filter" style="margin-right:4px"></i>Period</span>
+    <select class="form-select" style="height:30px;width:110px;font-size:12px" onchange="_tfMode=this.value;${onchange}">
+      <option value="year" ${_tfMode==='year'?'selected':''}>Yearly</option>
+      <option value="month" ${_tfMode==='month'?'selected':''}>Monthly</option>
+    </select>
+    <select class="form-select" style="height:30px;width:100px;font-size:12px" onchange="_tfYear=parseInt(this.value);${onchange}">
+      ${years.map(y=>`<option value="${y}" ${y===_tfYear?'selected':''}>${y}</option>`).join('')}
+    </select>
+    ${_tfMode==='month'?`<select class="form-select" style="height:30px;width:110px;font-size:12px" onchange="_tfMonth=parseInt(this.value);${onchange}">
+      ${months.map((m,i)=>`<option value="${i+1}" ${(i+1)===_tfMonth?'selected':''}>${m}</option>`).join('')}
+    </select>`:''}
+    <span style="font-size:11px;color:var(--text-secondary);margin-left:4px">Showing: <strong>${_tfRange().label}</strong></span>
+  </div>`;
+}
+
 
 const NAV_ITEMS=[
 {id:'dashboard',label:'Dashboard',icon:'fas fa-chart-pie',section:'Overview'},
@@ -19965,15 +20023,23 @@ setTimeout(()=>{const c=$('#progTrendChart');if(c){c.width=c.parentElement.offse
 </script>
 <script>
 function renderKPI(){
-const{tasks,costs,risks}=AppState.data;
-// Exclude prospects from KPI calculations
-const projects=(AppState.data.projects||[]).filter(p=>p.status!=='prospect');
+const{tasks:_allTasks,costs:_allCosts,risks:_allRisks}=AppState.data;
+// Exclude prospects, then filter to the selected time period
+const projects=(AppState.data.projects||[]).filter(p=>p.status!=='prospect'&&_tfProjectInRange(p));
+const _projIds=new Set(projects.map(p=>p.id));
+const tasks=(_allTasks||[]).filter(t=>_projIds.has(t.projectId));
+const costs=(_allCosts||[]).filter(c=>_projIds.has(c.projectId));
+const risks=(_allRisks||[]).filter(r=>_projIds.has(r.projectId));
 const totP=costs.reduce((s,c)=>s+c.planned,0),totA=costs.reduce((s,c)=>s+c.actual,0);
 const avgProg=projects.length?projects.reduce((s,p)=>s+(p.progress||0),0)/projects.length/100:0;
 const EV=totP*avgProg,CPI=(EV/totA).toFixed(2),SPI=(EV/(totP*.56)).toFixed(2);
 const ph=tasks.reduce((s,t)=>s+t.plannedHrs,0),ah=tasks.reduce((s,t)=>s+t.actualHrs,0);
 const prod=ah>0?(ph/ah).toFixed(2):'1.00';const done=tasks.filter(t=>t.status==='done').length;
-$('#kpi').innerHTML=`<div class="section-header" style="margin-bottom:14px"><div class="section-title">KPI Analytics Dashboard</div></div>
+$('#kpi').innerHTML=`<div class="section-header" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
+<div><div class="section-title">KPI Analytics Dashboard</div><div class="section-sub">${projects.length} project${projects.length===1?'':'s'} in <strong>${_tfRange().label}</strong></div></div>
+${_tfFilterHTML('renderKPI()')}
+</div>
+${projects.length===0?`<div class="empty-state" style="padding:36px"><i class="fas fa-calendar-times" style="font-size:24px;opacity:.4;display:block;margin-bottom:10px"></i><div>No projects overlap ${_tfRange().label}.</div></div>`:''}
 <div class="grid grid-4" style="margin-bottom:14px">
 <div class="card" style="text-align:center"><div class="card-title">Cost Performance Index</div>
 <div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)'}">${CPI}</div>
@@ -21188,12 +21254,13 @@ function renderAnalytics() {
   const el = $('#analytics');
   if (!el) return;
   el.innerHTML = `
-  <div class="section-header">
+  <div class="section-header" style="flex-wrap:wrap;gap:10px">
     <div>
       <h2 style="margin:0;font-size:18px;font-weight:700">Advanced Analytics</h2>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Spend, suppliers, warehouse turnover, procurement, manpower</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Spend, suppliers, warehouse turnover, procurement, manpower · <strong>${_tfRange().label}</strong></div>
     </div>
-    <div style="display:flex;gap:8px">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      ${_tfFilterHTML('renderAnalytics()')}
       <button class="btn btn-secondary btn-sm" onclick="_analyticsExportCSV()"><i class="fas fa-download"></i> Export CSV</button>
     </div>
   </div>
@@ -21238,8 +21305,10 @@ function _analyticsRenderTab() {
 
 // ── SPEND ANALYSIS ──────────────────────────────────────────
 function _analyticsSpend() {
-  const tx = (AppState.data.whTransactions || []).filter(t => !t._deleted && t.type === 'receive');
-  const procItems = (AppState.data.procurement || []).filter(p => !p._deleted);
+  const _r = _tfRange();
+  const _inR = (d)=>{ if(!d) return false; const dt=new Date(d.length>10?d:(d+'T00:00:00')); return !isNaN(dt) && dt>=_r.start && dt<=_r.end; };
+  const tx = (AppState.data.whTransactions || []).filter(t => !t._deleted && t.type === 'receive' && _inR(t.date || t.postedAt));
+  const procItems = (AppState.data.procurement || []).filter(p => !p._deleted && _inR(p.date || p.createdAt));
 
   // Monthly spend from warehouse receives
   const byMonth = {};
@@ -21288,7 +21357,9 @@ function _analyticsSpend() {
 
 // ── SUPPLIER PERFORMANCE ────────────────────────────────────
 function _analyticsSuppliers() {
-  const tx = (AppState.data.whTransactions || []).filter(t => !t._deleted && t.type === 'receive' && t.vendor);
+  const _r = _tfRange();
+  const _inR = (d)=>{ if(!d) return false; const dt=new Date(d.length>10?d:(d+'T00:00:00')); return !isNaN(dt) && dt>=_r.start && dt<=_r.end; };
+  const tx = (AppState.data.whTransactions || []).filter(t => !t._deleted && t.type === 'receive' && t.vendor && _inR(t.date || t.postedAt));
   const byVendor = {};
   tx.forEach(t => {
     if (!byVendor[t.vendor]) byVendor[t.vendor] = { deliveries: 0, items: 0, spend: 0, lastDate: '' };
@@ -21391,8 +21462,10 @@ function _analyticsTurnover() {
 
 // ── PROCUREMENT CYCLE TIME ──────────────────────────────────
 function _analyticsProcurement() {
-  const items = (AppState.data.procurement || []).filter(p => !p._deleted);
-  if (!items.length) return '<div class="empty-state" style="padding:40px"><p>No procurement records yet.</p></div>';
+  const _r = _tfRange();
+  const _inR = (d)=>{ if(!d) return false; const dt=new Date(d.length>10?d:(d+'T00:00:00')); return !isNaN(dt) && dt>=_r.start && dt<=_r.end; };
+  const items = (AppState.data.procurement || []).filter(p => !p._deleted && _inR(p.date||p.createdAt||p.completedDate));
+  if (!items.length) return '<div class="empty-state" style="padding:40px"><p>No procurement records in '+_r.label+'.</p></div>';
 
   const stageOrder = ['prospect','rfq','po_issued','delivery','received','closed'];
   const cycleItems = items.filter(p => p.createdAt && p.updatedAt);
@@ -21444,8 +21517,10 @@ function _analyticsProcurement() {
 
 // ── MANPOWER COST TREND ─────────────────────────────────────
 function _analyticsManpower() {
-  const records = (AppState.data.manpower || []).filter(r => !r._deleted);
-  if (!records.length) return '<div class="empty-state" style="padding:40px"><p>No manpower records yet.</p></div>';
+  const _r = _tfRange();
+  const _inR = (d)=>{ if(!d) return false; const dt=new Date(d.length>10?d:(d+'T00:00:00')); return !isNaN(dt) && dt>=_r.start && dt<=_r.end; };
+  const records = (AppState.data.manpower || []).filter(r => !r._deleted && _inR(r.date||r.startDate||r.createdAt));
+  if (!records.length) return '<div class="empty-state" style="padding:40px"><p>No manpower records in '+_r.label+'.</p></div>';
 
   const byMonth = {};
   const byProject = {};
@@ -21492,7 +21567,7 @@ function _analyticsManpower() {
 
 // ── PROJECT VARIANCE ────────────────────────────────────────
 function _analyticsProjects() {
-  const projects = (AppState.data.projects || []).filter(p => !p._deleted && p.status !== 'prospect');
+  const projects = (AppState.data.projects || []).filter(p => !p._deleted && p.status !== 'prospect' && _tfProjectInRange(p));
   if (!projects.length) return '<div class="empty-state" style="padding:40px"><p>No active projects.</p></div>';
 
   const rows = projects.map(p => {
@@ -21859,9 +21934,9 @@ function renderReports(){
     </div>`;
   }
 
-  // Filter projects based on report scope
+  // Filter projects based on report scope + active time-filter period
   function getProjectsForScope(buId) {
-    const all = AppState.data.projects || [];
+    const all = (AppState.data.projects || []).filter(p => _tfProjectInRange(p));
     if (buId === 'all') return all;
     if (buId === '') return all.filter(p => !p.businessUnit);
     return all.filter(p => p.businessUnit === buId);
@@ -21894,12 +21969,13 @@ function renderReports(){
   const allCosts = AppState.data.costs || [];
 
   $('#reports').innerHTML = `
-  <div class="section-header" style="margin-bottom:14px">
+  <div class="section-header" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
     <div>
       <div class="section-title">Reports & Analytics</div>
-      <div class="section-sub">Consolidated &amp; per Business Unit reports</div>
+      <div class="section-sub">Consolidated &amp; per Business Unit reports · <strong>${_tfRange().label}</strong></div>
     </div>
-    <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      ${_tfFilterHTML('renderReports()')}
       <button class="btn btn-secondary btn-sm" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
       <button class="btn btn-primary btn-sm" onclick="exportReportCSV('All')"><i class="fas fa-file-csv"></i> Export CSV</button>
     </div>

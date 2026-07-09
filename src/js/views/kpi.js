@@ -1,13 +1,21 @@
 function renderKPI(){
-const{tasks,costs,risks}=AppState.data;
-// Exclude prospects from KPI calculations
-const projects=(AppState.data.projects||[]).filter(p=>p.status!=='prospect');
+const{tasks:_allTasks,costs:_allCosts,risks:_allRisks}=AppState.data;
+// Exclude prospects, then filter to the selected time period
+const projects=(AppState.data.projects||[]).filter(p=>p.status!=='prospect'&&_tfProjectInRange(p));
+const _projIds=new Set(projects.map(p=>p.id));
+const tasks=(_allTasks||[]).filter(t=>_projIds.has(t.projectId));
+const costs=(_allCosts||[]).filter(c=>_projIds.has(c.projectId));
+const risks=(_allRisks||[]).filter(r=>_projIds.has(r.projectId));
 const totP=costs.reduce((s,c)=>s+c.planned,0),totA=costs.reduce((s,c)=>s+c.actual,0);
 const avgProg=projects.length?projects.reduce((s,p)=>s+(p.progress||0),0)/projects.length/100:0;
 const EV=totP*avgProg,CPI=(EV/totA).toFixed(2),SPI=(EV/(totP*.56)).toFixed(2);
 const ph=tasks.reduce((s,t)=>s+t.plannedHrs,0),ah=tasks.reduce((s,t)=>s+t.actualHrs,0);
 const prod=ah>0?(ph/ah).toFixed(2):'1.00';const done=tasks.filter(t=>t.status==='done').length;
-$('#kpi').innerHTML=`<div class="section-header" style="margin-bottom:14px"><div class="section-title">KPI Analytics Dashboard</div></div>
+$('#kpi').innerHTML=`<div class="section-header" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
+<div><div class="section-title">KPI Analytics Dashboard</div><div class="section-sub">${projects.length} project${projects.length===1?'':'s'} in <strong>${_tfRange().label}</strong></div></div>
+${_tfFilterHTML('renderKPI()')}
+</div>
+${projects.length===0?`<div class="empty-state" style="padding:36px"><i class="fas fa-calendar-times" style="font-size:24px;opacity:.4;display:block;margin-bottom:10px"></i><div>No projects overlap ${_tfRange().label}.</div></div>`:''}
 <div class="grid grid-4" style="margin-bottom:14px">
 <div class="card" style="text-align:center"><div class="card-title">Cost Performance Index</div>
 <div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)'}">${CPI}</div>

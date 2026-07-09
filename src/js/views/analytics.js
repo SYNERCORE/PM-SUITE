@@ -9,12 +9,13 @@ function renderAnalytics() {
   const el = $('#analytics');
   if (!el) return;
   el.innerHTML = `
-  <div class="section-header">
+  <div class="section-header" style="flex-wrap:wrap;gap:10px">
     <div>
       <h2 style="margin:0;font-size:18px;font-weight:700">Advanced Analytics</h2>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Spend, suppliers, warehouse turnover, procurement, manpower</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Spend, suppliers, warehouse turnover, procurement, manpower · <strong>${_tfRange().label}</strong></div>
     </div>
-    <div style="display:flex;gap:8px">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      ${_tfFilterHTML('renderAnalytics()')}
       <button class="btn btn-secondary btn-sm" onclick="_analyticsExportCSV()"><i class="fas fa-download"></i> Export CSV</button>
     </div>
   </div>
@@ -59,8 +60,10 @@ function _analyticsRenderTab() {
 
 // ── SPEND ANALYSIS ──────────────────────────────────────────
 function _analyticsSpend() {
-  const tx = (AppState.data.whTransactions || []).filter(t => !t._deleted && t.type === 'receive');
-  const procItems = (AppState.data.procurement || []).filter(p => !p._deleted);
+  const _r = _tfRange();
+  const _inR = (d)=>{ if(!d) return false; const dt=new Date(d.length>10?d:(d+'T00:00:00')); return !isNaN(dt) && dt>=_r.start && dt<=_r.end; };
+  const tx = (AppState.data.whTransactions || []).filter(t => !t._deleted && t.type === 'receive' && _inR(t.date || t.postedAt));
+  const procItems = (AppState.data.procurement || []).filter(p => !p._deleted && _inR(p.date || p.createdAt));
 
   // Monthly spend from warehouse receives
   const byMonth = {};
@@ -109,7 +112,9 @@ function _analyticsSpend() {
 
 // ── SUPPLIER PERFORMANCE ────────────────────────────────────
 function _analyticsSuppliers() {
-  const tx = (AppState.data.whTransactions || []).filter(t => !t._deleted && t.type === 'receive' && t.vendor);
+  const _r = _tfRange();
+  const _inR = (d)=>{ if(!d) return false; const dt=new Date(d.length>10?d:(d+'T00:00:00')); return !isNaN(dt) && dt>=_r.start && dt<=_r.end; };
+  const tx = (AppState.data.whTransactions || []).filter(t => !t._deleted && t.type === 'receive' && t.vendor && _inR(t.date || t.postedAt));
   const byVendor = {};
   tx.forEach(t => {
     if (!byVendor[t.vendor]) byVendor[t.vendor] = { deliveries: 0, items: 0, spend: 0, lastDate: '' };
@@ -212,8 +217,10 @@ function _analyticsTurnover() {
 
 // ── PROCUREMENT CYCLE TIME ──────────────────────────────────
 function _analyticsProcurement() {
-  const items = (AppState.data.procurement || []).filter(p => !p._deleted);
-  if (!items.length) return '<div class="empty-state" style="padding:40px"><p>No procurement records yet.</p></div>';
+  const _r = _tfRange();
+  const _inR = (d)=>{ if(!d) return false; const dt=new Date(d.length>10?d:(d+'T00:00:00')); return !isNaN(dt) && dt>=_r.start && dt<=_r.end; };
+  const items = (AppState.data.procurement || []).filter(p => !p._deleted && _inR(p.date||p.createdAt||p.completedDate));
+  if (!items.length) return '<div class="empty-state" style="padding:40px"><p>No procurement records in '+_r.label+'.</p></div>';
 
   const stageOrder = ['prospect','rfq','po_issued','delivery','received','closed'];
   const cycleItems = items.filter(p => p.createdAt && p.updatedAt);
@@ -265,8 +272,10 @@ function _analyticsProcurement() {
 
 // ── MANPOWER COST TREND ─────────────────────────────────────
 function _analyticsManpower() {
-  const records = (AppState.data.manpower || []).filter(r => !r._deleted);
-  if (!records.length) return '<div class="empty-state" style="padding:40px"><p>No manpower records yet.</p></div>';
+  const _r = _tfRange();
+  const _inR = (d)=>{ if(!d) return false; const dt=new Date(d.length>10?d:(d+'T00:00:00')); return !isNaN(dt) && dt>=_r.start && dt<=_r.end; };
+  const records = (AppState.data.manpower || []).filter(r => !r._deleted && _inR(r.date||r.startDate||r.createdAt));
+  if (!records.length) return '<div class="empty-state" style="padding:40px"><p>No manpower records in '+_r.label+'.</p></div>';
 
   const byMonth = {};
   const byProject = {};
@@ -313,7 +322,7 @@ function _analyticsManpower() {
 
 // ── PROJECT VARIANCE ────────────────────────────────────────
 function _analyticsProjects() {
-  const projects = (AppState.data.projects || []).filter(p => !p._deleted && p.status !== 'prospect');
+  const projects = (AppState.data.projects || []).filter(p => !p._deleted && p.status !== 'prospect' && _tfProjectInRange(p));
   if (!projects.length) return '<div class="empty-state" style="padding:40px"><p>No active projects.</p></div>';
 
   const rows = projects.map(p => {

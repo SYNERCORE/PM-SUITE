@@ -810,6 +810,64 @@ let detailProjectId=null, detailTab='overview';
 let docSearch='', docStatusFilter='all', docProjFilter='all', docCatFilter='all', docGroupBy='status', docCollapsed={};
 let ganttZoom=100, ganttFrom='', ganttTo='', ganttProjFilter='all', ganttStatusFilter='all';
 
+// ── Shared time filter for KPI / Analytics / Reports ─────────
+// mode: 'year' (whole year) | 'month' (single month within year)
+let _tfMode='year', _tfYear=new Date().getFullYear(), _tfMonth=new Date().getMonth()+1;
+
+function _tfRange(){
+  const y=_tfYear||new Date().getFullYear();
+  if(_tfMode==='month'){
+    const m=Math.max(1,Math.min(12,_tfMonth||1));
+    const start=new Date(y,m-1,1);
+    const end=new Date(y,m,0); // last day of month
+    end.setHours(23,59,59,999);
+    const label=start.toLocaleString('en',{month:'long'})+' '+y;
+    return{start,end,label,ymd:(d)=>d.toISOString().slice(0,10)};
+  }
+  const start=new Date(y,0,1);
+  const end=new Date(y,11,31,23,59,59,999);
+  return{start,end,label:String(y),ymd:(d)=>d.toISOString().slice(0,10)};
+}
+
+function _tfInRange(dateStr){
+  if(!dateStr)return false;
+  const d=new Date(dateStr+'T00:00:00');
+  if(isNaN(d))return false;
+  const r=_tfRange();
+  return d>=r.start&&d<=r.end;
+}
+
+// A project is "in scope" for the period if its execution window overlaps the range.
+function _tfProjectInRange(p){
+  if(!p)return false;
+  const r=_tfRange();
+  const s=p.startDate?new Date(p.startDate+'T00:00:00'):null;
+  const e=p.endDate?new Date(p.endDate+'T00:00:00'):(p.completedDate?new Date(p.completedDate+'T00:00:00'):new Date());
+  if(!s)return false;
+  return s<=r.end&&e>=r.start;
+}
+
+function _tfFilterHTML(onchange){
+  const years=[];
+  const cy=new Date().getFullYear();
+  for(let y=cy-5;y<=cy+2;y++)years.push(y);
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+    <span style="font-size:11px;color:var(--text-muted);font-weight:600"><i class="fas fa-filter" style="margin-right:4px"></i>Period</span>
+    <select class="form-select" style="height:30px;width:110px;font-size:12px" onchange="_tfMode=this.value;${onchange}">
+      <option value="year" ${_tfMode==='year'?'selected':''}>Yearly</option>
+      <option value="month" ${_tfMode==='month'?'selected':''}>Monthly</option>
+    </select>
+    <select class="form-select" style="height:30px;width:100px;font-size:12px" onchange="_tfYear=parseInt(this.value);${onchange}">
+      ${years.map(y=>`<option value="${y}" ${y===_tfYear?'selected':''}>${y}</option>`).join('')}
+    </select>
+    ${_tfMode==='month'?`<select class="form-select" style="height:30px;width:110px;font-size:12px" onchange="_tfMonth=parseInt(this.value);${onchange}">
+      ${months.map((m,i)=>`<option value="${i+1}" ${(i+1)===_tfMonth?'selected':''}>${m}</option>`).join('')}
+    </select>`:''}
+    <span style="font-size:11px;color:var(--text-secondary);margin-left:4px">Showing: <strong>${_tfRange().label}</strong></span>
+  </div>`;
+}
+
 
 const NAV_ITEMS=[
 {id:'dashboard',label:'Dashboard',icon:'fas fa-chart-pie',section:'Overview'},
