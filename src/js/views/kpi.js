@@ -6,29 +6,67 @@ const _projIds=new Set(projects.map(p=>p.id));
 const tasks=(_allTasks||[]).filter(t=>_projIds.has(t.projectId));
 const costs=(_allCosts||[]).filter(c=>_projIds.has(c.projectId));
 const risks=(_allRisks||[]).filter(r=>_projIds.has(r.projectId));
-const totP=costs.reduce((s,c)=>s+c.planned,0),totA=costs.reduce((s,c)=>s+c.actual,0);
-const avgProg=projects.length?projects.reduce((s,p)=>s+(p.progress||0),0)/projects.length/100:0;
-const EV=totP*avgProg,CPI=(EV/totA).toFixed(2),SPI=(EV/(totP*.56)).toFixed(2);
-const ph=tasks.reduce((s,t)=>s+t.plannedHrs,0),ah=tasks.reduce((s,t)=>s+t.actualHrs,0);
-const prod=ah>0?(ph/ah).toFixed(2):'1.00';const done=tasks.filter(t=>t.status==='done').length;
+
+// ── Earned Value Management: proper per-project EV / PV / AC ─
+// Planned progress at today, as a 0..1 fraction of the project's own schedule.
+// Uses stored plannedProgress (kept up-to-date by _recalcProjectProgress);
+// falls back to a straight time-elapsed calculation when start/end dates exist.
+const _plannedFrac=(p)=>{
+  if(typeof p.plannedProgress==='number'&&p.plannedProgress>0)return Math.min(1,p.plannedProgress/100);
+  if(!p.startDate||!p.endDate)return 0;
+  const s=new Date(p.startDate+'T00:00:00');
+  const e=new Date((p.completedDate||p.endDate)+'T00:00:00');
+  const today=new Date();today.setHours(0,0,0,0);
+  if(isNaN(s)||isNaN(e)||e<=s)return 0;
+  if(today<=s)return 0;
+  if(today>=e)return 1;
+  return (today-s)/(e-s);
+};
+
+let sumEV=0,sumPV=0,sumAC=0,sumBudget=0,sumSpent=0;
+projects.forEach(p=>{
+  const budget=+(p.budget||0);
+  const spent=+(p.spent||0);
+  const actualFrac=Math.min(1,Math.max(0,(p.progress||0)/100));
+  const plannedFrac=_plannedFrac(p);
+  sumBudget+=budget;
+  sumSpent+=spent;
+  sumEV+=budget*actualFrac;
+  sumPV+=budget*plannedFrac;
+  sumAC+=spent;
+});
+
+// CPI = Earned Value / Actual Cost. Neutral 1.00 when nothing spent yet.
+const CPI=(sumAC>0?(sumEV/sumAC):1).toFixed(2);
+// SPI = Earned Value / Planned Value. Neutral 1.00 when nothing scheduled yet.
+const SPI=(sumPV>0?(sumEV/sumPV):1).toFixed(2);
+// Budget-weighted overall completion (not simple average — big projects count more)
+const overallPct=sumBudget>0?Math.round((sumEV/sumBudget)*100):0;
+const avgProg=overallPct/100;
+
+const ph=tasks.reduce((s,t)=>s+(t.plannedHrs||0),0),ah=tasks.reduce((s,t)=>s+(t.actualHrs||0),0);
+// Productivity Index = Earned Hours / Burned Hours. Weighs plannedHrs by task progress.
+const earnedHrs=tasks.reduce((s,t)=>s+((t.plannedHrs||0)*((t.progress||0)/100)),0);
+const prod=ah>0?(earnedHrs/ah).toFixed(2):'—';
+const done=tasks.filter(t=>t.status==='done').length;
 $('#kpi').innerHTML=`<div class="section-header" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
 <div><div class="section-title">KPI Analytics Dashboard</div><div class="section-sub">${projects.length} project${projects.length===1?'':'s'} in <strong>${_tfRange().label}</strong></div></div>
 ${_tfFilterHTML('renderKPI()')}
 </div>
 ${projects.length===0?`<div class="empty-state" style="padding:36px"><i class="fas fa-calendar-times" style="font-size:24px;opacity:.4;display:block;margin-bottom:10px"></i><div>No projects overlap ${_tfRange().label}.</div></div>`:''}
 <div class="grid grid-4" style="margin-bottom:14px">
-<div class="card" style="text-align:center"><div class="card-title">Cost Performance Index</div>
+<div class="card" style="text-align:center"><div class="card-title" title="Cost Performance Index = Earned Value / Actual Cost">Cost Performance Index</div>
 <div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)'}">${CPI}</div>
-<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${parseFloat(CPI)>=1?'Cost Efficient ✓':'Cost Overrun ✗'}</div>
+<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${parseFloat(CPI)>=1?'Cost Efficient ✓':'Cost Overrun ✗'} · EV ${fmtCur(sumEV)} / AC ${fmtCur(sumAC)}</div>
 <div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${Math.min(100,parseFloat(CPI)*50)}%;background:${parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)'}"></div></div></div>
-<div class="card" style="text-align:center"><div class="card-title">Schedule Performance Index</div>
+<div class="card" style="text-align:center"><div class="card-title" title="Schedule Performance Index = Earned Value / Planned Value">Schedule Performance Index</div>
 <div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${parseFloat(SPI)>=1?'var(--accent-green)':'var(--accent-amber)'}">${SPI}</div>
-<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${parseFloat(SPI)>=1?'On Schedule ✓':'Behind Schedule'}</div>
+<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${parseFloat(SPI)>=1?'On/Ahead of Schedule ✓':'Behind Schedule'} · EV ${fmtCur(sumEV)} / PV ${fmtCur(sumPV)}</div>
 <div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${Math.min(100,parseFloat(SPI)*50)}%;background:${parseFloat(SPI)>=1?'var(--accent-green)':'var(--accent-amber)'}"></div></div></div>
-<div class="card" style="text-align:center"><div class="card-title">Productivity Index</div>
-<div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${parseFloat(prod)>=1?'var(--accent-green)':'var(--accent-amber)'}">${prod}</div>
-<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">Earned / Burned Hours</div>
-<div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${Math.min(100,parseFloat(prod)*50)}%;background:var(--accent-blue)"></div></div></div>
+<div class="card" style="text-align:center"><div class="card-title" title="Productivity Index = Earned Hours / Actual Hours">Productivity Index</div>
+<div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${prod==='—'?'var(--text-muted)':(parseFloat(prod)>=1?'var(--accent-green)':'var(--accent-amber)')}">${prod}</div>
+<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${prod==='—'?'No time logged':'Earned '+Math.round(earnedHrs)+'h / Burned '+Math.round(ah)+'h'}</div>
+<div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${prod==='—'?0:Math.min(100,parseFloat(prod)*50)}%;background:var(--accent-blue)"></div></div></div>
 <div class="card" style="text-align:center"><div class="card-title">Overall Completion</div>
 <div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:var(--accent-blue)">${Math.round(avgProg*100)}%</div>
 <div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${done}/${tasks.length} tasks done</div>
@@ -47,11 +85,12 @@ const pt=tasks.filter(t=>t.projectId===p.id);
 const pd=pt.filter(t=>t.status==='done').length;
 const pr=risks.filter(r=>r.projectId===p.id&&r.status==='active').length;
 const pn=(AppState.data.qaqc||[]).filter(q=>q.projectId===p.id&&q.type==='NCR'&&q.status==='open').length;
-const bp=Math.round((p.spent/p.budget)*100);
-const dl=daysBetween(new Date().toISOString().split('T')[0],p.endDate);
-const tot=daysBetween(p.startDate,p.endDate);
-const te=Math.round(((tot-Math.max(0,dl))/Math.max(1,tot))*100);
-const onTrk=p.progress>=te-8;
+const bp=p.budget?Math.round((p.spent/p.budget)*100):0;
+const _planPct=Math.round(_plannedFrac(p)*100);
+const te=_planPct; // "time %" now uses proper schedule-based planned progress
+const _schedGap=(p.progress||0)-_planPct;
+const _schedLabel=p.status==='completed'?'Completed':(_schedGap>=-5?'On Track':(_schedGap>=-15?'At Risk':'Delayed'));
+const _schedClass=p.status==='completed'?'badge-blue':(_schedGap>=-5?'badge-green':(_schedGap>=-15?'badge-amber':'badge-red'));
 return`<tr>
 <td><div style="font-weight:600;font-size:12px">${p.id}</div><div style="font-size:10px;color:var(--text-secondary)">${p.name.substring(0,22)}...</div></td>
 <td style="font-size:11px">${p.pm.split(' ')[0]}</td>
@@ -61,7 +100,7 @@ return`<tr>
 <td style="font-family:var(--font-mono);font-size:11px">${pd}/${pt.length}</td>
 <td style="font-family:var(--font-mono);font-size:11px;color:${pr>2?'var(--accent-red)':pr>0?'var(--accent-amber)':'var(--accent-green)'}">${pr}</td>
 <td style="font-family:var(--font-mono);font-size:11px;color:${pn>0?'var(--accent-red)':'var(--accent-green)'}">${pn}</td>
-<td><span class="badge ${onTrk?'badge-green':'badge-red'}">${onTrk?'On Track':'Delayed'}</span></td>
+<td><span class="badge ${_schedClass}">${_schedLabel}</span></td>
 </tr>`;}).join('')}</tbody></table></div></div>`;
 setTimeout(()=>{
 let c=$('#kpiProg');if(c){c.width=c.parentElement.offsetWidth-30;drawBar('kpiProg',projects.map(p=>p.id),projects.map(p=>p.progress),'#388bfd');}
