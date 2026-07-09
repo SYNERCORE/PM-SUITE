@@ -9940,6 +9940,7 @@ function renderDetailOverview(){
         <div class="form-group"><label class="form-label">Risk Level</label><select class="form-select" id="dp_risk">${['low','medium','high'].map(r=>`<option value="${r}" ${p.riskLevel===r?'selected':''}>${r}</option>`).join('')}</select></div>
         <div class="form-group"><label class="form-label">Start Date</label><input class="form-input" type="date" id="dp_start" value="${safeDate(p.startDate)}"></div>
         <div class="form-group"><label class="form-label">End Date</label><input class="form-input" type="date" id="dp_end" value="${safeDate(p.endDate)}"></div>
+        <div class="form-group"><label class="form-label">Completion Date <span style="font-size:10px;color:var(--text-muted)">— set when status is completed</span></label><input class="form-input" type="date" id="dp_completed" value="${safeDate(p.completedDate)}" ${p.status==='completed'?'':'disabled style="opacity:.5;cursor:not-allowed"'}></div>
         <div class="form-group"><label class="form-label">Contract Budget (&#8369;)</label><input class="form-input" type="number" id="dp_budget" value="${p.budget||0}"></div>
         <div class="form-group"><label class="form-label">Amount Spent (&#8369;)</label><input class="form-input" type="number" id="dp_spent" value="${p.spent||0}"></div>
         <div class="form-group"><label class="form-label">Physical Progress %</label><input class="form-input" type="number" id="dp_prog" value="${p.progress||0}" min="0" max="100"></div>
@@ -10232,9 +10233,12 @@ function saveDetailOverview(){
   p.riskLevel=$('#dp_risk').value;
   const _prevStatus=p.status;
   p.status=$('#dp_status').value;
-  if(p.status==='completed'&&_prevStatus!=='completed'&&!p.completedDate){
-    p.completedDate=new Date().toISOString().slice(0,10);
-  } else if(p.status!=='completed'){
+  const _manualCompleted=$('#dp_completed')?.value||'';
+  if(p.status==='completed'){
+    // Prefer any date the user typed in the Completion Date field; otherwise
+    // keep the existing one, or stamp today on the first transition to completed.
+    p.completedDate=_manualCompleted||p.completedDate||new Date().toISOString().slice(0,10);
+  } else {
     // Reopening a project — drop the recorded completion date
     p.completedDate='';
   }
