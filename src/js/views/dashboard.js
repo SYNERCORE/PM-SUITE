@@ -2,13 +2,29 @@ let _dashDateFilter=localStorage.getItem('shic_dash_filter')||'all';
 function _dashFilterProjects(all){
   if(_dashDateFilter==='all')return all;
   const now=new Date();
-  let cutoff=new Date();
-  if(_dashDateFilter==='month')cutoff.setDate(1);
-  else if(_dashDateFilter==='quarter')cutoff.setMonth(Math.floor(now.getMonth()/3)*3,1);
-  else if(_dashDateFilter==='year')cutoff=new Date(now.getFullYear(),0,1);
+  let rangeStart=new Date();
+  let rangeEnd=new Date();
+  if(_dashDateFilter==='month'){
+    rangeStart=new Date(now.getFullYear(),now.getMonth(),1);
+    rangeEnd=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59,999);
+  } else if(_dashDateFilter==='quarter'){
+    const q=Math.floor(now.getMonth()/3);
+    rangeStart=new Date(now.getFullYear(),q*3,1);
+    rangeEnd=new Date(now.getFullYear(),q*3+3,0,23,59,59,999);
+  } else if(_dashDateFilter==='year'){
+    rangeStart=new Date(now.getFullYear(),0,1);
+    rangeEnd=new Date(now.getFullYear(),11,31,23,59,59,999);
+  }
+  rangeStart.setHours(0,0,0,0);
   return all.filter(p=>{
-    const d=new Date(p.startDate||p._createdAt||0);
-    return d>=cutoff||p.status==='active';
+    // A project is in scope when its execution window overlaps the period.
+    // Overlap = start <= period_end && end >= period_start. This catches
+    // completed projects that finished inside the period even if they
+    // started before it, AND future-starting planned projects.
+    const s=new Date(p.startDate||p._createdAt||0);
+    const eStr=p.completedDate||p.endDate;
+    const e=eStr?new Date(eStr):rangeEnd;
+    return (!isNaN(s)&&!isNaN(e))&&(s<=rangeEnd)&&(e>=rangeStart);
   });
 }
 function setDashFilter(val){_dashDateFilter=val;localStorage.setItem('shic_dash_filter',val);renderDashboard();}
