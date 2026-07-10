@@ -206,7 +206,54 @@ canvas{display:block}
 @media(max-width:768px){.sidebar{position:fixed;height:100vh;transform:translateX(-100%);z-index:200}.sidebar.mobile-open{transform:translateX(0)}.mobile-overlay{display:block!important}.grid-4,.grid-3{grid-template-columns:1fr 1fr}.grid-2{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.topbar-search{display:none}}
 .mobile-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:199;backdrop-filter:blur(2px)}
 @media(max-width:480px){.grid-4,.grid-3,.grid-2{grid-template-columns:1fr}}
-@media print{.sidebar,.topbar,.fab,.toast-container{display:none!important}}
+/* ── Print styles ──────────────────────────────────────────
+   Hide navigation chrome, force light theme (no dark ink), keep
+   each report card together on a page, drop interactive controls.
+*/
+@media print{
+  @page{margin:12mm 10mm;size:A4}
+  /* Kill navigation & interactive chrome */
+  .sidebar,.topbar,.fab,.toast-container,.filters-bar,.tabs,.wh-tabs-wrap,.pg-nav,.pagination{display:none!important}
+  .section-header{border:none!important;margin-bottom:8px!important}
+  /* Hide buttons anywhere in the printed content */
+  button,.btn{display:none!important}
+  /* Force full-width content — no sidebar offset */
+  .main-content,main,.page,#reports,#kpi,#analytics,#dashboard{padding:0!important;margin:0!important;width:100%!important;max-width:100%!important}
+  body{background:#fff!important;color:#000!important}
+  /* Force light theme regardless of dark-mode toggle */
+  :root{
+    --bg-primary:#fff!important;--bg-secondary:#f7f8fa!important;--bg-card:#fff!important;--bg-hover:#f0f2f5!important;
+    --text-primary:#111!important;--text-secondary:#333!important;--text-muted:#666!important;
+    --border:#ccc!important;--border-subtle:#e0e0e0!important;
+    --accent-blue:#0057b7!important;--accent-green:#0a7a1e!important;--accent-red:#b30000!important;--accent-amber:#8a5000!important;
+  }
+  /* Cards should print cleanly — avoid mid-card page breaks */
+  .card,.stat-card,.welcome-banner{background:#fff!important;color:#000!important;border:1px solid #ccc!important;box-shadow:none!important;page-break-inside:avoid;break-inside:avoid}
+  /* Progress bars keep their fill visible */
+  .progress-bar{background:#e0e0e0!important;border:1px solid #999}
+  .progress-fill{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  /* Tables — grid lines and row backgrounds should print */
+  table,th,td{border-collapse:collapse}
+  th{background:#eee!important;color:#000!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  td,th{padding:6px 8px!important;font-size:10pt!important}
+  /* Badges retain color */
+  .badge,.badge-blue,.badge-green,.badge-red,.badge-amber,.badge-purple,.badge-gray{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  /* Modals shouldn't print if one is open */
+  .modal-overlay,.modal{display:none!important}
+  /* Links: don't append URL after — cleaner report */
+  a[href]:after{content:none!important}
+  /* Only print the currently visible page (has .active) */
+  .page:not(.active){display:none!important}
+  /* Time filter dropdown, group-by dropdowns, search inputs */
+  select,input[type="text"],input[type="date"],input[type="search"]{border:none!important;background:none!important;color:#000!important;padding:0!important;-webkit-appearance:none;appearance:none}
+  /* Compress the section title area */
+  .section-title{font-size:16pt!important;font-weight:700}
+  .section-sub{font-size:9pt!important;color:#666!important}
+  /* Avoid orphan headings */
+  h1,h2,h3,h4,.card-title{page-break-after:avoid;break-after:avoid}
+  /* Prevent overflow scroll from clipping content */
+  .table-wrap,.card{overflow:visible!important}
+}
 
 /* ── Mobile enhancements ──────────────────────────────────── */
 @media(max-width:768px){
