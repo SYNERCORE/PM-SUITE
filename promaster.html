@@ -2080,13 +2080,77 @@ window.tSectionHeader  = tSectionHeader;
 
 </script>
 <script>
+// ── Toast notifications ───────────────────────────────────
+// Dedup rules:
+//  - If an identical message (same text + type) already appears in the toast
+//    stack, increment its counter and reset its dismiss timer instead of
+//    pushing another one.
+//  - Cap the visible stack at MAX_TOASTS. Anything above that pops the oldest.
+//  - Message text is inserted as textContent so a malicious value (project
+//    name, error message) can't inject HTML.
+const _TOAST_MAX=5;
+const _toastRegistry=new Map(); // key: type+msg → { el, timer, count }
 function showToast(msg,type='info',dur=3500){
-const icons={success:'fa-check-circle',error:'fa-times-circle',warning:'fa-exclamation-circle',info:'fa-info-circle'};
-const cols={success:'var(--accent-green)',error:'var(--accent-red)',warning:'var(--accent-amber)',info:'var(--accent-blue)'};
-const t=document.createElement('div');t.className=`toast ${type}`;
-t.innerHTML=`<i class="fas ${icons[type]}" style="color:${cols[type]}"></i><span style="flex:1">${msg}</span><i class="fas fa-times" style="cursor:pointer;opacity:.5" onclick="this.parentElement.remove()"></i>`;
-$('#toastContainer').appendChild(t);
-setTimeout(()=>{t.style.opacity='0';t.style.transform='translateX(20px)';t.style.transition='.3s';setTimeout(()=>t.remove(),300);},dur);}
+  const key=(type||'info')+' '+(msg==null?'':String(msg));
+  const container=$('#toastContainer');
+  if(!container)return;
+  // Dedup within the currently-visible stack.
+  const existing=_toastRegistry.get(key);
+  if(existing){
+    existing.count++;
+    const counter=existing.el.querySelector('.toast-count');
+    if(counter)counter.textContent='×'+existing.count;
+    else{
+      const s=document.createElement('span');
+      s.className='toast-count';
+      s.style.cssText='font-size:10px;color:var(--text-muted);margin-left:6px;font-weight:700';
+      s.textContent='×'+existing.count;
+      const text=existing.el.querySelector('.toast-msg');
+      if(text)text.parentNode.insertBefore(s,text.nextSibling);
+    }
+    clearTimeout(existing.timer);
+    existing.timer=setTimeout(()=>_removeToast(key),dur);
+    return;
+  }
+  // Cap the stack. Oldest goes first (Map preserves insertion order).
+  while(_toastRegistry.size>=_TOAST_MAX){
+    const oldest=_toastRegistry.keys().next().value;
+    _removeToast(oldest);
+  }
+  const icons={success:'fa-check-circle',error:'fa-times-circle',warning:'fa-exclamation-circle',info:'fa-info-circle'};
+  const cols={success:'var(--accent-green)',error:'var(--accent-red)',warning:'var(--accent-amber)',info:'var(--accent-blue)'};
+  const t=document.createElement('div');
+  t.className=`toast ${type}`;
+  const icon=document.createElement('i');
+  icon.className='fas '+(icons[type]||icons.info);
+  icon.style.color=cols[type]||cols.info;
+  t.appendChild(icon);
+  const msgEl=document.createElement('span');
+  msgEl.className='toast-msg';
+  msgEl.style.flex='1';
+  msgEl.textContent=(msg==null?'':String(msg));
+  t.appendChild(msgEl);
+  const closeBtn=document.createElement('i');
+  closeBtn.className='fas fa-times';
+  closeBtn.style.cssText='cursor:pointer;opacity:.5';
+  closeBtn.addEventListener('click',()=>_removeToast(key));
+  t.appendChild(closeBtn);
+  container.appendChild(t);
+  const rec={el:t,count:1,timer:setTimeout(()=>_removeToast(key),dur)};
+  _toastRegistry.set(key,rec);
+}
+function _removeToast(key){
+  const rec=_toastRegistry.get(key);
+  if(!rec)return;
+  clearTimeout(rec.timer);
+  _toastRegistry.delete(key);
+  const el=rec.el;
+  if(!el||!el.isConnected)return;
+  el.style.opacity='0';
+  el.style.transform='translateX(20px)';
+  el.style.transition='.3s';
+  setTimeout(()=>{ if(el.isConnected) el.remove(); },300);
+}
 
 function buildSidebar(){
 let html='',lastSec='';
