@@ -841,14 +841,28 @@ function _tfInRange(dateStr){
   return d>=r.start&&d<=r.end;
 }
 
-// A project is "in scope" for the period if its execution window overlaps the range.
+// Canonical overlap check: does the project's execution window intersect the
+// given [rangeStart, rangeEnd] range? Used by every period-scoped view
+// (dashboard, KPI, Analytics, Reports) so results are consistent. A project
+// with no startDate/_createdAt is excluded; a project with no end date is
+// treated as "still open through the end of the range".
+function _projectOverlapsRange(p, rangeStart, rangeEnd){
+  if(!p||!rangeStart||!rangeEnd)return false;
+  const startStr=p.startDate||p._createdAt;
+  if(!startStr)return false;
+  const s=new Date((''+startStr).length>10?startStr:(startStr+'T00:00:00'));
+  if(isNaN(s))return false;
+  const endStr=p.completedDate||p.endDate;
+  const e=endStr?new Date((''+endStr).length>10?endStr:(endStr+'T00:00:00')):rangeEnd;
+  if(isNaN(e))return false;
+  return s<=rangeEnd&&e>=rangeStart;
+}
+
+// A project is "in scope" for the shared time filter if its execution window
+// overlaps the currently-selected period.
 function _tfProjectInRange(p){
-  if(!p)return false;
   const r=_tfRange();
-  const s=p.startDate?new Date(p.startDate+'T00:00:00'):null;
-  const e=p.endDate?new Date(p.endDate+'T00:00:00'):(p.completedDate?new Date(p.completedDate+'T00:00:00'):new Date());
-  if(!s)return false;
-  return s<=r.end&&e>=r.start;
+  return _projectOverlapsRange(p, r.start, r.end);
 }
 
 function _tfFilterHTML(onchange){

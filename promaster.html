@@ -1377,14 +1377,28 @@ function _tfInRange(dateStr){
   return d>=r.start&&d<=r.end;
 }
 
-// A project is "in scope" for the period if its execution window overlaps the range.
+// Canonical overlap check: does the project's execution window intersect the
+// given [rangeStart, rangeEnd] range? Used by every period-scoped view
+// (dashboard, KPI, Analytics, Reports) so results are consistent. A project
+// with no startDate/_createdAt is excluded; a project with no end date is
+// treated as "still open through the end of the range".
+function _projectOverlapsRange(p, rangeStart, rangeEnd){
+  if(!p||!rangeStart||!rangeEnd)return false;
+  const startStr=p.startDate||p._createdAt;
+  if(!startStr)return false;
+  const s=new Date((''+startStr).length>10?startStr:(startStr+'T00:00:00'));
+  if(isNaN(s))return false;
+  const endStr=p.completedDate||p.endDate;
+  const e=endStr?new Date((''+endStr).length>10?endStr:(endStr+'T00:00:00')):rangeEnd;
+  if(isNaN(e))return false;
+  return s<=rangeEnd&&e>=rangeStart;
+}
+
+// A project is "in scope" for the shared time filter if its execution window
+// overlaps the currently-selected period.
 function _tfProjectInRange(p){
-  if(!p)return false;
   const r=_tfRange();
-  const s=p.startDate?new Date(p.startDate+'T00:00:00'):null;
-  const e=p.endDate?new Date(p.endDate+'T00:00:00'):(p.completedDate?new Date(p.completedDate+'T00:00:00'):new Date());
-  if(!s)return false;
-  return s<=r.end&&e>=r.start;
+  return _projectOverlapsRange(p, r.start, r.end);
 }
 
 function _tfFilterHTML(onchange){
@@ -8337,33 +8351,17 @@ setInterval(()=>{if(_m365LoggedIn)AppState.save();},30000);
 </script>
 <script>
 let _dashDateFilter=localStorage.getItem('shic_dash_filter')||'all';
+// Compute the [start, end] window for the currently-selected dashboard tab.
+function _dashRange(){
+  const now=new Date();
+  if(_dashDateFilter==='month')return{start:new Date(now.getFullYear(),now.getMonth(),1,0,0,0,0),end:new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59,999)};
+  if(_dashDateFilter==='quarter'){const q=Math.floor(now.getMonth()/3);return{start:new Date(now.getFullYear(),q*3,1,0,0,0,0),end:new Date(now.getFullYear(),q*3+3,0,23,59,59,999)};}
+  return{start:new Date(now.getFullYear(),0,1,0,0,0,0),end:new Date(now.getFullYear(),11,31,23,59,59,999)};
+}
 function _dashFilterProjects(all){
   if(_dashDateFilter==='all')return all;
-  const now=new Date();
-  let rangeStart=new Date();
-  let rangeEnd=new Date();
-  if(_dashDateFilter==='month'){
-    rangeStart=new Date(now.getFullYear(),now.getMonth(),1);
-    rangeEnd=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59,999);
-  } else if(_dashDateFilter==='quarter'){
-    const q=Math.floor(now.getMonth()/3);
-    rangeStart=new Date(now.getFullYear(),q*3,1);
-    rangeEnd=new Date(now.getFullYear(),q*3+3,0,23,59,59,999);
-  } else if(_dashDateFilter==='year'){
-    rangeStart=new Date(now.getFullYear(),0,1);
-    rangeEnd=new Date(now.getFullYear(),11,31,23,59,59,999);
-  }
-  rangeStart.setHours(0,0,0,0);
-  return all.filter(p=>{
-    // A project is in scope when its execution window overlaps the period.
-    // Overlap = start <= period_end && end >= period_start. This catches
-    // completed projects that finished inside the period even if they
-    // started before it, AND future-starting planned projects.
-    const s=new Date(p.startDate||p._createdAt||0);
-    const eStr=p.completedDate||p.endDate;
-    const e=eStr?new Date(eStr):rangeEnd;
-    return (!isNaN(s)&&!isNaN(e))&&(s<=rangeEnd)&&(e>=rangeStart);
-  });
+  const{start,end}=_dashRange();
+  return all.filter(p=>_projectOverlapsRange(p,start,end));
 }
 function setDashFilter(val){_dashDateFilter=val;localStorage.setItem('shic_dash_filter',val);renderDashboard();}
 
