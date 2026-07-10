@@ -1,6 +1,19 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
 const APP_VERSION='2.9.0';
 const APP_BUILD='20260707b';
+
+// ── DATA SCHEMA VERSION ───────────────────────────────────
+// Bumped each time the persisted data shape changes in a way that needs
+// migration. Add a matching entry to _SCHEMA_MIGRATIONS below and it will
+// run once on next boot for anyone whose AppState.data._schemaVersion is
+// lower. Idempotent — migrations don't re-run on already-migrated data.
+const SHIC_SCHEMA_VERSION=1;
+const _SCHEMA_MIGRATIONS=[
+  // Example entry — remove this comment when the first real migration lands.
+  // { v:2, description:'Rename task.assignedTo → task.assignee', apply(d){
+  //     (d.tasks||[]).forEach(t=>{ if(t.assignedTo && !t.assignee){ t.assignee=t.assignedTo; delete t.assignedTo; } });
+  //   } }
+];
 // One-line summary of this release — shown in the update banner on other users' screens
 const APP_RELEASE_NOTE='SLA auto-escalation, role-based workflow approvers, project archiving';
 const APP_NAME='SHIC Enterprise PM Suite';

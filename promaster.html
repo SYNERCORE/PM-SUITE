@@ -537,6 +537,19 @@ kbd {
 // ── APP VERSION & BUILD INFO ──────────────────────────────
 const APP_VERSION='2.9.0';
 const APP_BUILD='20260707b';
+
+// ── DATA SCHEMA VERSION ───────────────────────────────────
+// Bumped each time the persisted data shape changes in a way that needs
+// migration. Add a matching entry to _SCHEMA_MIGRATIONS below and it will
+// run once on next boot for anyone whose AppState.data._schemaVersion is
+// lower. Idempotent — migrations don't re-run on already-migrated data.
+const SHIC_SCHEMA_VERSION=1;
+const _SCHEMA_MIGRATIONS=[
+  // Example entry — remove this comment when the first real migration lands.
+  // { v:2, description:'Rename task.assignedTo → task.assignee', apply(d){
+  //     (d.tasks||[]).forEach(t=>{ if(t.assignedTo && !t.assignee){ t.assignee=t.assignedTo; delete t.assignedTo; } });
+  //   } }
+];
 // One-line summary of this release — shown in the update banner on other users' screens
 const APP_RELEASE_NOTE='SLA auto-escalation, role-based workflow approvers, project archiving';
 const APP_NAME='SHIC Enterprise PM Suite';
@@ -3544,6 +3557,32 @@ function migrateData(){
   if(!d.materials||!Array.isArray(d.materials))d.materials=def.materials||[];
   // Ensure resources array exists
   if(!d.resources||!Array.isArray(d.resources))d.resources=def.resources||[];
+
+  // Versioned schema migrations — run any migration whose target version is
+  // above the currently-stored _schemaVersion, in order. Each migration
+  // bumps the stored version so it never re-runs.
+  const current=+(d._schemaVersion||0);
+  if(typeof _SCHEMA_MIGRATIONS!=='undefined' && Array.isArray(_SCHEMA_MIGRATIONS)){
+    _SCHEMA_MIGRATIONS
+      .slice()
+      .sort((a,b)=>a.v-b.v)
+      .forEach(m=>{
+        if(m.v>current){
+          try{
+            m.apply(d);
+            d._schemaVersion=m.v;
+            console.log('[SHIC] Applied schema migration v'+m.v+(m.description?': '+m.description:''));
+          }catch(e){
+            console.error('[SHIC] Schema migration v'+m.v+' failed:',e.message);
+          }
+        }
+      });
+  }
+  // First boot after this feature lands: stamp the current version so an
+  // empty _schemaVersion doesn't trigger every migration on a fresh install.
+  if(typeof d._schemaVersion==='undefined'){
+    d._schemaVersion=typeof SHIC_SCHEMA_VERSION==='number'?SHIC_SCHEMA_VERSION:1;
+  }
   AppState.save();
 }
 

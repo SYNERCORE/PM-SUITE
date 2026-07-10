@@ -924,6 +924,32 @@ function migrateData(){
   if(!d.materials||!Array.isArray(d.materials))d.materials=def.materials||[];
   // Ensure resources array exists
   if(!d.resources||!Array.isArray(d.resources))d.resources=def.resources||[];
+
+  // Versioned schema migrations — run any migration whose target version is
+  // above the currently-stored _schemaVersion, in order. Each migration
+  // bumps the stored version so it never re-runs.
+  const current=+(d._schemaVersion||0);
+  if(typeof _SCHEMA_MIGRATIONS!=='undefined' && Array.isArray(_SCHEMA_MIGRATIONS)){
+    _SCHEMA_MIGRATIONS
+      .slice()
+      .sort((a,b)=>a.v-b.v)
+      .forEach(m=>{
+        if(m.v>current){
+          try{
+            m.apply(d);
+            d._schemaVersion=m.v;
+            console.log('[SHIC] Applied schema migration v'+m.v+(m.description?': '+m.description:''));
+          }catch(e){
+            console.error('[SHIC] Schema migration v'+m.v+' failed:',e.message);
+          }
+        }
+      });
+  }
+  // First boot after this feature lands: stamp the current version so an
+  // empty _schemaVersion doesn't trigger every migration on a fresh install.
+  if(typeof d._schemaVersion==='undefined'){
+    d._schemaVersion=typeof SHIC_SCHEMA_VERSION==='number'?SHIC_SCHEMA_VERSION:1;
+  }
   AppState.save();
 }
 
