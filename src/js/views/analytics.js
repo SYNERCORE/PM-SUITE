@@ -164,26 +164,26 @@ function _analyticsSuppliers() {
 function _analyticsTurnover() {
   if (typeof _whItems !== 'function') return '<div class="empty-state"><p>Warehouse module not loaded.</p></div>';
   const items = _whItems();
-  const now = new Date();
-  const yr = now.getFullYear();
-  const mo = now.getMonth();
-  const ytdStart = new Date(yr, 0, 1).toISOString().slice(0, 10);
-  const mtdStart = new Date(yr, mo, 1).toISOString().slice(0, 10);
+  const _r = _tfRange();
+  const _inR = (d) => { if (!d) return false; const dt = new Date(d.length > 10 ? d : (d + 'T00:00:00')); return !isNaN(dt) && dt >= _r.start && dt <= _r.end; };
+  const _periodStartYMD = _r.start.toISOString().slice(0, 10);
 
   const rows = items.map(it => {
     const q = _whCalcQty(it.id);
     const txAll = (AppState.data.whTransactions || []).filter(t => !t._deleted && t.type !== 'receive');
     const issued = txAll.filter(t => (t.lines || []).some(l => l.itemId === it.id));
-    const ytdIssued = issued.filter(t => (t.date || t.postedAt || '') >= ytdStart)
+    const periodIssued = issued.filter(t => _inR(t.date || t.postedAt))
       .reduce((s, t) => s + (t.lines || []).filter(l => l.itemId === it.id).reduce((a, l) => a + (parseFloat(l.qty) || 0), 0), 0);
-    const mtdIssued = issued.filter(t => (t.date || t.postedAt || '') >= mtdStart)
+    // Second column: "Recent" always means the last 30 days for a quick pulse
+    const last30 = new Date(); last30.setDate(last30.getDate() - 30);
+    const recentIssued = issued.filter(t => { const s = t.date || t.postedAt || ''; return s && new Date(s.length > 10 ? s : (s + 'T00:00:00')) >= last30; })
       .reduce((s, t) => s + (t.lines || []).filter(l => l.itemId === it.id).reduce((a, l) => a + (parseFloat(l.qty) || 0), 0), 0);
     const wac = typeof _whCalcWAC === 'function' ? _whCalcWAC(it.id) : 0;
     const onHandValue = q.qtyOnHand * wac;
-    const cogs = ytdIssued * wac;
+    const cogs = periodIssued * wac;
     const avgInv = onHandValue > 0 ? onHandValue : 1;
     const turnover = cogs / avgInv;
-    return { it, q, ytdIssued, mtdIssued, wac, onHandValue, turnover };
+    return { it, q, ytdIssued: periodIssued, mtdIssued: recentIssued, wac, onHandValue, turnover };
   }).sort((a, b) => b.ytdIssued - a.ytdIssued);
 
   const totalOnHandValue = rows.reduce((s, r) => s + r.onHandValue, 0);
@@ -193,12 +193,12 @@ function _analyticsTurnover() {
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
     ${_aKpi('Total Inventory Value', _fmt(totalOnHandValue), 'fas fa-boxes', 'var(--accent-blue)')}
     ${_aKpi('Items in Stock', rows.filter(r=>r.q.qtyOnHand>0).length+'', 'fas fa-archive', 'var(--accent-green)')}
-    ${_aKpi('YTD Units Issued', totalYtdIssued.toLocaleString(), 'fas fa-arrow-right', 'var(--accent-amber)')}
+    ${_aKpi(_r.label+' Units Issued', totalYtdIssued.toLocaleString(), 'fas fa-arrow-right', 'var(--accent-amber)')}
   </div>
   <div class="card">
-    <div style="font-weight:600;font-size:13px;margin-bottom:12px"><i class="fas fa-sync-alt" style="color:var(--accent-blue);margin-right:6px"></i>Item Turnover (YTD)</div>
+    <div style="font-weight:600;font-size:13px;margin-bottom:12px"><i class="fas fa-sync-alt" style="color:var(--accent-blue);margin-right:6px"></i>Item Turnover (${_r.label})</div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Item</th><th>Category</th><th style="text-align:right">On Hand</th><th style="text-align:right">WAC</th><th style="text-align:right">Inv. Value</th><th style="text-align:right">YTD Issued</th><th style="text-align:right">MTD Issued</th><th style="text-align:right">Turnover</th></tr></thead>
+      <thead><tr><th>Item</th><th>Category</th><th style="text-align:right">On Hand</th><th style="text-align:right">WAC</th><th style="text-align:right">Inv. Value</th><th style="text-align:right">Issued (${_r.label})</th><th style="text-align:right">Last 30d</th><th style="text-align:right">Turnover</th></tr></thead>
       <tbody>
         ${rows.map(r=>`<tr>
           <td style="font-weight:600;font-size:12px">${r.it.name}</td>

@@ -37,9 +37,10 @@ projects.forEach(p=>{
 });
 
 // CPI = Earned Value / Actual Cost. Neutral 1.00 when nothing spent yet.
-const CPI=(sumAC>0?(sumEV/sumAC):1).toFixed(2);
-// SPI = Earned Value / Planned Value. Neutral 1.00 when nothing scheduled yet.
-const SPI=(sumPV>0?(sumEV/sumPV):1).toFixed(2);
+// Show "—" for empty data instead of a fake 1.00 that reads as "perfect performance".
+const CPI=sumAC>0?(sumEV/sumAC).toFixed(2):'—';
+// SPI = Earned Value / Planned Value.
+const SPI=sumPV>0?(sumEV/sumPV).toFixed(2):'—';
 // Budget-weighted overall completion (not simple average — big projects count more)
 const overallPct=sumBudget>0?Math.round((sumEV/sumBudget)*100):0;
 const avgProg=overallPct/100;
@@ -56,13 +57,13 @@ ${_tfFilterHTML('renderKPI()')}
 ${projects.length===0?`<div class="empty-state" style="padding:36px"><i class="fas fa-calendar-times" style="font-size:24px;opacity:.4;display:block;margin-bottom:10px"></i><div>No projects overlap ${_tfRange().label}.</div></div>`:''}
 <div class="grid grid-4" style="margin-bottom:14px">
 <div class="card" style="text-align:center"><div class="card-title" title="Cost Performance Index = Earned Value / Actual Cost">Cost Performance Index</div>
-<div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)'}">${CPI}</div>
-<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${parseFloat(CPI)>=1?'Cost Efficient ✓':'Cost Overrun ✗'} · EV ${fmtCur(sumEV)} / AC ${fmtCur(sumAC)}</div>
-<div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${Math.min(100,parseFloat(CPI)*50)}%;background:${parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)'}"></div></div></div>
+<div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${CPI==='—'?'var(--text-muted)':(parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)')}">${CPI}</div>
+<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${CPI==='—'?'No cost data yet':(parseFloat(CPI)>=1?'Cost Efficient ✓':'Cost Overrun ✗')+' · EV '+fmtCur(sumEV)+' / AC '+fmtCur(sumAC)}</div>
+<div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${CPI==='—'?0:Math.min(100,parseFloat(CPI)*50)}%;background:${CPI==='—'?'var(--text-muted)':(parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)')}"></div></div></div>
 <div class="card" style="text-align:center"><div class="card-title" title="Schedule Performance Index = Earned Value / Planned Value">Schedule Performance Index</div>
-<div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${parseFloat(SPI)>=1?'var(--accent-green)':'var(--accent-amber)'}">${SPI}</div>
-<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${parseFloat(SPI)>=1?'On/Ahead of Schedule ✓':'Behind Schedule'} · EV ${fmtCur(sumEV)} / PV ${fmtCur(sumPV)}</div>
-<div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${Math.min(100,parseFloat(SPI)*50)}%;background:${parseFloat(SPI)>=1?'var(--accent-green)':'var(--accent-amber)'}"></div></div></div>
+<div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${SPI==='—'?'var(--text-muted)':(parseFloat(SPI)>=1?'var(--accent-green)':'var(--accent-amber)')}">${SPI}</div>
+<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${SPI==='—'?'No schedule data yet':(parseFloat(SPI)>=1?'On/Ahead of Schedule ✓':'Behind Schedule')+' · EV '+fmtCur(sumEV)+' / PV '+fmtCur(sumPV)}</div>
+<div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${SPI==='—'?0:Math.min(100,parseFloat(SPI)*50)}%;background:${SPI==='—'?'var(--text-muted)':(parseFloat(SPI)>=1?'var(--accent-green)':'var(--accent-amber)')}"></div></div></div>
 <div class="card" style="text-align:center"><div class="card-title" title="Productivity Index = Earned Hours / Actual Hours">Productivity Index</div>
 <div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${prod==='—'?'var(--text-muted)':(parseFloat(prod)>=1?'var(--accent-green)':'var(--accent-amber)')}">${prod}</div>
 <div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${prod==='—'?'No time logged':'Earned '+Math.round(earnedHrs)+'h / Burned '+Math.round(ah)+'h'}</div>

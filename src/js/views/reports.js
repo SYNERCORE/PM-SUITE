@@ -6,9 +6,16 @@ function renderReports(){
   // Build report view for a given set of projects + scope label
   function buildReportHTML(scopeProjects, scopeLabel, scopeColor, isCompact) {
     const costs = AppState.data.costs || [];
-    const scopeCosts = costs.filter(c => scopeProjects.some(p => p.id === c.projectId));
+    // Filter cost items by the active period so planned/actual align with what
+    // the KPI page shows for the same window. Budget stays as the contract
+    // total for the projects in scope (contract value isn't time-sliced).
+    const _r = _tfRange();
+    const _inR = (d) => { if (!d) return true; const dt = new Date(d.length > 10 ? d : (d + 'T00:00:00')); return !isNaN(dt) && dt >= _r.start && dt <= _r.end; };
+    const scopeCosts = costs
+      .filter(c => scopeProjects.some(p => p.id === c.projectId))
+      .filter(c => _inR(c.date || c.createdAt || c.periodStart));
     const totBudget = scopeProjects.reduce((s,p)=>s+p.budget,0);
-    const totSpent  = scopeProjects.reduce((s,p)=>s+p.spent,0);
+    const totSpent  = scopeCosts.reduce((s,c)=>s+(c.actual||0),0) || scopeProjects.reduce((s,p)=>s+p.spent,0);
     const totPlanned = scopeCosts.reduce((s,c)=>s+c.planned,0);
     const totActual  = scopeCosts.reduce((s,c)=>s+c.actual,0);
     const avgProg = scopeProjects.length ? Math.round(scopeProjects.reduce((s,p)=>s+p.progress,0)/scopeProjects.length) : 0;

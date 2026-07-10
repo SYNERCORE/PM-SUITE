@@ -14441,7 +14441,21 @@ let dragTaskId=null;
 function dropTask(e,status){
 if(!dragTaskId)return;
 const t=(AppState.data.tasks||[]).find(t=>t.id===dragTaskId);
-if(t){t.status=status;if(status==='done')t.progress=100;_applySummaryRollups(t.projectId);_recalcProjectProgress(t.projectId);AppState.save();renderTaskView();showToast('Task moved','success');}
+if(t){
+  t.status=status;
+  // Keep task progress in sync with the column it was dropped into so
+  // Physical Progress, EV, CPI, and SPI roll up correctly. Otherwise a
+  // manager dragging a card to Done still shows 0% progress everywhere.
+  if(status==='done')t.progress=100;
+  else if(status==='todo')t.progress=0;
+  else if(status==='inprogress'&&(t.progress===0||t.progress===100))t.progress=50;
+  // blocked → don't change progress; whatever was there is preserved
+  _applySummaryRollups(t.projectId);
+  _recalcProjectProgress(t.projectId);
+  AppState.save();
+  renderTaskView();
+  showToast('Task moved','success');
+}
 dragTaskId=null;}
 
 function renderTaskTable(){
@@ -20134,9 +20148,10 @@ projects.forEach(p=>{
 });
 
 // CPI = Earned Value / Actual Cost. Neutral 1.00 when nothing spent yet.
-const CPI=(sumAC>0?(sumEV/sumAC):1).toFixed(2);
-// SPI = Earned Value / Planned Value. Neutral 1.00 when nothing scheduled yet.
-const SPI=(sumPV>0?(sumEV/sumPV):1).toFixed(2);
+// Show "—" for empty data instead of a fake 1.00 that reads as "perfect performance".
+const CPI=sumAC>0?(sumEV/sumAC).toFixed(2):'—';
+// SPI = Earned Value / Planned Value.
+const SPI=sumPV>0?(sumEV/sumPV).toFixed(2):'—';
 // Budget-weighted overall completion (not simple average — big projects count more)
 const overallPct=sumBudget>0?Math.round((sumEV/sumBudget)*100):0;
 const avgProg=overallPct/100;
@@ -20153,13 +20168,13 @@ ${_tfFilterHTML('renderKPI()')}
 ${projects.length===0?`<div class="empty-state" style="padding:36px"><i class="fas fa-calendar-times" style="font-size:24px;opacity:.4;display:block;margin-bottom:10px"></i><div>No projects overlap ${_tfRange().label}.</div></div>`:''}
 <div class="grid grid-4" style="margin-bottom:14px">
 <div class="card" style="text-align:center"><div class="card-title" title="Cost Performance Index = Earned Value / Actual Cost">Cost Performance Index</div>
-<div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)'}">${CPI}</div>
-<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${parseFloat(CPI)>=1?'Cost Efficient ✓':'Cost Overrun ✗'} · EV ${fmtCur(sumEV)} / AC ${fmtCur(sumAC)}</div>
-<div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${Math.min(100,parseFloat(CPI)*50)}%;background:${parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)'}"></div></div></div>
+<div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${CPI==='—'?'var(--text-muted)':(parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)')}">${CPI}</div>
+<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${CPI==='—'?'No cost data yet':(parseFloat(CPI)>=1?'Cost Efficient ✓':'Cost Overrun ✗')+' · EV '+fmtCur(sumEV)+' / AC '+fmtCur(sumAC)}</div>
+<div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${CPI==='—'?0:Math.min(100,parseFloat(CPI)*50)}%;background:${CPI==='—'?'var(--text-muted)':(parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)')}"></div></div></div>
 <div class="card" style="text-align:center"><div class="card-title" title="Schedule Performance Index = Earned Value / Planned Value">Schedule Performance Index</div>
-<div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${parseFloat(SPI)>=1?'var(--accent-green)':'var(--accent-amber)'}">${SPI}</div>
-<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${parseFloat(SPI)>=1?'On/Ahead of Schedule ✓':'Behind Schedule'} · EV ${fmtCur(sumEV)} / PV ${fmtCur(sumPV)}</div>
-<div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${Math.min(100,parseFloat(SPI)*50)}%;background:${parseFloat(SPI)>=1?'var(--accent-green)':'var(--accent-amber)'}"></div></div></div>
+<div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${SPI==='—'?'var(--text-muted)':(parseFloat(SPI)>=1?'var(--accent-green)':'var(--accent-amber)')}">${SPI}</div>
+<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${SPI==='—'?'No schedule data yet':(parseFloat(SPI)>=1?'On/Ahead of Schedule ✓':'Behind Schedule')+' · EV '+fmtCur(sumEV)+' / PV '+fmtCur(sumPV)}</div>
+<div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${SPI==='—'?0:Math.min(100,parseFloat(SPI)*50)}%;background:${SPI==='—'?'var(--text-muted)':(parseFloat(SPI)>=1?'var(--accent-green)':'var(--accent-amber)')}"></div></div></div>
 <div class="card" style="text-align:center"><div class="card-title" title="Productivity Index = Earned Hours / Actual Hours">Productivity Index</div>
 <div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${prod==='—'?'var(--text-muted)':(parseFloat(prod)>=1?'var(--accent-green)':'var(--accent-amber)')}">${prod}</div>
 <div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${prod==='—'?'No time logged':'Earned '+Math.round(earnedHrs)+'h / Burned '+Math.round(ah)+'h'}</div>
@@ -21521,26 +21536,26 @@ function _analyticsSuppliers() {
 function _analyticsTurnover() {
   if (typeof _whItems !== 'function') return '<div class="empty-state"><p>Warehouse module not loaded.</p></div>';
   const items = _whItems();
-  const now = new Date();
-  const yr = now.getFullYear();
-  const mo = now.getMonth();
-  const ytdStart = new Date(yr, 0, 1).toISOString().slice(0, 10);
-  const mtdStart = new Date(yr, mo, 1).toISOString().slice(0, 10);
+  const _r = _tfRange();
+  const _inR = (d) => { if (!d) return false; const dt = new Date(d.length > 10 ? d : (d + 'T00:00:00')); return !isNaN(dt) && dt >= _r.start && dt <= _r.end; };
+  const _periodStartYMD = _r.start.toISOString().slice(0, 10);
 
   const rows = items.map(it => {
     const q = _whCalcQty(it.id);
     const txAll = (AppState.data.whTransactions || []).filter(t => !t._deleted && t.type !== 'receive');
     const issued = txAll.filter(t => (t.lines || []).some(l => l.itemId === it.id));
-    const ytdIssued = issued.filter(t => (t.date || t.postedAt || '') >= ytdStart)
+    const periodIssued = issued.filter(t => _inR(t.date || t.postedAt))
       .reduce((s, t) => s + (t.lines || []).filter(l => l.itemId === it.id).reduce((a, l) => a + (parseFloat(l.qty) || 0), 0), 0);
-    const mtdIssued = issued.filter(t => (t.date || t.postedAt || '') >= mtdStart)
+    // Second column: "Recent" always means the last 30 days for a quick pulse
+    const last30 = new Date(); last30.setDate(last30.getDate() - 30);
+    const recentIssued = issued.filter(t => { const s = t.date || t.postedAt || ''; return s && new Date(s.length > 10 ? s : (s + 'T00:00:00')) >= last30; })
       .reduce((s, t) => s + (t.lines || []).filter(l => l.itemId === it.id).reduce((a, l) => a + (parseFloat(l.qty) || 0), 0), 0);
     const wac = typeof _whCalcWAC === 'function' ? _whCalcWAC(it.id) : 0;
     const onHandValue = q.qtyOnHand * wac;
-    const cogs = ytdIssued * wac;
+    const cogs = periodIssued * wac;
     const avgInv = onHandValue > 0 ? onHandValue : 1;
     const turnover = cogs / avgInv;
-    return { it, q, ytdIssued, mtdIssued, wac, onHandValue, turnover };
+    return { it, q, ytdIssued: periodIssued, mtdIssued: recentIssued, wac, onHandValue, turnover };
   }).sort((a, b) => b.ytdIssued - a.ytdIssued);
 
   const totalOnHandValue = rows.reduce((s, r) => s + r.onHandValue, 0);
@@ -21550,12 +21565,12 @@ function _analyticsTurnover() {
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
     ${_aKpi('Total Inventory Value', _fmt(totalOnHandValue), 'fas fa-boxes', 'var(--accent-blue)')}
     ${_aKpi('Items in Stock', rows.filter(r=>r.q.qtyOnHand>0).length+'', 'fas fa-archive', 'var(--accent-green)')}
-    ${_aKpi('YTD Units Issued', totalYtdIssued.toLocaleString(), 'fas fa-arrow-right', 'var(--accent-amber)')}
+    ${_aKpi(_r.label+' Units Issued', totalYtdIssued.toLocaleString(), 'fas fa-arrow-right', 'var(--accent-amber)')}
   </div>
   <div class="card">
-    <div style="font-weight:600;font-size:13px;margin-bottom:12px"><i class="fas fa-sync-alt" style="color:var(--accent-blue);margin-right:6px"></i>Item Turnover (YTD)</div>
+    <div style="font-weight:600;font-size:13px;margin-bottom:12px"><i class="fas fa-sync-alt" style="color:var(--accent-blue);margin-right:6px"></i>Item Turnover (${_r.label})</div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Item</th><th>Category</th><th style="text-align:right">On Hand</th><th style="text-align:right">WAC</th><th style="text-align:right">Inv. Value</th><th style="text-align:right">YTD Issued</th><th style="text-align:right">MTD Issued</th><th style="text-align:right">Turnover</th></tr></thead>
+      <thead><tr><th>Item</th><th>Category</th><th style="text-align:right">On Hand</th><th style="text-align:right">WAC</th><th style="text-align:right">Inv. Value</th><th style="text-align:right">Issued (${_r.label})</th><th style="text-align:right">Last 30d</th><th style="text-align:right">Turnover</th></tr></thead>
       <tbody>
         ${rows.map(r=>`<tr>
           <td style="font-weight:600;font-size:12px">${r.it.name}</td>
@@ -21933,9 +21948,16 @@ function renderReports(){
   // Build report view for a given set of projects + scope label
   function buildReportHTML(scopeProjects, scopeLabel, scopeColor, isCompact) {
     const costs = AppState.data.costs || [];
-    const scopeCosts = costs.filter(c => scopeProjects.some(p => p.id === c.projectId));
+    // Filter cost items by the active period so planned/actual align with what
+    // the KPI page shows for the same window. Budget stays as the contract
+    // total for the projects in scope (contract value isn't time-sliced).
+    const _r = _tfRange();
+    const _inR = (d) => { if (!d) return true; const dt = new Date(d.length > 10 ? d : (d + 'T00:00:00')); return !isNaN(dt) && dt >= _r.start && dt <= _r.end; };
+    const scopeCosts = costs
+      .filter(c => scopeProjects.some(p => p.id === c.projectId))
+      .filter(c => _inR(c.date || c.createdAt || c.periodStart));
     const totBudget = scopeProjects.reduce((s,p)=>s+p.budget,0);
-    const totSpent  = scopeProjects.reduce((s,p)=>s+p.spent,0);
+    const totSpent  = scopeCosts.reduce((s,c)=>s+(c.actual||0),0) || scopeProjects.reduce((s,p)=>s+p.spent,0);
     const totPlanned = scopeCosts.reduce((s,c)=>s+c.planned,0);
     const totActual  = scopeCosts.reduce((s,c)=>s+c.actual,0);
     const avgProg = scopeProjects.length ? Math.round(scopeProjects.reduce((s,p)=>s+p.progress,0)/scopeProjects.length) : 0;

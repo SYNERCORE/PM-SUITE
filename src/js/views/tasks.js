@@ -182,7 +182,21 @@ let dragTaskId=null;
 function dropTask(e,status){
 if(!dragTaskId)return;
 const t=(AppState.data.tasks||[]).find(t=>t.id===dragTaskId);
-if(t){t.status=status;if(status==='done')t.progress=100;_applySummaryRollups(t.projectId);_recalcProjectProgress(t.projectId);AppState.save();renderTaskView();showToast('Task moved','success');}
+if(t){
+  t.status=status;
+  // Keep task progress in sync with the column it was dropped into so
+  // Physical Progress, EV, CPI, and SPI roll up correctly. Otherwise a
+  // manager dragging a card to Done still shows 0% progress everywhere.
+  if(status==='done')t.progress=100;
+  else if(status==='todo')t.progress=0;
+  else if(status==='inprogress'&&(t.progress===0||t.progress===100))t.progress=50;
+  // blocked → don't change progress; whatever was there is preserved
+  _applySummaryRollups(t.projectId);
+  _recalcProjectProgress(t.projectId);
+  AppState.save();
+  renderTaskView();
+  showToast('Task moved','success');
+}
 dragTaskId=null;}
 
 function renderTaskTable(){
