@@ -16430,7 +16430,7 @@ return`<tr>
 <td><div style="display:flex;gap:3px;position:relative">
 <button class="btn btn-secondary btn-sm btn-icon" onclick="showAssetDetail('${r.id}','${r.type.toLowerCase()}')" title="View detail & attachments"><i class="fas fa-paperclip"></i>${(r.attachments&&r.attachments.length)?`<span style="position:absolute;top:-4px;right:-4px;background:var(--accent-amber);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;font-weight:700">${r.attachments.length}</span>`:''}</button>
 <button class="btn btn-secondary btn-sm btn-icon" onclick="showEditAsset('${r.id}','${r.type.toLowerCase()}')" title="Edit"><i class="fas fa-edit"></i></button>
-<button class="btn btn-primary btn-sm btn-icon" onclick="logUtilization('${r.id}','${r.name}','${r.type}')" title="Log utilization"><i class="fas fa-plus-circle"></i></button>
+<button class="btn btn-primary btn-sm btn-icon" onclick="logUtilization('${r.id}')" title="Log utilization"><i class="fas fa-plus-circle"></i></button>
 </div></td></tr>`;}
 
 function noData(label,icon){return`<tr><td colspan="14"><div class="empty-state"><i class="fas ${icon}"></i><p>No ${label} records yet</p></div></td></tr>`;}
@@ -17092,7 +17092,16 @@ async function deleteAssetAttachment(assetId, typeKey, attId) {
 
 
 function logUtilization(rid,rname,rtype){
-AppState.data._quickLogId=rid;AppState.data._quickLogName=rname;AppState.data._quickLogType=rtype;
+// Look up name/type by id so callers only need to pass a safe identifier.
+// The previous signature took rname/rtype as raw strings interpolated into
+// an onclick attribute, which was a JS-string XSS surface if names contained
+// quotes or angle brackets. Legacy rname/rtype params kept as fallbacks.
+if(!rname||!rtype){
+  const all=[...(AppState.data.equipment||[]),...(AppState.data.tools||[]),...(AppState.data.vehicles||[]),...(AppState.data.consumables||[]),...(AppState.data.materials||[])];
+  const rec=all.find(x=>x&&x.id===rid);
+  if(rec){rname=rname||rec.name||'';rtype=rtype||rec.type||'Equipment';}
+}
+AppState.data._quickLogId=rid;AppState.data._quickLogName=rname||'';AppState.data._quickLogType=rtype||'Equipment';
 showLogUtilization();}
 
 function showLogUtilization(){
