@@ -14390,19 +14390,34 @@ _wbsProjs.forEach(pid=>{
   const pool=(AppState.data.tasks||[]).filter(t=>t.projectId===pid&&!t._deleted);
   if(pool.some(t=>!t.wbs)){_recalcAllWbs(pid);_wbsDirty=true;}
 });
-if(_wbsDirty)AppState.save();
+// Backfill Planned Hrs from durationHrs across every project so the global
+// task table shows the same values as the project detail Task List.
+let _phDirty=false;
+_wbsProjs.forEach(pid=>{
+  const hpd=(typeof _getTaskProjHPD==='function')?_getTaskProjHPD(pid):8;
+  (AppState.data.tasks||[])
+    .filter(t=>t.projectId===pid&&!t._deleted&&!t.milestone&&t.durationHrs>0&&(!t.plannedHrs||t.plannedHrs===0))
+    .forEach(t=>{t.plannedHrs=+t.durationHrs.toFixed(2);_phDirty=true;});
+});
+if(_wbsDirty||_phDirty)AppState.save();
 const el=$('#tasks');
+// Import from Project + Export CSV only make sense for a specific project scope
+const _perProjBtns = (taskProjectFilter && taskProjectFilter!=='all') ? `
+<button class="btn btn-secondary btn-sm" onclick="exportTasksExcel('${taskProjectFilter}')" title="Export tasks for the selected project to CSV"><i class="fas fa-file-export"></i> Export</button>
+<button class="btn btn-secondary btn-sm" onclick="showImportFromProject('${taskProjectFilter}')" title="Copy tasks from another project"><i class="fas fa-copy"></i> Import from Project</button>` : '';
 el.innerHTML=`<div class="section-header" style="margin-bottom:14px">
 <div><div class="section-title">Task Management</div><div class="section-sub">${(AppState.data.tasks||[]).length} tasks total</div></div>
-<div style="display:flex;gap:7px;align-items:center">
-<select class="form-select" style="width:180px;height:32px" id="taskProjSel" onchange="taskProjectFilter=this.value;renderTaskView()">
+<div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+<select class="form-select" style="width:180px;height:32px" id="taskProjSel" onchange="taskProjectFilter=this.value;renderTasks()">
 <option value="all">All Projects</option>
-${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${taskProjectFilter===p.id?'selected':''}>${p.id}</option>`).join('')}
+${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${taskProjectFilter===p.id?'selected':''}>${esc(p.id)}</option>`).join('')}
 </select>
 <div style="display:flex;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
 <div class="tab ${taskView==='kanban'?'active':''}" style="border:none;padding:5px 10px;margin:0" onclick="taskView='kanban';renderTasks()"><i class="fas fa-columns"></i></div>
 <div class="tab ${taskView==='table'?'active':''}" style="border:none;padding:5px 10px;margin:0" onclick="taskView='table';renderTasks()"><i class="fas fa-table"></i></div>
 </div>
+${_perProjBtns}
+<button class="btn btn-secondary btn-sm" onclick="showTaskImport()" title="Import tasks from CSV / Excel"><i class="fas fa-file-import"></i> Import CSV</button>
 <button class="btn btn-primary btn-sm" onclick="showTaskForm()"><i class="fas fa-plus"></i> New Task</button>
 </div></div>
 <div id="taskViewContent"></div>`;renderTaskView();}
@@ -14461,13 +14476,14 @@ const __ttContainer=$('#taskViewContent');
 if(!__ttContainer)return; // not on tasks page
 const tasks=getFilteredTasks();
 $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><table>
-<thead><tr><th>WBS</th><th>Task</th><th>Project</th><th>Assignee</th><th>End</th><th>Progress</th><th>Status</th><th>Priority</th><th></th></tr></thead>
+<thead><tr><th>WBS</th><th>Task</th><th>Project</th><th>Assignee</th><th>End</th><th>Dur (d)</th><th>Progress</th><th>Status</th><th>Priority</th><th></th></tr></thead>
 <tbody>${_pgSlice("tasks",_orderTasksHier(tasks)).map(({t,depth})=>{const isSum=_taskHasChildren(t.id,tasks);return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${t.wbs||t.id}</td>
 <td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${esc(t.name)}</div><div style="font-size:10px;color:var(--text-secondary);padding-left:${depth*18}px">${esc(t.dept||'')}</div></td>
 <td><span class="badge badge-blue">${t.projectId}</span></td>
 <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.assignee)}<span style="font-size:11px">${t.assignee.split(' ')[0]}</span></div></td>
 <td style="font-size:11px;font-family:var(--font-mono);color:${isOverdue(t.endDate)?'var(--accent-red)':'inherit'}">${t.endDate}</td>
+<td style="font-family:var(--font-mono);font-size:11px;text-align:center">${t.milestone?'—':(t.durationHrs?+((t.durationHrs/(_getTaskProjHPD?.(t.projectId)||8)).toFixed(2)):'')}</td>
 <td><div style="display:flex;align-items:center;gap:5px"><div class="progress-bar" style="width:65px;height:5px"><div class="progress-fill" style="width:${t.progress}%;background:${pColor(t.progress)}"></div></div><span style="font-size:10px;font-family:var(--font-mono)">${t.progress}%</span></div></td>
 <td>${sBadge(t.status)}</td><td>${pBadge(t.priority)}</td>
 <td><div style="display:flex;gap:3px">
