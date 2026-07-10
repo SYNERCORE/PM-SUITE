@@ -84,7 +84,7 @@ function renderProspects(){
     <div class="card" style="cursor:pointer;position:relative" onclick="showProjectDetail('${p.id}')">
       <div style="position:absolute;top:8px;right:8px"><span class="badge" style="background:rgba(240,164,80,.15);color:var(--accent-amber);border:1px solid var(--accent-amber);font-size:9px;letter-spacing:1px">PROSPECT</span></div>
       <div style="font-family:var(--font-mono);font-size:11px;color:var(--accent-amber);font-weight:700">${p.id}</div>
-      <div style="font-weight:700;font-size:14px;margin-top:4px;line-height:1.3;padding-right:80px">${p.name}</div>
+      <div style="font-weight:700;font-size:14px;margin-top:4px;line-height:1.3;padding-right:80px">${esc(p.name)}</div>
       <div style="font-size:11px;color:var(--text-secondary);margin-top:3px">${p.client || '— no client —'}</div>
       <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
         ${buBadge}

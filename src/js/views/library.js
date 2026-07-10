@@ -55,7 +55,7 @@ function renderLibrary(){
       return `<tr style="${isSuperseded?'opacity:.5':''}">
         <td style="font-family:var(--font-mono);font-size:11px;color:var(--accent-blue);font-weight:700">${d.number||'—'}</td>
         <td><span class="badge badge-gray">Rev ${d.rev||'A'}</span></td>
-        <td style="font-weight:600;font-size:12px">${d.name}</td>
+        <td style="font-weight:600;font-size:12px">${esc(d.name)}</td>
         <td><span class="badge" style="background:${cat.color}22;color:${cat.color}"><i class="fas ${cat.icon}" style="margin-right:4px;font-size:9px"></i>${d.category}</span></td>
         <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${d.description||''}">${d.description||'—'}</td>
         <td style="font-size:11px">${(d.uploadedBy||'').split('@')[0]}</td>

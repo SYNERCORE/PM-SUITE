@@ -101,7 +101,7 @@ function renderGantt(){
       }
     }
 
-    rows+=`<div style="display:flex;background:${pc}11;border-bottom:2px solid ${pc}55" title="${p.name}">
+    rows+=`<div style="display:flex;background:${pc}11;border-bottom:2px solid ${pc}55" title="${esc(p.name)}">
       <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:6px 10px;font-weight:700;font-size:12px;color:${pc};border-right:1px solid var(--border);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:flex;align-items:center;gap:6px">
         <i class="fas fa-folder" style="font-size:10px;flex-shrink:0"></i>${p.id} — ${p.name.substring(0,22)}
         <span style="margin-left:auto;font-size:9px;font-weight:400;color:var(--text-muted)">${pt.length} tasks</span>
@@ -181,11 +181,11 @@ function renderGantt(){
         // Summary bar: slim solid bracket with end caps spanning the children
         const lft=pct(tsStr),wdt=wPct(tsStr,teStr);
         bar=`${ghostBar}
-          <div style="position:absolute;left:${lft}%;width:${wdt}%;min-width:8px;top:9px;height:7px;background:#6e7681;border-radius:2px" title="Summary: ${t.name} (${tsStr} → ${teStr})"></div>
+          <div style="position:absolute;left:${lft}%;width:${wdt}%;min-width:8px;top:9px;height:7px;background:#6e7681;border-radius:2px" title="Summary: ${esc(t.name)} (${tsStr} → ${teStr})"></div>
           <div style="position:absolute;left:${lft}%;top:16px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid #6e7681;margin-left:-1px"></div>
           <div style="position:absolute;left:calc(${lft}% + ${wdt}% - 7px);top:16px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid #6e7681"></div>`;
       }else if(isMile){
-        bar=`${ghostBar}<div style="position:absolute;left:calc(${pct(tsStr)}% - 9px);top:4px;width:18px;height:18px;background:${isCrit?'#f85149':'var(--accent-amber)'};border-radius:2px;transform:rotate(45deg)" title="Milestone: ${t.name}"></div>`;
+        bar=`${ghostBar}<div style="position:absolute;left:calc(${pct(tsStr)}% - 9px);top:4px;width:18px;height:18px;background:${isCrit?'#f85149':'var(--accent-amber)'};border-radius:2px;transform:rotate(45deg)" title="Milestone: ${esc(t.name)}"></div>`;
       }else{
         const lft=pct(tsStr);
         const wdt=wPct(tsStr,teStr);
@@ -196,14 +196,14 @@ function renderGantt(){
           ${floatBar}
           <div style="position:absolute;left:${lft}%;width:${wdt}%;min-width:4px;top:7px;height:16px;background:${tc}33;border-radius:3px;border:1px solid ${tc}77"></div>
           ${progW>0?`<div style="position:absolute;left:${lft}%;width:${progW}%;min-width:4px;top:7px;height:16px;background:${tc};border-radius:3px;overflow:hidden;display:flex;align-items:center;padding:0 4px">
-            <span style="font-size:8px;color:#fff;white-space:nowrap;overflow:hidden">${t.name}</span>
+            <span style="font-size:8px;color:#fff;white-space:nowrap;overflow:hidden">${esc(t.name)}</span>
           </div>`:''}
           ${overdue?`<div style="position:absolute;left:calc(${lft+wdt}% + 2px);top:7px;font-size:9px;color:var(--accent-red)">⚠</div>`:''}`;
       }
 
       const predCount=(window.SHICCPMEngine&&t.predecessors)?SHICCPMEngine.parsePredecessors(t.predecessors).length:0;
 
-      rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${t.name} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0?' — Float: '+tf.toFixed(1)+'d':''}">
+      rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0?' — Float: '+tf.toFixed(1)+'d':''}">
         <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:4px 10px 4px ${26+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
           <div style="display:flex;align-items:center;gap:5px">
             <i class="fas ${isSummary?'fa-folder-open':isMile?'fa-diamond':'fa-circle'}" style="color:${isSummary?'#6e7681':isMile?(isCrit?'#f85149':'var(--accent-amber)'):tc};font-size:${isSummary?'9':isMile?'9':'5'}px;flex-shrink:0"></i>
@@ -436,7 +436,7 @@ function showBaselineManager(){
     const canAdd=bls.length<SHICBaseline.MAX_BASELINES;
 
     return `<div style="margin-bottom:16px">
-      <div style="font-size:12px;font-weight:700;color:var(--accent-blue);margin-bottom:8px"><i class="fas fa-folder" style="margin-right:5px"></i>${p.id} — ${p.name}</div>
+      <div style="font-size:12px;font-weight:700;color:var(--accent-blue);margin-bottom:8px"><i class="fas fa-folder" style="margin-right:5px"></i>${esc(p.id)} — ${esc(p.name)}</div>
       ${blList}
       ${canAdd?`<div style="display:flex;gap:6px;margin-top:6px">
         <input class="form-input" id="blName_${p.id}" placeholder="Baseline name (e.g. Rev-0)" style="height:30px;font-size:11px;flex:1">

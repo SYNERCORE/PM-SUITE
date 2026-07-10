@@ -122,7 +122,7 @@ function renderProcList(){
             ${p.poNumber?`<div style="font-size:10px;font-weight:700;color:var(--accent-blue)"><i class="fas fa-shopping-cart" style="width:12px"></i>PO: ${p.poNumber}</div>`:`<div style="font-size:10px;color:var(--text-muted)"><i class="fas fa-shopping-cart" style="width:12px"></i>PO: <em>Pending</em></div>`}
           </div>
         </td>
-        <td style="min-width:180px"><div style="font-weight:500;font-size:12px">${p.description}</div>
+        <td style="min-width:180px"><div style="font-weight:500;font-size:12px">${esc(p.description)}</div>
           ${p.notes?`<div style="font-size:10px;color:var(--text-muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px" title="${p.notes.replace(/"/g,'&quot;')}"><i class="fas fa-sticky-note" style="margin-right:3px"></i>${p.notes.substring(0,60)}${p.notes.length>60?'...':''}</div>`:''}
           ${p.attachments?.length?`<div style="margin-top:3px"><span class="badge badge-amber" style="font-size:8px"><i class="fas fa-paperclip" style="margin-right:3px"></i>${p.attachments.length} file${p.attachments.length!==1?'s':''}</span></div>`:''}
         </td>
@@ -182,7 +182,7 @@ function renderProcBoard(){
         <div style="background:var(--bg-hover);border:1px solid ${stage.color}44;border-top:none;border-radius:0 0 8px 8px;min-height:100px;padding:6px;display:flex;flex-direction:column;gap:6px">
           ${items.map(p=>`<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:7px;padding:9px;cursor:pointer" onclick="showProcDetail('${p.id}')">
             <div style="font-size:10px;font-family:var(--font-mono);color:${stage.color};font-weight:700;margin-bottom:3px">${p.id}</div>
-            <div style="font-size:11px;font-weight:500;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${p.description}</div>
+            <div style="font-size:11px;font-weight:500;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(p.description)}</div>
             <div style="font-size:10px;color:var(--text-secondary);margin-bottom:3px">${p.vendor||'—'}</div>
             <div style="display:flex;justify-content:space-between;align-items:center">
               <span style="font-size:10px;font-family:var(--font-mono);font-weight:600">₱${fmtNum(p.amount)}</span>
@@ -224,9 +224,9 @@ function renderProcLog(){
         <td style="font-size:10px;font-family:var(--font-mono);color:var(--text-muted)">${l.id}</td>
         <td style="font-size:10px;font-family:var(--font-mono);white-space:nowrap">${l.date}${l.time?' '+l.time:''}</td>
         <td><div style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--accent-blue)">${l.procId}</div>
-          <div style="font-size:9px;color:var(--text-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.description||''}</div>
+          <div style="font-size:9px;color:var(--text-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.description||'')}</div>
         </td>
-        <td style="font-size:11px;font-weight:500;min-width:150px">${p.description||'—'}</td>
+        <td style="font-size:11px;font-weight:500;min-width:150px">${esc(p.description||'—')}</td>
         <td><div style="font-size:12px;font-weight:600">${l.action}</div></td>
         <td>${before?`<span class="badge" style="background:${before.color}22;color:${before.color};font-size:9px">${before.label}</span>`:'<span style="color:var(--text-muted);font-size:10px">—</span>'}</td>
         <td>${after?`<span class="badge" style="background:${after.color}22;color:${after.color};font-size:9px">${after.label}</span>`:'<span style="color:var(--text-muted);font-size:10px">—</span>'}</td>
@@ -268,7 +268,7 @@ function renderProcHistory(){
               </div>              <span class="badge" style="background:${stage.color}22;color:${stage.color}"><i class="fas ${stage.icon}" style="margin-right:4px;font-size:9px"></i>${stage.label}</span>
               <span class="badge ${{'critical':'badge-red','high':'badge-amber','normal':'badge-blue','low':'badge-gray'}[p.priority||'normal']}">${p.priority||'normal'}</span>
             </div>
-            <div style="font-size:14px;font-weight:600;margin-bottom:3px">${p.description}</div>
+            <div style="font-size:14px;font-weight:600;margin-bottom:3px">${esc(p.description)}</div>
             <div style="font-size:11px;color:var(--text-secondary);display:flex;gap:12px;flex-wrap:wrap">
               <span><i class="fas fa-building" style="margin-right:4px"></i>${p.vendor||'—'}</span>
               <span><i class="fas fa-project-diagram" style="margin-right:4px"></i>${p.projectId}</span>
@@ -449,7 +449,7 @@ function showProcLogUpdate(procId, preselect=null){
   $('#genericModalTitle').textContent='Log Update — '+procId;
   $('#genericModalBody').innerHTML=`
   <div style="padding:8px 12px;background:rgba(56,139,253,.08);border-radius:7px;margin-bottom:14px;font-size:11px">
-    <strong>${p.description}</strong><br>
+    <strong>${esc(p.description)}</strong><br>
     <span style="color:var(--text-secondary)">Current Stage: </span>
     <span class="badge" style="background:${currentStage.color}22;color:${currentStage.color};font-size:9px">${currentStage.label}</span>
   </div>
@@ -894,7 +894,7 @@ function _procPickFromMaster(){
           <div class="pm-row" data-name="${(item.name||'').toLowerCase()}" style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:10px"
             onclick="_procApplyMasterItem('${item.id}','${(item.name||'').replace(/'/g,'\\\'').replace(/"/g,'&quot;')}','${item.unit||''}',${item.unitCost||0},'${item.category||'Materials'}')">
             <div style="flex:1">
-              <div style="font-weight:600;font-size:12px">${item.name}</div>
+              <div style="font-weight:600;font-size:12px">${esc(item.name)}</div>
               <div style="font-size:10px;color:var(--text-secondary)">${item.id} · ${item.category||'—'} · ${item.unit||'—'} · Std Cost: ₱${fmtNum(item.unitCost||0)}</div>
             </div>
             <i class="fas fa-chevron-right" style="color:var(--text-secondary)"></i>

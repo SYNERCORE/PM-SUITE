@@ -105,8 +105,8 @@ function renderReports(){
           </tr></thead>
           <tbody>${scopeProjects.map(p=>`<tr>
             <td style="font-size:10px;font-family:var(--font-mono);font-weight:700;color:${scopeColor}">${p.id}</td>
-            <td style="font-size:11px;font-weight:500;max-width:180px">${p.name}</td>
-            <td style="font-size:10px;color:var(--text-secondary)">${p.client}</td>
+            <td style="font-size:11px;font-weight:500;max-width:180px">${esc(p.name)}</td>
+            <td style="font-size:10px;color:var(--text-secondary)">${esc(p.client)}</td>
             <td style="font-size:10px">${(p.pm||'').split(' ')[0]}</td>
             <td>
               <div style="display:flex;align-items:center;gap:5px">

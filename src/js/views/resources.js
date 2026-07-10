@@ -53,7 +53,7 @@ ${sc('fas fa-times-circle','Unavailable',resources.filter(r=>r.availability==='u
 <div class="card"><div class="table-wrap"><table>
 <thead><tr><th>Resource</th><th>Role</th><th>Dept</th><th>Skills</th><th>Certifications</th><th>Utilization</th><th>Availability</th><th>Rate/Day</th></tr></thead>
 <tbody>${_pgSlice("resources",resources).map(r=>`<tr>
-<td><div style="display:flex;align-items:center;gap:7px">${avatarH(r.name)}<div><div style="font-weight:500;font-size:12px">${r.name}</div><div style="font-size:10px;color:var(--text-secondary)">${r.id}</div></div></div></td>
+<td><div style="display:flex;align-items:center;gap:7px">${avatarH(r.name)}<div><div style="font-weight:500;font-size:12px">${esc(r.name)}</div><div style="font-size:10px;color:var(--text-secondary)">${esc(r.id)}</div></div></div></td>
 <td style="font-size:11px">${r.role}</td><td style="font-size:11px">${r.dept}</td>
 <td>${r.skills.slice(0,2).map(s=>`<span class="chip" style="margin:1px;font-size:9px">${s}</span>`).join('')}</td>
 <td>${r.certifications.map(c=>`<span class="badge badge-purple" style="margin:1px;font-size:9px">${c}</span>`).join('')}</td>
@@ -111,7 +111,7 @@ function assetRow(r,isVeh=false){
 const nextMaintDue=r.nextMaint&&r.nextMaint!=='N/A'&&daysBetween(new Date().toISOString().split('T')[0],r.nextMaint)<14;
 return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono);font-weight:700">${r.id}</td>
-<td><div style="font-weight:500;font-size:12px;min-width:140px">${r.name}</div><div style="font-size:9px;color:var(--text-secondary)">${r.serialNo}</div></td>
+<td><div style="font-weight:500;font-size:12px;min-width:140px">${esc(r.name)}</div><div style="font-size:9px;color:var(--text-secondary)">${esc(r.serialNo)}</div></td>
 <td><span class="badge badge-gray">${r.category}</span></td>
 <td style="font-size:11px;min-width:110px">${r.make} ${r.model}</td>
 <td style="font-size:10px;font-family:var(--font-mono)">${isVeh?r.regNo:r.serialNo}</td>
@@ -187,7 +187,7 @@ ${sc('fas fa-calendar-times','Expiring Soon',tp.filter(t=>t.contractEnd&&daysBet
 const expSoon=t.contractEnd&&daysBetween(new Date().toISOString().split('T')[0],t.contractEnd)<60;
 return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${t.id}</td>
-<td><div style="font-weight:500;font-size:12px;min-width:140px">${t.name}</div></td>
+<td><div style="font-weight:500;font-size:12px;min-width:140px">${esc(t.name)}</div></td>
 <td><span class="badge badge-purple">${t.category}</span></td>
 <td style="font-size:11px;max-width:160px;color:var(--text-secondary)">${t.service}</td>
 <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.contactPerson,22)}<span style="font-size:11px">${t.contactPerson}</span></div></td>
@@ -350,21 +350,21 @@ $('#resTabContent').innerHTML=`
 <div class="card" style="border-left:3px solid var(--accent-red)">
 <div class="card-title" style="color:var(--accent-red)"><i class="fas fa-tools" style="margin-right:5px"></i>Maintenance Due (&lt;30 days)</div>
 ${maintDue.length?maintDue.map(r=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:11px">
-<span style="font-weight:500">${r.name}</span>
+<span style="font-weight:500">${esc(r.name)}</span>
 <span style="font-family:var(--font-mono);color:${daysBetween(now,r.nextMaint)<0?'var(--accent-red)':'var(--accent-amber)'}">${r.nextMaint}</span>
 </div>`).join(''):`<div style="padding:10px 0;font-size:11px;color:var(--text-muted)">No maintenance due soon ✓</div>`}
 </div>
 <div class="card" style="border-left:3px solid var(--accent-amber)">
 <div class="card-title" style="color:var(--accent-amber)"><i class="fas fa-crosshairs" style="margin-right:5px"></i>Calibration Due (&lt;30 days)</div>
 ${calDue.length?calDue.map(r=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:11px">
-<span style="font-weight:500">${r.name}</span>
+<span style="font-weight:500">${esc(r.name)}</span>
 <span style="font-family:var(--font-mono);color:${daysBetween(now,r.nextCal)<0?'var(--accent-red)':'var(--accent-amber)'}">${r.nextCal}</span>
 </div>`).join(''):`<div style="padding:10px 0;font-size:11px;color:var(--text-muted)">No calibration due soon ✓</div>`}
 </div>
 <div class="card" style="border-left:3px solid var(--accent-purple)">
 <div class="card-title" style="color:var(--accent-purple)"><i class="fas fa-certificate" style="margin-right:5px"></i>Cert/Permit Expiring (&lt;60 days)</div>
 ${certExp.length?certExp.map(r=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:11px">
-<span style="font-weight:500">${r.name}</span>
+<span style="font-weight:500">${esc(r.name)}</span>
 <span style="font-family:var(--font-mono);color:${daysBetween(now,r.certExpiry)<0?'var(--accent-red)':daysBetween(now,r.certExpiry)<30?'var(--accent-red)':'var(--accent-amber)'}">${r.certExpiry}</span>
 </div>`).join(''):`<div style="padding:10px 0;font-size:11px;color:var(--text-muted)">No certificates expiring soon ✓</div>`}
 </div>
@@ -398,7 +398,7 @@ const certAlert=r.certExpiry&&r.certExpiry!=='N/A'&&daysBetween(now,r.certExpiry
 const listKey=r.type==='Equipment'?'equipment':r.type==='Vehicle'?'vehicles':'tools';
 return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono);font-weight:700">${r.id}</td>
-<td style="font-weight:500;font-size:12px;min-width:140px">${r.name}</td>
+<td style="font-weight:500;font-size:12px;min-width:140px">${esc(r.name)}</td>
 <td><span class="badge ${r.type==='Equipment'?'badge-blue':r.type==='Vehicle'?'badge-amber':'badge-purple'}">${r.type}</span></td>
 <td>${resourceStatusBadge(r.status)}</td>
 <td><span class="badge badge-blue" style="font-size:10px">${r.projectId||'N/A'}</span></td>

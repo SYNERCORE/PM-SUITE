@@ -628,7 +628,7 @@ function showPredPicker(currentTaskId){
     return `<tr id="ppr-row-${t.id}">
       <td style="width:28px;text-align:center"><input type="checkbox" class="ppr-chk" data-id="${t.id}" ${chk} onchange="_pprToggle('${t.id}')"></td>
       <td style="font-size:11px;font-family:var(--font-mono);color:var(--text-secondary)">${t.wbs||t.id}</td>
-      <td style="font-size:12px">${t.name}</td>
+      <td style="font-size:12px">${esc(t.name)}</td>
       <td style="width:90px">
         <select class="form-select ppr-type" data-id="${t.id}" style="font-size:11px;padding:2px 4px;height:26px" ${sel?'':'disabled'} onchange="_pprApply()">
           ${['FS','SS','FF','SF'].map(x=>`<option value="${x}" ${typeVal===x?'selected':''}>${x} — ${x==='FS'?'Finish-to-Start':x==='SS'?'Start-to-Start':x==='FF'?'Finish-to-Finish':'Start-to-Finish'}</option>`).join('')}

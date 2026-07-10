@@ -1242,7 +1242,7 @@ function _whIssueHTML(){
           <label class="form-label">Project</label>
           <select class="form-control" id="wh-iss-proj">
             <option value="">— No project —</option>
-            ${projects.map(p=>{const label=`${p.id} — ${p.name||''}`;return`<option value="${p.id}">${label.length>60?label.slice(0,60)+'…':label}</option>`;}).join('')}
+            ${projects.map(p=>{const label=`${p.id} — ${p.name||''}`;const disp=label.length>60?label.slice(0,60)+'…':label;return`<option value="${esc(p.id)}">${esc(disp)}</option>`;}).join('')}
           </select>
         </div>
         <div class="form-group" style="margin:0">
@@ -2027,7 +2027,7 @@ function _whPrintSlip(d){
   while(padded.length<10)padded.push({name:'',code:'',unit:'',qty:'',wac:0,total:0});
   const rows=padded.map((r,i)=>{
     const reason=i===0&&d.notes?d.notes:'';
-    const name=r.name?`${r.code?`<span style="color:#888;font-size:7pt">[${r.code}]</span> `:''}${r.name}`:'';
+    const name=r.name?`${r.code?`<span style="color:#888;font-size:7pt">[${esc(r.code)}]</span> `:''}${esc(r.name)}`:'';
     const stock=(r.stock!=null&&r.stock!=='')?_whFmt(r.stock)+' '+( r.unit||''):'';
     return`<tr>
       <td class="tc">${i<d.items.length?i+1:''}</td>
@@ -2317,8 +2317,8 @@ function _whPickFromMaster(){
             const inWh=enrolled.has(item.id);
             return`<div class="im-row" data-name="${(item.name||'').toLowerCase()}" style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;${inWh?'opacity:.5':'cursor:pointer'}" ${!inWh?`onclick="_whEnrollFromPicker('${item.id}','${item._type}')"`:'title="Already in Warehouse"'}>
               <div style="flex:1">
-                <div style="font-weight:600;font-size:12px">${item.name}</div>
-                <div style="font-size:10px;color:var(--text-secondary)">${item.id} · ${item.category||'—'} · ${item.unit||'—'} · Std Cost: ₱${fmtNum(item.unitCost||0)}</div>
+                <div style="font-weight:600;font-size:12px">${esc(item.name)}</div>
+                <div style="font-size:10px;color:var(--text-secondary)">${esc(item.id)} · ${esc(item.category||'—')} · ${esc(item.unit||'—')} · Std Cost: ₱${fmtNum(item.unitCost||0)}</div>
               </div>
               ${inWh?'<span style="font-size:10px;color:var(--accent-green)"><i class="fas fa-check"></i> In Warehouse</span>':'<span style="font-size:10px;color:var(--accent-blue)"><i class="fas fa-plus"></i> Enroll</span>'}
             </div>`;
@@ -2560,7 +2560,7 @@ function _whShowAddRequest(){
             <label class="form-label">Project</label>
             <select class="form-control" id="whr-proj">
               <option value="">— No project —</option>
-              ${projects.map(p=>{const label=`${p.id} — ${p.name||''}`;return`<option value="${p.id}">${label.length>60?label.slice(0,60)+'…':label}</option>`;}).join('')}
+              ${projects.map(p=>{const label=`${p.id} — ${p.name||''}`;const disp=label.length>60?label.slice(0,60)+'…':label;return`<option value="${esc(p.id)}">${esc(disp)}</option>`;}).join('')}
             </select>
           </div>
           <div class="form-group" style="margin:0">

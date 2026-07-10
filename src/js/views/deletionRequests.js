@@ -361,7 +361,7 @@ function showChangeProjectId(id) {
     <div style="margin-bottom:12px">
       <div style="font-size:11px;color:var(--text-muted)">CURRENT ID</div>
       <div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:var(--accent-blue)">${p.id}</div>
-      <div style="font-size:12px;color:var(--text-secondary);margin-top:3px">${p.name}</div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-top:3px">${esc(p.name)}</div>
       <div style="margin-top:6px"><span class="badge" style="background:rgba(240,164,80,.15);color:var(--accent-amber)">Status: ${status}</span></div>
     </div>
     <div class="form-group" style="margin-bottom:12px">

@@ -114,7 +114,7 @@ ${(()=>{
     const rd=(typeof _projectReadiness==='function')?_projectReadiness(p.id):{overall:'go',fails:0,warns:0};
     const cfg=rd.overall==='go'?{c:'var(--accent-green)',ic:'fa-check-circle',l:'GO'}:rd.overall==='caution'?{c:'var(--accent-amber)',ic:'fa-exclamation-triangle',l:'CAUTION'}:{c:'var(--accent-red)',ic:'fa-times-circle',l:'NOT READY'};
     return`<tr style="cursor:pointer" onclick="showProjectDetail('${p.id}');setTimeout(()=>{detailTab='readiness';renderDetailTab();},300)">
-      <td style="padding:7px 10px"><div style="font-size:12px;font-weight:600">${p.id}</div><div style="font-size:10px;color:var(--text-secondary);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name||''}</div></td>
+      <td style="padding:7px 10px"><div style="font-size:12px;font-weight:600">${p.id}</div><div style="font-size:10px;color:var(--text-secondary);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name||'')}</div></td>
       <td style="padding:7px 10px;text-align:center"><span style="font-size:10px;padding:2px 8px;border-radius:8px;background:${cfg.c}22;color:${cfg.c};font-weight:700"><i class="fas ${cfg.ic}" style="margin-right:4px;font-size:9px"></i>${cfg.l}</span></td>
       <td style="padding:7px 10px;font-size:10px;color:var(--accent-red);text-align:center">${rd.fails>0?rd.fails+' blocker'+(rd.fails!==1?'s':''):'-'}</td>
       <td style="padding:7px 10px;font-size:10px;color:var(--accent-amber);text-align:center">${rd.warns>0?rd.warns+' issue'+(rd.warns!==1?'s':''):'-'}</td>
@@ -265,7 +265,7 @@ function _renderWarehouseDashSection(){
         <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">TOP 5 ISSUED THIS MONTH</div>
         ${top5.length?top5.map((t,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
           <div style="width:18px;height:18px;border-radius:50%;background:var(--accent-blue)22;color:var(--accent-blue);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">${i+1}</div>
-          <div style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.name}</div>
+          <div style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.name)}</div>
           <div style="font-size:11px;font-family:var(--font-mono);font-weight:600;color:var(--accent-amber)">${t.qty} ${t.unit}</div>
         </div>`).join(''):'<div style="font-size:11px;color:var(--text-secondary);padding:8px 0">No issues this month</div>'}
       </div>

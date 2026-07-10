@@ -12,8 +12,8 @@ const te=Math.round(((tot-Math.max(0,dl))/Math.max(1,tot))*100);
 return`<div class="card">
 <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
 <div><div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono)">${p.id}</div>
-<div style="font-size:14px;font-weight:600;margin:2px 0">${p.name}</div>
-<div style="font-size:11px;color:var(--text-secondary)">${p.pm}</div></div>${sBadge(p.status)}</div>
+<div style="font-size:14px;font-weight:600;margin:2px 0">${esc(p.name)}</div>
+<div style="font-size:11px;color:var(--text-secondary)">${esc(p.pm)}</div></div>${sBadge(p.status)}</div>
 <div style="margin-bottom:10px">
 <div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="font-size:11px;color:var(--text-secondary)">Physical Progress</span><span style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:${pColor(p.progress)}">${p.progress}%</span></div>
 <div class="progress-bar" style="height:9px"><div class="progress-fill" style="width:${p.progress}%;background:${pColor(p.progress)};border-radius:5px"></div></div></div>

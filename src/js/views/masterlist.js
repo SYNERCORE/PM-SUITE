@@ -155,7 +155,7 @@ function renderMlAll(){
   <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Category</th><th>Details</th><th>Identifier</th><th>Status</th><th>Project</th><th>Location</th><th>Next Maint.</th><th>Cal / Accred.</th><th>Cert Expiry</th><th>Unit Rate (₱)</th><th>Notes</th></tr></thead>
   <tbody>${rows.length?rows.map(r=>`<tr data-rowid="${r.id}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700;white-space:nowrap">${r.id}</td>
-    <td style="font-weight:500;font-size:12px;min-width:150px">${r.name}</td>
+    <td style="font-weight:500;font-size:12px;min-width:150px">${esc(r.name)}</td>
     <td><span class="badge" style="background:${typeColor[r.type]||'#8b949e'}22;color:${typeColor[r.type]||'#8b949e'}">${r.type}</span></td>
     <td><span class="badge badge-gray">${r.category||'—'}</span></td>
     <td style="font-size:11px;color:var(--text-secondary);max-width:130px">${r.detail}</td>
@@ -197,7 +197,7 @@ function renderMlPersonnel(){
   <thead><tr><th>ID</th><th>Name</th><th>Role</th><th>Department</th><th>Skills</th><th>Certifications</th><th>Utilization%</th><th>Availability</th><th>Hourly Rate (₱)</th><th>Daily Rate (₱)</th><th></th></tr></thead>
   <tbody>${_pgSliceN('ml_personnel',data,20).length?_pgSliceN('ml_personnel',data,20).map(r=>`<tr data-rowid="${r.id}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700">${r.id}</td>
-    <td><div style="display:flex;align-items:center;gap:8px">${avatarH(r.name,30)}<div><div style="font-weight:600;font-size:12px">${r.name}</div><div style="font-size:9px;color:var(--text-muted)">${r.id}</div></div></div></td>
+    <td><div style="display:flex;align-items:center;gap:8px">${avatarH(r.name,30)}<div><div style="font-weight:600;font-size:12px">${esc(r.name)}</div><div style="font-size:9px;color:var(--text-muted)">${r.id}</div></div></div></td>
     <td><input class="form-input" value="${r.role||''}" style="min-width:120px;height:26px;font-size:11px" oninput="mlSavePersonnel('${r.id}','role',this.value)" onchange="mlSavePersonnel('${r.id}','role',this.value)"></td>
     <td><input class="form-input" value="${r.dept||''}" style="min-width:100px;height:26px;font-size:11px" oninput="mlSavePersonnel('${r.id}','dept',this.value)" onchange="mlSavePersonnel('${r.id}','dept',this.value)"></td>
     <td style="max-width:160px">${(r.skills||[]).map(s=>`<span class="chip" style="margin:1px;font-size:9px">${s}</span>`).join('')||'<span style="color:var(--text-muted);font-size:10px">—</span>'}</td>
@@ -309,7 +309,7 @@ function renderMlEquipment(){
     const cA=r.nextCal&&r.nextCal!=='N/A'&&daysBetween(now,r.nextCal)<14;
     return`<tr data-rowid="${r.id}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700;white-space:nowrap">${r.id}</td>
-    <td style="font-weight:500;font-size:12px;min-width:140px">${r.name}</td>
+    <td style="font-weight:500;font-size:12px;min-width:140px">${esc(r.name)}</td>
     <td><span class="badge badge-gray">${r.category}</span></td>
     <td style="font-size:11px">${r.make}</td>
     <td style="font-size:11px">${r.model}</td>
@@ -354,7 +354,7 @@ function renderMlTools(){
     const cA=r.nextCal&&r.nextCal!=='N/A'&&daysBetween(now,r.nextCal)<14;
     return`<tr data-rowid="${r.id}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700;white-space:nowrap">${r.id}</td>
-    <td style="font-weight:500;font-size:12px;min-width:140px">${r.name}</td>
+    <td style="font-weight:500;font-size:12px;min-width:140px">${esc(r.name)}</td>
     <td><span class="badge badge-gray">${r.category}</span></td>
     <td style="font-size:11px">${r.make}</td>
     <td style="font-size:11px">${r.model}</td>
@@ -396,7 +396,7 @@ function renderMlVehicles(){
     const mA=r.nextMaint&&r.nextMaint!=='N/A'&&daysBetween(now,r.nextMaint)<14;
     return`<tr data-rowid="${r.id}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700;white-space:nowrap">${r.id}</td>
-    <td style="font-weight:500;font-size:12px;min-width:140px">${r.name}</td>
+    <td style="font-weight:500;font-size:12px;min-width:140px">${esc(r.name)}</td>
     <td><span class="badge badge-gray">${r.category}</span></td>
     <td style="font-size:11px">${r.make}</td>
     <td style="font-size:11px">${r.model}</td>
@@ -603,7 +603,7 @@ function renderMlMaterials(){
   <thead><tr><th>ID</th><th>Material Name</th><th>Project</th><th>Quantity</th><th>Unit</th><th>Unit Cost (₱)</th><th>Total Value (₱)</th><th>Supplier</th><th>Delivery Date</th><th>Status</th><th>Critical</th><th></th></tr></thead>
   <tbody>${data.length?data.map(m=>`<tr data-rowid="${m.id}" style="${m.critical?'border-left:3px solid var(--accent-amber)':''}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700">${m.id}</td>
-    <td style="font-weight:500;font-size:12px;min-width:180px">${m.name}</td>
+    <td style="font-weight:500;font-size:12px;min-width:180px">${esc(m.name)}</td>
     <td><select class="form-select" style="height:30px;font-size:11px;min-width:80px" onchange="mlSaveMaterial('${m.id}','projectId',this.value)">${projOpts(m.projectId)}</select></td>
     <td><input class="form-input" type="number" value="${m.qty}" style="width:80px;height:26px;font-family:var(--font-mono);font-size:11px" oninput="mlSaveMaterial('${m.id}','qty',+this.value);setTimeout(renderMlMaterials,700)" onchange="mlSaveMaterial('${m.id}','qty',+this.value);setTimeout(renderMlMaterials,700)"></td>
     <td><span class="badge badge-blue">${m.unit}</span></td>
@@ -648,7 +648,7 @@ function renderMlThirdParty(){
     const expSoon=t.contractEnd&&daysBetween(now,t.contractEnd)<60&&daysBetween(now,t.contractEnd)>0;
     return`<tr data-rowid="${t.id}" style="${expSoon?'background:rgba(248,81,73,.04)':''}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700">${t.id}</td>
-    <td style="font-weight:600;font-size:12px;min-width:150px">${t.name}</td>
+    <td style="font-weight:600;font-size:12px;min-width:150px">${esc(t.name)}</td>
     <td><span class="badge badge-purple">${t.category}</span></td>
     <td style="font-size:10px;color:var(--text-secondary);max-width:140px">${t.service}</td>
     <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.contactPerson,22)}<span style="font-size:11px">${t.contactPerson}</span></div></td>

@@ -8452,7 +8452,7 @@ ${(()=>{
     const rd=(typeof _projectReadiness==='function')?_projectReadiness(p.id):{overall:'go',fails:0,warns:0};
     const cfg=rd.overall==='go'?{c:'var(--accent-green)',ic:'fa-check-circle',l:'GO'}:rd.overall==='caution'?{c:'var(--accent-amber)',ic:'fa-exclamation-triangle',l:'CAUTION'}:{c:'var(--accent-red)',ic:'fa-times-circle',l:'NOT READY'};
     return`<tr style="cursor:pointer" onclick="showProjectDetail('${p.id}');setTimeout(()=>{detailTab='readiness';renderDetailTab();},300)">
-      <td style="padding:7px 10px"><div style="font-size:12px;font-weight:600">${p.id}</div><div style="font-size:10px;color:var(--text-secondary);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name||''}</div></td>
+      <td style="padding:7px 10px"><div style="font-size:12px;font-weight:600">${p.id}</div><div style="font-size:10px;color:var(--text-secondary);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name||'')}</div></td>
       <td style="padding:7px 10px;text-align:center"><span style="font-size:10px;padding:2px 8px;border-radius:8px;background:${cfg.c}22;color:${cfg.c};font-weight:700"><i class="fas ${cfg.ic}" style="margin-right:4px;font-size:9px"></i>${cfg.l}</span></td>
       <td style="padding:7px 10px;font-size:10px;color:var(--accent-red);text-align:center">${rd.fails>0?rd.fails+' blocker'+(rd.fails!==1?'s':''):'-'}</td>
       <td style="padding:7px 10px;font-size:10px;color:var(--accent-amber);text-align:center">${rd.warns>0?rd.warns+' issue'+(rd.warns!==1?'s':''):'-'}</td>
@@ -8603,7 +8603,7 @@ function _renderWarehouseDashSection(){
         <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">TOP 5 ISSUED THIS MONTH</div>
         ${top5.length?top5.map((t,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
           <div style="width:18px;height:18px;border-radius:50%;background:var(--accent-blue)22;color:var(--accent-blue);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">${i+1}</div>
-          <div style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.name}</div>
+          <div style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.name)}</div>
           <div style="font-size:11px;font-family:var(--font-mono);font-weight:600;color:var(--accent-amber)">${t.qty} ${t.unit}</div>
         </div>`).join(''):'<div style="font-size:11px;color:var(--text-secondary);padding:8px 0">No issues this month</div>'}
       </div>
@@ -9001,9 +9001,9 @@ function _renderProjTable(projects) {
             const progColor = (typeof pColor === 'function') ? pColor(p.progress) : '#388bfd';
             return `<tr style="border-bottom:1px solid var(--border);transition:background .15s" onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background=''">
               <td style="padding:8px 10px;font-family:var(--font-mono);font-size:10px;color:var(--accent-blue);font-weight:700;cursor:pointer;white-space:nowrap" onclick="showProjectDetail('${p.id}')" title="Open project detail">${p.id}</td>
-              <td style="padding:8px 10px;font-weight:600;cursor:pointer;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="showProjectDetail('${p.id}')" title="${(p.name||'').replace(/"/g,'&quot;')}">${p.name||'-'}</td>
-              <td style="padding:8px 10px;color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(p.client||'').replace(/"/g,'&quot;')}">${p.client||'-'}</td>
-              <td style="padding:8px 10px"><span style="font-size:9px;padding:2px 7px;border-radius:8px;background:var(--bg-hover);color:var(--text-secondary);text-transform:capitalize">${p.phase||'-'}</span></td>
+              <td style="padding:8px 10px;font-weight:600;cursor:pointer;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="showProjectDetail('${p.id}')" title="${esc(p.name||'')}">${esc(p.name||'-')}</td>
+              <td style="padding:8px 10px;color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.client||'')}">${esc(p.client||'-')}</td>
+              <td style="padding:8px 10px"><span style="font-size:9px;padding:2px 7px;border-radius:8px;background:var(--bg-hover);color:var(--text-secondary);text-transform:capitalize">${esc(p.phase||'-')}</span></td>
               <td style="padding:8px 10px"><span style="font-size:9px;padding:2px 8px;border-radius:8px;background:${statusColor}22;color:${statusColor};font-weight:700;text-transform:uppercase">${p.status||'-'}</span></td>
               <td style="padding:8px 10px">
                 <div style="display:flex;align-items:center;gap:6px">
@@ -9041,13 +9041,13 @@ function _renderProjList(projects) {
           <span style="width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0"></span>
           <span style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--accent-blue)">${p.id}</span>
           <span style="font-size:10px;padding:1px 7px;border-radius:8px;background:${statusColor}22;color:${statusColor};font-weight:700;text-transform:uppercase">${p.status||'-'}</span>
-          <span style="font-size:10px;color:var(--text-muted)">· ${p.client||'-'}${p.phase?' · '+p.phase:''}</span>
+          <span style="font-size:10px;color:var(--text-muted)">· ${esc(p.client||'-')}${p.phase?' · '+esc(p.phase):''}</span>
           ${p._flagged?'<i class="fas fa-flag" style="color:var(--accent-red);margin-left:auto"></i>':''}
           ${overdue?'<i class="fas fa-exclamation-triangle" style="color:var(--accent-amber);margin-left:auto"></i>':''}
           ${(()=>{const rd=_projectReadiness(p.id);return rd.overall==='go'?'<span style="font-size:9px;padding:1px 7px;border-radius:8px;background:rgba(63,185,80,.15);color:var(--accent-green);font-weight:700;margin-left:auto">GO</span>':rd.overall==='caution'?'<span style="font-size:9px;padding:1px 7px;border-radius:8px;background:rgba(240,164,80,.15);color:var(--accent-amber);font-weight:700;margin-left:auto">CAUTION</span>':'<span style="font-size:9px;padding:1px 7px;border-radius:8px;background:rgba(248,81,73,.15);color:var(--accent-red);font-weight:700;margin-left:auto">NOT READY</span>';})()}
           <button class="btn btn-secondary btn-sm btn-icon" style="height:24px;width:24px;font-size:10px;margin-left:5px" onclick="event.stopPropagation();showProjectForm('${p.id}')" title="Edit"><i class="fas fa-pen"></i></button>
         </div>
-        <div style="font-size:13px;font-weight:600;line-height:1.3;margin-bottom:6px">${p.name||'-'}</div>
+        <div style="font-size:13px;font-weight:600;line-height:1.3;margin-bottom:6px">${esc(p.name||'-')}</div>
         <div style="display:flex;align-items:center;gap:10px;font-size:10px;color:var(--text-muted)">
           <div style="flex:1;display:flex;align-items:center;gap:6px">
             <div style="flex:1;height:5px;background:var(--bg-hover);border-radius:3px;overflow:hidden"><div style="width:${p.progress||0}%;height:100%;background:${progColor}"></div></div>
@@ -9071,8 +9071,8 @@ function _renderProjCards(projects) {
       <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
         <div>
           <div class="project-card-id">${p.id}${p.discipline?'<span class="project-card-id-discipline">'+p.discipline+'</span>':''}</div>
-          <div class="project-card-name">${p.name}</div>
-          <div class="project-card-client"><i class="fas fa-building" style="font-size:9px"></i> ${p.client}</div>
+          <div class="project-card-name">${esc(p.name)}</div>
+          <div class="project-card-client"><i class="fas fa-building" style="font-size:9px"></i> ${esc(p.client)}</div>
           ${p.businessUnit?(()=>{const b=(AppState.data.businessUnits||[]).find(x=>x.id===p.businessUnit);return b?`<div style="margin-top:3px"><span style="font-size:9px;padding:1px 7px;border-radius:10px;background:${b.color||'#388bfd'}22;color:${b.color||'#388bfd'};font-weight:600;border:1px solid ${b.color||'#388bfd'}44"><i class="fas fa-layer-group" style="margin-right:3px;font-size:8px"></i>${b.name}</span></div>`:'';})():''}
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">${typeof sBadge==='function'?sBadge(p.status):p.status}${typeof pBadge==='function'?pBadge(p.priority):''}</div>
@@ -9503,7 +9503,7 @@ function printProjectDetail(pid){
     @media print{body{padding:10px}}
   </style></head><body>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-    <div><h1>${p.name}</h1><div style="font-size:11px;color:#555">${p.id} · ${p.client} · PM: ${p.pm||'—'}</div></div>
+    <div><h1>${esc(p.name)}</h1><div style="font-size:11px;color:#555">${p.id} · ${esc(p.client)} · PM: ${esc(p.pm||'—')}</div></div>
     <div style="font-size:10px;color:#777;text-align:right">Printed: ${new Date().toLocaleString()}<br>Status: ${p.status} · Priority: ${p.priority}</div>
   </div>
   <div class="grid">
@@ -9616,13 +9616,13 @@ function renderProjectDetail(){
       <div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
           <span style="font-size:18px;font-family:var(--font-mono);color:#f59e0b;font-weight:800;letter-spacing:.5px;padding:3px 12px;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);border-radius:6px">${p.id}</span>
-          <span style="font-size:10px;color:rgba(255,255,255,.6)">${p.discipline||'—'}</span>
+          <span style="font-size:10px;color:rgba(255,255,255,.6)">${esc(p.discipline||'—')}</span>
           <span style="font-size:10px;color:rgba(255,255,255,.6)">&middot;</span>
-          <span style="font-size:10px;color:rgba(255,255,255,.6)">Phase: ${p.phase||'—'}</span>
+          <span style="font-size:10px;color:rgba(255,255,255,.6)">Phase: ${esc(p.phase||'—')}</span>
           ${p.duration||(p.startDate&&p.endDate)?`<span style="font-size:10px;color:rgba(255,255,255,.6)">&middot;</span><span style="font-size:10px;color:rgba(255,255,255,.6)">Duration: ${p.duration||Math.max(1,Math.round((new Date(p.endDate)-new Date(p.startDate))/86400000)+1)} days</span>`:''}
         </div>
-        <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:4px">${p.name}</div>
-        <div style="font-size:13px;color:rgba(255,255,255,.7)"><i class="fas fa-building" style="margin-right:6px"></i>${p.client} &nbsp;|&nbsp; <i class="fas fa-map-marker-alt" style="margin-right:6px"></i>${p.location}</div>
+        <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:4px">${esc(p.name)}</div>
+        <div style="font-size:13px;color:rgba(255,255,255,.7)"><i class="fas fa-building" style="margin-right:6px"></i>${esc(p.client)} &nbsp;|&nbsp; <i class="fas fa-map-marker-alt" style="margin-right:6px"></i>${esc(p.location)}</div>
       </div>
       <div style="text-align:right">
         <div style="font-size:34px;font-weight:700;font-family:var(--font-mono);color:${pColor(p.progress)}">${p.progress}%</div>
@@ -9919,7 +9919,7 @@ function renderDetailReadiness(){
           <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-radius:6px;background:${statusBg(item.status)};border:1px solid ${statusBorder(item.status)}">
             ${statusIcon(item.status)}
             <div style="flex:1;min-width:0">
-              <div style="font-size:11px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.name}</div>
+              <div style="font-size:11px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(item.name)}</div>
               <div style="font-size:10px;color:var(--text-secondary);margin-top:1px">${item.detail}</div>
             </div>
             ${item.status!=='go'?`<button class="btn btn-secondary btn-sm" style="height:22px;font-size:9px;padding:0 7px;flex-shrink:0" onclick="navigate('${item.link||'masterlist'}')">Fix</button>`:''}
@@ -9998,8 +9998,8 @@ function renderDetailOverview(){
       <div style="font-size:14px;font-weight:600;margin-bottom:14px"><i class="fas fa-edit" style="color:var(--accent-blue);margin-right:7px"></i>Project Information</div>
       <div class="form-grid">
         <div class="form-group"><label class="form-label">Project ID</label><input class="form-input" id="dp_id" value="${p.id}" readonly style="opacity:.6;font-family:var(--font-mono)"></div>
-        <div class="form-group"><label class="form-label">Project Name</label><input class="form-input" id="dp_name" value="${(p.name||'').replace(/"/g,'&quot;')}"></div>
-        <div class="form-group"><label class="form-label">Client</label><input class="form-input" id="dp_client" value="${(p.client||'').replace(/"/g,'&quot;')}"></div>
+        <div class="form-group"><label class="form-label">Project Name</label><input class="form-input" id="dp_name" value="${esc(p.name||'')}"></div>
+        <div class="form-group"><label class="form-label">Client</label><input class="form-input" id="dp_client" value="${esc(p.client||'')}"></div>
         <div class="form-group"><label class="form-label">Location</label><input class="form-input" id="dp_loc" value="${(p.location||'').replace(/"/g,'&quot;')}"></div>
         <div class="form-group"><label class="form-label">Project Manager</label><input class="form-input" id="dp_pm" value="${(p.pm||'').replace(/"/g,'&quot;')}"></div>
         <div class="form-group"><label class="form-label">Discipline</label><input class="form-input" id="dp_disc" value="${(p.discipline||'').replace(/"/g,'&quot;')}"></div>
@@ -10247,7 +10247,7 @@ function renderDetailOverview(){
 
   // Alerts + Recent Transactions
   let alertItems=[];
-  overdueTasks.forEach(t=>{alertItems.push(`<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)"><i class="fas fa-clock" style="color:var(--accent-red);margin-top:2px;flex-shrink:0"></i><div><div style="font-size:11px;font-weight:500">Overdue Task: ${t.name}</div><div style="font-size:10px;color:var(--text-secondary)">Due: ${t.dueDate} &middot; ${t.assignee||'Unassigned'}</div></div></div>`);});
+  overdueTasks.forEach(t=>{alertItems.push(`<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)"><i class="fas fa-clock" style="color:var(--accent-red);margin-top:2px;flex-shrink:0"></i><div><div style="font-size:11px;font-weight:500">Overdue Task: ${esc(t.name)}</div><div style="font-size:10px;color:var(--text-secondary)">Due: ${t.dueDate} &middot; ${t.assignee||'Unassigned'}</div></div></div>`);});
   risks.filter(r=>r.status==='active'&&(r.impact||0)*(r.probability||0)>=6).forEach(r=>{alertItems.push(`<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)"><i class="fas fa-shield-alt" style="color:var(--accent-red);margin-top:2px;flex-shrink:0"></i><div><div style="font-size:11px;font-weight:500">High Risk: ${(r.description||'').substring(0,50)||'&#8212;'}</div><div style="font-size:10px;color:var(--text-secondary)">Score: ${(r.impact||0)*(r.probability||0)}</div></div></div>`);});
   lowStock.forEach(c=>{alertItems.push(`<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)"><i class="fas fa-exclamation-triangle" style="color:var(--accent-amber);margin-top:2px;flex-shrink:0"></i><div><div style="font-size:11px;font-weight:500">Low Stock: ${c.name}</div><div style="font-size:10px;color:var(--text-secondary)">${c.qtyOnHand} ${c.unit} &middot; Min: ${c.minStock}</div></div></div>`);});
   actions.filter(a=>a.status!=='closed'&&a.dueDate&&isOverdue(a.dueDate)).forEach(a=>{alertItems.push(`<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)"><i class="fas fa-clipboard-list" style="color:var(--accent-amber);margin-top:2px;flex-shrink:0"></i><div><div style="font-size:11px;font-weight:500">Overdue Action: ${(a.description||'').substring(0,50)||'&#8212;'}</div><div style="font-size:10px;color:var(--text-secondary)">Due: ${a.dueDate}</div></div></div>`);});
@@ -10361,7 +10361,7 @@ function renderDetailTaskRows(tasks){
   const ordered=typeof _orderTasksHier==='function'?_orderTasksHier(tasks):tasks.map(t=>({t,depth:0}));
   return ordered.map(({t,depth})=>{const isSum=typeof _taskHasChildren==='function'&&_taskHasChildren(t.id,tasks);return`<tr>
     <td style="font-size:10px;font-family:var(--font-mono);color:var(--text-muted)">${t.wbs||t.id}</td>
-    <td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${t.name}</div></td>
+    <td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${esc(t.name)}</div></td>
     <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.assignee,22)}<span style="font-size:11px">${t.assignee}</span></div></td>
     <td style="font-size:11px;color:var(--text-secondary)">${t.dept}</td>
     <td style="font-size:11px;font-family:var(--font-mono)">${t.startDate}</td>
@@ -10743,7 +10743,7 @@ function renderDetailResources(){
         const pct2=tc2>0?Math.round(dc/tc2*100):0;
         const res=(AppState.data.resources||[]).find(r=>r.id===m.resourceId)||{};
         return`<tr>
-        <td><div style="display:flex;align-items:center;gap:8px">${avatarH(m.name,30)}<div><div style="font-weight:600;font-size:12px">${m.name}</div><div style="font-size:9px;color:var(--text-muted)">${res.dept||m.department||'—'}</div></div></div></td>
+        <td><div style="display:flex;align-items:center;gap:8px">${avatarH(m.name,30)}<div><div style="font-weight:600;font-size:12px">${esc(m.name)}</div><div style="font-size:9px;color:var(--text-muted)">${res.dept||m.department||'—'}</div></div></div></td>
         <td><input class="form-input" value="${m.role||''}" style="min-width:110px;height:26px;font-size:11px" oninput="updateTeamMember('${m.id}','role',this.value)" onchange="updateTeamMember('${m.id}','role',this.value)"></td>
         <td style="font-size:11px">${m.department||res.dept||'—'}</td>
         <td>${sb(res.availability||'—')}</td>
@@ -10863,7 +10863,7 @@ function renderDetailDocRows(docs){
   return docs.map(d=>`<tr>
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700">${d.number}</td>
     <td><input class="form-input" value="${d.rev}" style="width:48px;height:26px;font-size:11px" onchange="updateDocField('${d.id}','rev',this.value)"></td>
-    <td><input class="form-input" value="${d.name}" style="min-width:160px;height:26px;font-size:12px;font-weight:500" onchange="updateDocField('${d.id}','name',this.value)"></td>
+    <td><input class="form-input" value="${esc(d.name)}" style="min-width:160px;height:26px;font-size:12px;font-weight:500" onchange="updateDocField('${d.id}','name',this.value)"></td>
     <td><select class="form-select" style="height:30px;font-size:11px" onchange="updateDocField('${d.id}','category',this.value)">${_getDropdown('doc_categories').map(c=>`<option ${d.category===c?'selected':''}>${c}</option>`).join('')}</select></td>
     <td><input class="form-input" value="${d.author}" style="min-width:100px;height:26px;font-size:11px" onchange="updateDocField('${d.id}','author',this.value)"></td>
     <td><input class="form-input" type="date" value="${safeDate(d.date)}" style="height:26px;font-size:11px" onchange="updateDocField('${d.id}','date',this.value)"></td>
@@ -11694,7 +11694,7 @@ function _ulFilterRes(i,query){
       style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)"
       onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">
       <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name}</div>
+        <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.name)}</div>
         <div style="font-size:10px;color:var(--text-muted)">${r.id} · ${r.unit}</div>
       </div>
       <span style="font-size:10px;padding:1px 7px;border-radius:10px;background:${_UL_TYPE_COLORS[r.type]||'#888'}22;color:${_UL_TYPE_COLORS[r.type]||'#888'};white-space:nowrap">${r.type}</span>
@@ -12676,16 +12676,16 @@ function renderDetailGantt(){
       barContent=`
         <div style="position:absolute;left:${lft}%;width:${wdt}%;min-width:4px;top:9px;height:${BAR_H}px;background:${c}33;border-radius:3px;border:1px solid ${c}88"></div>
         ${prog>0?`<div style="position:absolute;left:${lft}%;width:${prog}%;min-width:4px;top:9px;height:${BAR_H}px;background:${c};border-radius:3px;overflow:hidden;display:flex;align-items:center">
-          <span style="font-size:8px;color:#fff;padding:0 4px;white-space:nowrap;overflow:hidden">${t.name}</span>
+          <span style="font-size:8px;color:#fff;padding:0 4px;white-space:nowrap;overflow:hidden">${esc(t.name)}</span>
         </div>`:''}
         ${overdue?`<div style="position:absolute;left:calc(${lft+wdt}% + 2px);top:9px;font-size:9px;color:var(--accent-red)">⚠</div>`:''}`;
     }
 
-    rowsHtml+=`<div id="ganttRow_${t.id}" style="display:flex;border-bottom:1px solid var(--border)" title="${t.name}">
+    rowsHtml+=`<div id="ganttRow_${t.id}" style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)}">
       <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:5px 10px;border-right:1px solid var(--border);overflow:hidden">
         <div style="display:flex;align-items:center;gap:5px">
           <i class="fas ${isMile?'fa-diamond':'fa-circle'}" style="color:${isMile?'var(--accent-amber)':c};font-size:${isMile?'9':'6'}px;flex-shrink:0"></i>
-          <span style="font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.name}</span>
+          <span style="font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.name)}</span>
         </div>
         ${t.assignee?`<div style="font-size:9px;color:var(--text-muted);padding-left:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.assignee}</div>`:''}
       </div>
@@ -12995,7 +12995,7 @@ function renderProspects(){
     <div class="card" style="cursor:pointer;position:relative" onclick="showProjectDetail('${p.id}')">
       <div style="position:absolute;top:8px;right:8px"><span class="badge" style="background:rgba(240,164,80,.15);color:var(--accent-amber);border:1px solid var(--accent-amber);font-size:9px;letter-spacing:1px">PROSPECT</span></div>
       <div style="font-family:var(--font-mono);font-size:11px;color:var(--accent-amber);font-weight:700">${p.id}</div>
-      <div style="font-weight:700;font-size:14px;margin-top:4px;line-height:1.3;padding-right:80px">${p.name}</div>
+      <div style="font-weight:700;font-size:14px;margin-top:4px;line-height:1.3;padding-right:80px">${esc(p.name)}</div>
       <div style="font-size:11px;color:var(--text-secondary);margin-top:3px">${p.client || '— no client —'}</div>
       <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
         ${buBadge}
@@ -13534,7 +13534,7 @@ function showChangeProjectId(id) {
     <div style="margin-bottom:12px">
       <div style="font-size:11px;color:var(--text-muted)">CURRENT ID</div>
       <div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:var(--accent-blue)">${p.id}</div>
-      <div style="font-size:12px;color:var(--text-secondary);margin-top:3px">${p.name}</div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-top:3px">${esc(p.name)}</div>
       <div style="margin-top:6px"><span class="badge" style="background:rgba(240,164,80,.15);color:var(--accent-amber)">Status: ${status}</span></div>
     </div>
     <div class="form-group" style="margin-bottom:12px">
@@ -14887,7 +14887,7 @@ function showPredPicker(currentTaskId){
     return `<tr id="ppr-row-${t.id}">
       <td style="width:28px;text-align:center"><input type="checkbox" class="ppr-chk" data-id="${t.id}" ${chk} onchange="_pprToggle('${t.id}')"></td>
       <td style="font-size:11px;font-family:var(--font-mono);color:var(--text-secondary)">${t.wbs||t.id}</td>
-      <td style="font-size:12px">${t.name}</td>
+      <td style="font-size:12px">${esc(t.name)}</td>
       <td style="width:90px">
         <select class="form-select ppr-type" data-id="${t.id}" style="font-size:11px;padding:2px 4px;height:26px" ${sel?'':'disabled'} onchange="_pprApply()">
           ${['FS','SS','FF','SF'].map(x=>`<option value="${x}" ${typeVal===x?'selected':''}>${x} — ${x==='FS'?'Finish-to-Start':x==='SS'?'Start-to-Start':x==='FF'?'Finish-to-Finish':'Start-to-Finish'}</option>`).join('')}
@@ -15519,7 +15519,7 @@ function renderGantt(){
       }
     }
 
-    rows+=`<div style="display:flex;background:${pc}11;border-bottom:2px solid ${pc}55" title="${p.name}">
+    rows+=`<div style="display:flex;background:${pc}11;border-bottom:2px solid ${pc}55" title="${esc(p.name)}">
       <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:6px 10px;font-weight:700;font-size:12px;color:${pc};border-right:1px solid var(--border);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:flex;align-items:center;gap:6px">
         <i class="fas fa-folder" style="font-size:10px;flex-shrink:0"></i>${p.id} — ${p.name.substring(0,22)}
         <span style="margin-left:auto;font-size:9px;font-weight:400;color:var(--text-muted)">${pt.length} tasks</span>
@@ -15599,11 +15599,11 @@ function renderGantt(){
         // Summary bar: slim solid bracket with end caps spanning the children
         const lft=pct(tsStr),wdt=wPct(tsStr,teStr);
         bar=`${ghostBar}
-          <div style="position:absolute;left:${lft}%;width:${wdt}%;min-width:8px;top:9px;height:7px;background:#6e7681;border-radius:2px" title="Summary: ${t.name} (${tsStr} → ${teStr})"></div>
+          <div style="position:absolute;left:${lft}%;width:${wdt}%;min-width:8px;top:9px;height:7px;background:#6e7681;border-radius:2px" title="Summary: ${esc(t.name)} (${tsStr} → ${teStr})"></div>
           <div style="position:absolute;left:${lft}%;top:16px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid #6e7681;margin-left:-1px"></div>
           <div style="position:absolute;left:calc(${lft}% + ${wdt}% - 7px);top:16px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid #6e7681"></div>`;
       }else if(isMile){
-        bar=`${ghostBar}<div style="position:absolute;left:calc(${pct(tsStr)}% - 9px);top:4px;width:18px;height:18px;background:${isCrit?'#f85149':'var(--accent-amber)'};border-radius:2px;transform:rotate(45deg)" title="Milestone: ${t.name}"></div>`;
+        bar=`${ghostBar}<div style="position:absolute;left:calc(${pct(tsStr)}% - 9px);top:4px;width:18px;height:18px;background:${isCrit?'#f85149':'var(--accent-amber)'};border-radius:2px;transform:rotate(45deg)" title="Milestone: ${esc(t.name)}"></div>`;
       }else{
         const lft=pct(tsStr);
         const wdt=wPct(tsStr,teStr);
@@ -15614,14 +15614,14 @@ function renderGantt(){
           ${floatBar}
           <div style="position:absolute;left:${lft}%;width:${wdt}%;min-width:4px;top:7px;height:16px;background:${tc}33;border-radius:3px;border:1px solid ${tc}77"></div>
           ${progW>0?`<div style="position:absolute;left:${lft}%;width:${progW}%;min-width:4px;top:7px;height:16px;background:${tc};border-radius:3px;overflow:hidden;display:flex;align-items:center;padding:0 4px">
-            <span style="font-size:8px;color:#fff;white-space:nowrap;overflow:hidden">${t.name}</span>
+            <span style="font-size:8px;color:#fff;white-space:nowrap;overflow:hidden">${esc(t.name)}</span>
           </div>`:''}
           ${overdue?`<div style="position:absolute;left:calc(${lft+wdt}% + 2px);top:7px;font-size:9px;color:var(--accent-red)">⚠</div>`:''}`;
       }
 
       const predCount=(window.SHICCPMEngine&&t.predecessors)?SHICCPMEngine.parsePredecessors(t.predecessors).length:0;
 
-      rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${t.name} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0?' — Float: '+tf.toFixed(1)+'d':''}">
+      rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0?' — Float: '+tf.toFixed(1)+'d':''}">
         <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:4px 10px 4px ${26+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
           <div style="display:flex;align-items:center;gap:5px">
             <i class="fas ${isSummary?'fa-folder-open':isMile?'fa-diamond':'fa-circle'}" style="color:${isSummary?'#6e7681':isMile?(isCrit?'#f85149':'var(--accent-amber)'):tc};font-size:${isSummary?'9':isMile?'9':'5'}px;flex-shrink:0"></i>
@@ -15854,7 +15854,7 @@ function showBaselineManager(){
     const canAdd=bls.length<SHICBaseline.MAX_BASELINES;
 
     return `<div style="margin-bottom:16px">
-      <div style="font-size:12px;font-weight:700;color:var(--accent-blue);margin-bottom:8px"><i class="fas fa-folder" style="margin-right:5px"></i>${p.id} — ${p.name}</div>
+      <div style="font-size:12px;font-weight:700;color:var(--accent-blue);margin-bottom:8px"><i class="fas fa-folder" style="margin-right:5px"></i>${esc(p.id)} — ${esc(p.name)}</div>
       ${blList}
       ${canAdd?`<div style="display:flex;gap:6px;margin-top:6px">
         <input class="form-input" id="blName_${p.id}" placeholder="Baseline name (e.g. Rev-0)" style="height:30px;font-size:11px;flex:1">
@@ -16343,7 +16343,7 @@ ${sc('fas fa-times-circle','Unavailable',resources.filter(r=>r.availability==='u
 <div class="card"><div class="table-wrap"><table>
 <thead><tr><th>Resource</th><th>Role</th><th>Dept</th><th>Skills</th><th>Certifications</th><th>Utilization</th><th>Availability</th><th>Rate/Day</th></tr></thead>
 <tbody>${_pgSlice("resources",resources).map(r=>`<tr>
-<td><div style="display:flex;align-items:center;gap:7px">${avatarH(r.name)}<div><div style="font-weight:500;font-size:12px">${r.name}</div><div style="font-size:10px;color:var(--text-secondary)">${r.id}</div></div></div></td>
+<td><div style="display:flex;align-items:center;gap:7px">${avatarH(r.name)}<div><div style="font-weight:500;font-size:12px">${esc(r.name)}</div><div style="font-size:10px;color:var(--text-secondary)">${esc(r.id)}</div></div></div></td>
 <td style="font-size:11px">${r.role}</td><td style="font-size:11px">${r.dept}</td>
 <td>${r.skills.slice(0,2).map(s=>`<span class="chip" style="margin:1px;font-size:9px">${s}</span>`).join('')}</td>
 <td>${r.certifications.map(c=>`<span class="badge badge-purple" style="margin:1px;font-size:9px">${c}</span>`).join('')}</td>
@@ -16401,7 +16401,7 @@ function assetRow(r,isVeh=false){
 const nextMaintDue=r.nextMaint&&r.nextMaint!=='N/A'&&daysBetween(new Date().toISOString().split('T')[0],r.nextMaint)<14;
 return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono);font-weight:700">${r.id}</td>
-<td><div style="font-weight:500;font-size:12px;min-width:140px">${r.name}</div><div style="font-size:9px;color:var(--text-secondary)">${r.serialNo}</div></td>
+<td><div style="font-weight:500;font-size:12px;min-width:140px">${esc(r.name)}</div><div style="font-size:9px;color:var(--text-secondary)">${esc(r.serialNo)}</div></td>
 <td><span class="badge badge-gray">${r.category}</span></td>
 <td style="font-size:11px;min-width:110px">${r.make} ${r.model}</td>
 <td style="font-size:10px;font-family:var(--font-mono)">${isVeh?r.regNo:r.serialNo}</td>
@@ -16477,7 +16477,7 @@ ${sc('fas fa-calendar-times','Expiring Soon',tp.filter(t=>t.contractEnd&&daysBet
 const expSoon=t.contractEnd&&daysBetween(new Date().toISOString().split('T')[0],t.contractEnd)<60;
 return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${t.id}</td>
-<td><div style="font-weight:500;font-size:12px;min-width:140px">${t.name}</div></td>
+<td><div style="font-weight:500;font-size:12px;min-width:140px">${esc(t.name)}</div></td>
 <td><span class="badge badge-purple">${t.category}</span></td>
 <td style="font-size:11px;max-width:160px;color:var(--text-secondary)">${t.service}</td>
 <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.contactPerson,22)}<span style="font-size:11px">${t.contactPerson}</span></div></td>
@@ -16640,21 +16640,21 @@ $('#resTabContent').innerHTML=`
 <div class="card" style="border-left:3px solid var(--accent-red)">
 <div class="card-title" style="color:var(--accent-red)"><i class="fas fa-tools" style="margin-right:5px"></i>Maintenance Due (&lt;30 days)</div>
 ${maintDue.length?maintDue.map(r=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:11px">
-<span style="font-weight:500">${r.name}</span>
+<span style="font-weight:500">${esc(r.name)}</span>
 <span style="font-family:var(--font-mono);color:${daysBetween(now,r.nextMaint)<0?'var(--accent-red)':'var(--accent-amber)'}">${r.nextMaint}</span>
 </div>`).join(''):`<div style="padding:10px 0;font-size:11px;color:var(--text-muted)">No maintenance due soon ✓</div>`}
 </div>
 <div class="card" style="border-left:3px solid var(--accent-amber)">
 <div class="card-title" style="color:var(--accent-amber)"><i class="fas fa-crosshairs" style="margin-right:5px"></i>Calibration Due (&lt;30 days)</div>
 ${calDue.length?calDue.map(r=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:11px">
-<span style="font-weight:500">${r.name}</span>
+<span style="font-weight:500">${esc(r.name)}</span>
 <span style="font-family:var(--font-mono);color:${daysBetween(now,r.nextCal)<0?'var(--accent-red)':'var(--accent-amber)'}">${r.nextCal}</span>
 </div>`).join(''):`<div style="padding:10px 0;font-size:11px;color:var(--text-muted)">No calibration due soon ✓</div>`}
 </div>
 <div class="card" style="border-left:3px solid var(--accent-purple)">
 <div class="card-title" style="color:var(--accent-purple)"><i class="fas fa-certificate" style="margin-right:5px"></i>Cert/Permit Expiring (&lt;60 days)</div>
 ${certExp.length?certExp.map(r=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:11px">
-<span style="font-weight:500">${r.name}</span>
+<span style="font-weight:500">${esc(r.name)}</span>
 <span style="font-family:var(--font-mono);color:${daysBetween(now,r.certExpiry)<0?'var(--accent-red)':daysBetween(now,r.certExpiry)<30?'var(--accent-red)':'var(--accent-amber)'}">${r.certExpiry}</span>
 </div>`).join(''):`<div style="padding:10px 0;font-size:11px;color:var(--text-muted)">No certificates expiring soon ✓</div>`}
 </div>
@@ -16688,7 +16688,7 @@ const certAlert=r.certExpiry&&r.certExpiry!=='N/A'&&daysBetween(now,r.certExpiry
 const listKey=r.type==='Equipment'?'equipment':r.type==='Vehicle'?'vehicles':'tools';
 return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono);font-weight:700">${r.id}</td>
-<td style="font-weight:500;font-size:12px;min-width:140px">${r.name}</td>
+<td style="font-weight:500;font-size:12px;min-width:140px">${esc(r.name)}</td>
 <td><span class="badge ${r.type==='Equipment'?'badge-blue':r.type==='Vehicle'?'badge-amber':'badge-purple'}">${r.type}</span></td>
 <td>${resourceStatusBadge(r.status)}</td>
 <td><span class="badge badge-blue" style="font-size:10px">${r.projectId||'N/A'}</span></td>
@@ -17723,7 +17723,7 @@ ${sc('fas fa-exclamation-circle','Critical',materials.filter(m=>m.critical).leng
 <tbody>${_pgSlice("materials_mod",materials).map(m=>`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${m.id}</td>
 <td><span class="badge badge-blue">${m.projectId}</span></td>
-<td style="font-weight:500;font-size:12px;max-width:180px">${m.name}</td>
+<td style="font-weight:500;font-size:12px;max-width:180px">${esc(m.name)}</td>
 <td style="font-family:var(--font-mono)">${m.qty.toLocaleString()}</td>
 <td><span class="badge badge-gray">${m.unit}</span></td>
 <td style="font-family:var(--font-mono)">${fmtCur(m.unitCost)}</td>
@@ -18006,7 +18006,7 @@ function renderProcList(){
             ${p.poNumber?`<div style="font-size:10px;font-weight:700;color:var(--accent-blue)"><i class="fas fa-shopping-cart" style="width:12px"></i>PO: ${p.poNumber}</div>`:`<div style="font-size:10px;color:var(--text-muted)"><i class="fas fa-shopping-cart" style="width:12px"></i>PO: <em>Pending</em></div>`}
           </div>
         </td>
-        <td style="min-width:180px"><div style="font-weight:500;font-size:12px">${p.description}</div>
+        <td style="min-width:180px"><div style="font-weight:500;font-size:12px">${esc(p.description)}</div>
           ${p.notes?`<div style="font-size:10px;color:var(--text-muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px" title="${p.notes.replace(/"/g,'&quot;')}"><i class="fas fa-sticky-note" style="margin-right:3px"></i>${p.notes.substring(0,60)}${p.notes.length>60?'...':''}</div>`:''}
           ${p.attachments?.length?`<div style="margin-top:3px"><span class="badge badge-amber" style="font-size:8px"><i class="fas fa-paperclip" style="margin-right:3px"></i>${p.attachments.length} file${p.attachments.length!==1?'s':''}</span></div>`:''}
         </td>
@@ -18066,7 +18066,7 @@ function renderProcBoard(){
         <div style="background:var(--bg-hover);border:1px solid ${stage.color}44;border-top:none;border-radius:0 0 8px 8px;min-height:100px;padding:6px;display:flex;flex-direction:column;gap:6px">
           ${items.map(p=>`<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:7px;padding:9px;cursor:pointer" onclick="showProcDetail('${p.id}')">
             <div style="font-size:10px;font-family:var(--font-mono);color:${stage.color};font-weight:700;margin-bottom:3px">${p.id}</div>
-            <div style="font-size:11px;font-weight:500;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${p.description}</div>
+            <div style="font-size:11px;font-weight:500;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(p.description)}</div>
             <div style="font-size:10px;color:var(--text-secondary);margin-bottom:3px">${p.vendor||'—'}</div>
             <div style="display:flex;justify-content:space-between;align-items:center">
               <span style="font-size:10px;font-family:var(--font-mono);font-weight:600">₱${fmtNum(p.amount)}</span>
@@ -18108,9 +18108,9 @@ function renderProcLog(){
         <td style="font-size:10px;font-family:var(--font-mono);color:var(--text-muted)">${l.id}</td>
         <td style="font-size:10px;font-family:var(--font-mono);white-space:nowrap">${l.date}${l.time?' '+l.time:''}</td>
         <td><div style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--accent-blue)">${l.procId}</div>
-          <div style="font-size:9px;color:var(--text-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.description||''}</div>
+          <div style="font-size:9px;color:var(--text-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.description||'')}</div>
         </td>
-        <td style="font-size:11px;font-weight:500;min-width:150px">${p.description||'—'}</td>
+        <td style="font-size:11px;font-weight:500;min-width:150px">${esc(p.description||'—')}</td>
         <td><div style="font-size:12px;font-weight:600">${l.action}</div></td>
         <td>${before?`<span class="badge" style="background:${before.color}22;color:${before.color};font-size:9px">${before.label}</span>`:'<span style="color:var(--text-muted);font-size:10px">—</span>'}</td>
         <td>${after?`<span class="badge" style="background:${after.color}22;color:${after.color};font-size:9px">${after.label}</span>`:'<span style="color:var(--text-muted);font-size:10px">—</span>'}</td>
@@ -18152,7 +18152,7 @@ function renderProcHistory(){
               </div>              <span class="badge" style="background:${stage.color}22;color:${stage.color}"><i class="fas ${stage.icon}" style="margin-right:4px;font-size:9px"></i>${stage.label}</span>
               <span class="badge ${{'critical':'badge-red','high':'badge-amber','normal':'badge-blue','low':'badge-gray'}[p.priority||'normal']}">${p.priority||'normal'}</span>
             </div>
-            <div style="font-size:14px;font-weight:600;margin-bottom:3px">${p.description}</div>
+            <div style="font-size:14px;font-weight:600;margin-bottom:3px">${esc(p.description)}</div>
             <div style="font-size:11px;color:var(--text-secondary);display:flex;gap:12px;flex-wrap:wrap">
               <span><i class="fas fa-building" style="margin-right:4px"></i>${p.vendor||'—'}</span>
               <span><i class="fas fa-project-diagram" style="margin-right:4px"></i>${p.projectId}</span>
@@ -18333,7 +18333,7 @@ function showProcLogUpdate(procId, preselect=null){
   $('#genericModalTitle').textContent='Log Update — '+procId;
   $('#genericModalBody').innerHTML=`
   <div style="padding:8px 12px;background:rgba(56,139,253,.08);border-radius:7px;margin-bottom:14px;font-size:11px">
-    <strong>${p.description}</strong><br>
+    <strong>${esc(p.description)}</strong><br>
     <span style="color:var(--text-secondary)">Current Stage: </span>
     <span class="badge" style="background:${currentStage.color}22;color:${currentStage.color};font-size:9px">${currentStage.label}</span>
   </div>
@@ -18778,7 +18778,7 @@ function _procPickFromMaster(){
           <div class="pm-row" data-name="${(item.name||'').toLowerCase()}" style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:10px"
             onclick="_procApplyMasterItem('${item.id}','${(item.name||'').replace(/'/g,'\\\'').replace(/"/g,'&quot;')}','${item.unit||''}',${item.unitCost||0},'${item.category||'Materials'}')">
             <div style="flex:1">
-              <div style="font-weight:600;font-size:12px">${item.name}</div>
+              <div style="font-weight:600;font-size:12px">${esc(item.name)}</div>
               <div style="font-size:10px;color:var(--text-secondary)">${item.id} · ${item.category||'—'} · ${item.unit||'—'} · Std Cost: ₱${fmtNum(item.unitCost||0)}</div>
             </div>
             <i class="fas fa-chevron-right" style="color:var(--text-secondary)"></i>
@@ -19360,7 +19360,7 @@ function renderLibrary(){
       return `<tr style="${isSuperseded?'opacity:.5':''}">
         <td style="font-family:var(--font-mono);font-size:11px;color:var(--accent-blue);font-weight:700">${d.number||'—'}</td>
         <td><span class="badge badge-gray">Rev ${d.rev||'A'}</span></td>
-        <td style="font-weight:600;font-size:12px">${d.name}</td>
+        <td style="font-weight:600;font-size:12px">${esc(d.name)}</td>
         <td><span class="badge" style="background:${cat.color}22;color:${cat.color}"><i class="fas ${cat.icon}" style="margin-right:4px;font-size:9px"></i>${d.category}</span></td>
         <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${d.description||''}">${d.description||'—'}</td>
         <td style="font-size:11px">${(d.uploadedBy||'').split('@')[0]}</td>
@@ -19666,13 +19666,13 @@ function renderDocTable(){
           <div style="display:flex;align-items:center;gap:8px">
             <i class="fas ${icon}" style="color:${color};font-size:16px;flex-shrink:0"></i>
             <div>
-              <div style="font-size:12px;font-weight:500">${d.name}</div>
-              ${d.description?`<div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">${d.description}</div>`:''}
+              <div style="font-size:12px;font-weight:500">${esc(d.name)}</div>
+              ${d.description?`<div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">${esc(d.description)}</div>`:''}
             </div>
           </div>
         </td>
         <td><span class="badge badge-blue">${d.projectId}</span></td>
-        <td><span class="badge badge-purple">${d.category}</span></td>
+        <td><span class="badge badge-purple">${esc(d.category)}</span></td>
         <td>
           <div style="display:flex;align-items:center;gap:5px">
             ${d.author?`<div style="width:22px;height:22px;border-radius:50%;background:${stringToColor(d.author)};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff">${d.author.charAt(0).toUpperCase()}</div>`:''}
@@ -19747,13 +19747,13 @@ function renderDocTable(){
           <div style="display:flex;align-items:center;gap:8px">
             <i class="fas ${icon}" style="color:${color};font-size:16px;flex-shrink:0"></i>
             <div>
-              <div style="font-size:12px;font-weight:500">${d.name}</div>
-              ${d.description?`<div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">${d.description}</div>`:''}
+              <div style="font-size:12px;font-weight:500">${esc(d.name)}</div>
+              ${d.description?`<div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">${esc(d.description)}</div>`:''}
             </div>
           </div>
         </td>
         <td><span class="badge badge-blue">${d.projectId}</span></td>
-        <td><span class="badge badge-purple">${d.category}</span></td>
+        <td><span class="badge badge-purple">${esc(d.category)}</span></td>
         <td>
           <div style="display:flex;align-items:center;gap:5px">
             ${d.author?`<div style="width:22px;height:22px;border-radius:50%;background:${stringToColor(d.author)};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff">${d.author.charAt(0).toUpperCase()}</div>`:''}
@@ -20090,8 +20090,8 @@ const te=Math.round(((tot-Math.max(0,dl))/Math.max(1,tot))*100);
 return`<div class="card">
 <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
 <div><div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono)">${p.id}</div>
-<div style="font-size:14px;font-weight:600;margin:2px 0">${p.name}</div>
-<div style="font-size:11px;color:var(--text-secondary)">${p.pm}</div></div>${sBadge(p.status)}</div>
+<div style="font-size:14px;font-weight:600;margin:2px 0">${esc(p.name)}</div>
+<div style="font-size:11px;color:var(--text-secondary)">${esc(p.pm)}</div></div>${sBadge(p.status)}</div>
 <div style="margin-bottom:10px">
 <div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="font-size:11px;color:var(--text-secondary)">Physical Progress</span><span style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:${pColor(p.progress)}">${p.progress}%</span></div>
 <div class="progress-bar" style="height:9px"><div class="progress-fill" style="width:${p.progress}%;background:${pColor(p.progress)};border-radius:5px"></div></div></div>
@@ -20480,8 +20480,8 @@ function renderDailyMeeting() {
             ${flagged ? '<i class="fas fa-flag" style="color:var(--accent-red);font-size:11px;margin-top:2px;flex-shrink:0"></i>' : ''}
             <div style="flex:1;min-width:0">
               <div style="font-size:10px;font-family:var(--font-mono);font-weight:700;color:var(--accent-blue);display:flex;align-items:center;gap:5px"><span>${p.id}</span>${prevLog ? `<button onclick="event.stopPropagation();dmShowHistory('${p.id}')" title="View update history" style="background:none;border:none;color:var(--accent-blue);opacity:.6;cursor:pointer;padding:0;font-size:9px"><i class="fas fa-clock-rotate-left"></i></button>` : ''}</div>
-              <div style="font-size:11px;font-weight:600;line-height:1.3">${p.name}</div>
-              ${p.client ? `<div style="font-size:9px;color:var(--text-muted)">${p.client}</div>` : ''}
+              <div style="font-size:11px;font-weight:600;line-height:1.3">${esc(p.name)}</div>
+              ${p.client ? `<div style="font-size:9px;color:var(--text-muted)">${esc(p.client)}</div>` : ''}
               ${notUpdatedToday ? '<div style="font-size:9px;color:var(--accent-amber);margin-top:2px"><i class="fas fa-exclamation-circle" style="margin-right:3px"></i>Not yet updated</div>' : ''}
               ${(actCounts.total>0||actCounts.overdue>0) ? `<div style="display:flex;gap:4px;margin-top:3px;flex-wrap:wrap">
                 ${actCounts.overdue>0?`<span style="font-size:8px;background:rgba(248,81,73,.15);color:#f85149;padding:1px 5px;border-radius:8px;font-weight:700"><i class="fas fa-exclamation-circle" style="margin-right:2px"></i>${actCounts.overdue} overdue</span>`:''}
@@ -21229,7 +21229,7 @@ function dmPrintMeeting(opts) {
         }
       }
       return `<tr>
-        <td style="padding:5px 7px;border:1px solid #ccc;font-size:10px;min-width:140px">${log.flagged ? '🚩 ' : ''}${p.id}<br><strong>${p.name}</strong>${p.client ? '<br><span style="color:#666">'+p.client+'</span>' : ''}</td>
+        <td style="padding:5px 7px;border:1px solid #ccc;font-size:10px;min-width:140px">${log.flagged ? '🚩 ' : ''}${p.id}<br><strong>${esc(p.name)}</strong>${p.client ? '<br><span style="color:#666">'+esc(p.client)+'</span>' : ''}</td>
         <td style="padding:5px 7px;border:1px solid #ccc;text-align:center;font-size:11px;font-weight:700">${p.progress || 0}%</td>
         <td style="padding:5px 7px;border:1px solid #ccc;text-align:center;font-size:11px;color:#666">${p.plannedProgress || 0}%</td>
         <td style="padding:5px 7px;border:1px solid #ccc;text-align:center;font-size:11px;font-weight:700">${durActual}</td>
@@ -21631,7 +21631,7 @@ function _analyticsProcurement() {
         <thead><tr><th>Description</th><th>Supplier</th><th>Stage</th><th style="text-align:right">Amount</th></tr></thead>
         <tbody>
           ${top10.map(p=>`<tr>
-            <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.description||p.id}</td>
+            <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.description||p.id)}</td>
             <td style="font-size:11px;color:var(--text-secondary)">${p.supplier||'—'}</td>
             <td><span class="badge badge-blue" style="font-size:9px;text-transform:capitalize">${(p.stage||'').replace('_',' ')}</span></td>
             <td style="text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--accent-green)">${_fmt(parseFloat(p.amount)||0)}</td>
@@ -22047,8 +22047,8 @@ function renderReports(){
           </tr></thead>
           <tbody>${scopeProjects.map(p=>`<tr>
             <td style="font-size:10px;font-family:var(--font-mono);font-weight:700;color:${scopeColor}">${p.id}</td>
-            <td style="font-size:11px;font-weight:500;max-width:180px">${p.name}</td>
-            <td style="font-size:10px;color:var(--text-secondary)">${p.client}</td>
+            <td style="font-size:11px;font-weight:500;max-width:180px">${esc(p.name)}</td>
+            <td style="font-size:10px;color:var(--text-secondary)">${esc(p.client)}</td>
             <td style="font-size:10px">${(p.pm||'').split(' ')[0]}</td>
             <td>
               <div style="display:flex;align-items:center;gap:5px">
@@ -24768,7 +24768,7 @@ function _whIssueHTML(){
           <label class="form-label">Project</label>
           <select class="form-control" id="wh-iss-proj">
             <option value="">— No project —</option>
-            ${projects.map(p=>{const label=`${p.id} — ${p.name||''}`;return`<option value="${p.id}">${label.length>60?label.slice(0,60)+'…':label}</option>`;}).join('')}
+            ${projects.map(p=>{const label=`${p.id} — ${p.name||''}`;const disp=label.length>60?label.slice(0,60)+'…':label;return`<option value="${esc(p.id)}">${esc(disp)}</option>`;}).join('')}
           </select>
         </div>
         <div class="form-group" style="margin:0">
@@ -25553,7 +25553,7 @@ function _whPrintSlip(d){
   while(padded.length<10)padded.push({name:'',code:'',unit:'',qty:'',wac:0,total:0});
   const rows=padded.map((r,i)=>{
     const reason=i===0&&d.notes?d.notes:'';
-    const name=r.name?`${r.code?`<span style="color:#888;font-size:7pt">[${r.code}]</span> `:''}${r.name}`:'';
+    const name=r.name?`${r.code?`<span style="color:#888;font-size:7pt">[${esc(r.code)}]</span> `:''}${esc(r.name)}`:'';
     const stock=(r.stock!=null&&r.stock!=='')?_whFmt(r.stock)+' '+( r.unit||''):'';
     return`<tr>
       <td class="tc">${i<d.items.length?i+1:''}</td>
@@ -25843,8 +25843,8 @@ function _whPickFromMaster(){
             const inWh=enrolled.has(item.id);
             return`<div class="im-row" data-name="${(item.name||'').toLowerCase()}" style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;${inWh?'opacity:.5':'cursor:pointer'}" ${!inWh?`onclick="_whEnrollFromPicker('${item.id}','${item._type}')"`:'title="Already in Warehouse"'}>
               <div style="flex:1">
-                <div style="font-weight:600;font-size:12px">${item.name}</div>
-                <div style="font-size:10px;color:var(--text-secondary)">${item.id} · ${item.category||'—'} · ${item.unit||'—'} · Std Cost: ₱${fmtNum(item.unitCost||0)}</div>
+                <div style="font-weight:600;font-size:12px">${esc(item.name)}</div>
+                <div style="font-size:10px;color:var(--text-secondary)">${esc(item.id)} · ${esc(item.category||'—')} · ${esc(item.unit||'—')} · Std Cost: ₱${fmtNum(item.unitCost||0)}</div>
               </div>
               ${inWh?'<span style="font-size:10px;color:var(--accent-green)"><i class="fas fa-check"></i> In Warehouse</span>':'<span style="font-size:10px;color:var(--accent-blue)"><i class="fas fa-plus"></i> Enroll</span>'}
             </div>`;
@@ -26086,7 +26086,7 @@ function _whShowAddRequest(){
             <label class="form-label">Project</label>
             <select class="form-control" id="whr-proj">
               <option value="">— No project —</option>
-              ${projects.map(p=>{const label=`${p.id} — ${p.name||''}`;return`<option value="${p.id}">${label.length>60?label.slice(0,60)+'…':label}</option>`;}).join('')}
+              ${projects.map(p=>{const label=`${p.id} — ${p.name||''}`;const disp=label.length>60?label.slice(0,60)+'…':label;return`<option value="${esc(p.id)}">${esc(disp)}</option>`;}).join('')}
             </select>
           </div>
           <div class="form-group" style="margin:0">
@@ -26355,7 +26355,7 @@ function renderMlAll(){
   <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Category</th><th>Details</th><th>Identifier</th><th>Status</th><th>Project</th><th>Location</th><th>Next Maint.</th><th>Cal / Accred.</th><th>Cert Expiry</th><th>Unit Rate (₱)</th><th>Notes</th></tr></thead>
   <tbody>${rows.length?rows.map(r=>`<tr data-rowid="${r.id}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700;white-space:nowrap">${r.id}</td>
-    <td style="font-weight:500;font-size:12px;min-width:150px">${r.name}</td>
+    <td style="font-weight:500;font-size:12px;min-width:150px">${esc(r.name)}</td>
     <td><span class="badge" style="background:${typeColor[r.type]||'#8b949e'}22;color:${typeColor[r.type]||'#8b949e'}">${r.type}</span></td>
     <td><span class="badge badge-gray">${r.category||'—'}</span></td>
     <td style="font-size:11px;color:var(--text-secondary);max-width:130px">${r.detail}</td>
@@ -26397,7 +26397,7 @@ function renderMlPersonnel(){
   <thead><tr><th>ID</th><th>Name</th><th>Role</th><th>Department</th><th>Skills</th><th>Certifications</th><th>Utilization%</th><th>Availability</th><th>Hourly Rate (₱)</th><th>Daily Rate (₱)</th><th></th></tr></thead>
   <tbody>${_pgSliceN('ml_personnel',data,20).length?_pgSliceN('ml_personnel',data,20).map(r=>`<tr data-rowid="${r.id}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700">${r.id}</td>
-    <td><div style="display:flex;align-items:center;gap:8px">${avatarH(r.name,30)}<div><div style="font-weight:600;font-size:12px">${r.name}</div><div style="font-size:9px;color:var(--text-muted)">${r.id}</div></div></div></td>
+    <td><div style="display:flex;align-items:center;gap:8px">${avatarH(r.name,30)}<div><div style="font-weight:600;font-size:12px">${esc(r.name)}</div><div style="font-size:9px;color:var(--text-muted)">${r.id}</div></div></div></td>
     <td><input class="form-input" value="${r.role||''}" style="min-width:120px;height:26px;font-size:11px" oninput="mlSavePersonnel('${r.id}','role',this.value)" onchange="mlSavePersonnel('${r.id}','role',this.value)"></td>
     <td><input class="form-input" value="${r.dept||''}" style="min-width:100px;height:26px;font-size:11px" oninput="mlSavePersonnel('${r.id}','dept',this.value)" onchange="mlSavePersonnel('${r.id}','dept',this.value)"></td>
     <td style="max-width:160px">${(r.skills||[]).map(s=>`<span class="chip" style="margin:1px;font-size:9px">${s}</span>`).join('')||'<span style="color:var(--text-muted);font-size:10px">—</span>'}</td>
@@ -26509,7 +26509,7 @@ function renderMlEquipment(){
     const cA=r.nextCal&&r.nextCal!=='N/A'&&daysBetween(now,r.nextCal)<14;
     return`<tr data-rowid="${r.id}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700;white-space:nowrap">${r.id}</td>
-    <td style="font-weight:500;font-size:12px;min-width:140px">${r.name}</td>
+    <td style="font-weight:500;font-size:12px;min-width:140px">${esc(r.name)}</td>
     <td><span class="badge badge-gray">${r.category}</span></td>
     <td style="font-size:11px">${r.make}</td>
     <td style="font-size:11px">${r.model}</td>
@@ -26554,7 +26554,7 @@ function renderMlTools(){
     const cA=r.nextCal&&r.nextCal!=='N/A'&&daysBetween(now,r.nextCal)<14;
     return`<tr data-rowid="${r.id}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700;white-space:nowrap">${r.id}</td>
-    <td style="font-weight:500;font-size:12px;min-width:140px">${r.name}</td>
+    <td style="font-weight:500;font-size:12px;min-width:140px">${esc(r.name)}</td>
     <td><span class="badge badge-gray">${r.category}</span></td>
     <td style="font-size:11px">${r.make}</td>
     <td style="font-size:11px">${r.model}</td>
@@ -26596,7 +26596,7 @@ function renderMlVehicles(){
     const mA=r.nextMaint&&r.nextMaint!=='N/A'&&daysBetween(now,r.nextMaint)<14;
     return`<tr data-rowid="${r.id}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700;white-space:nowrap">${r.id}</td>
-    <td style="font-weight:500;font-size:12px;min-width:140px">${r.name}</td>
+    <td style="font-weight:500;font-size:12px;min-width:140px">${esc(r.name)}</td>
     <td><span class="badge badge-gray">${r.category}</span></td>
     <td style="font-size:11px">${r.make}</td>
     <td style="font-size:11px">${r.model}</td>
@@ -26803,7 +26803,7 @@ function renderMlMaterials(){
   <thead><tr><th>ID</th><th>Material Name</th><th>Project</th><th>Quantity</th><th>Unit</th><th>Unit Cost (₱)</th><th>Total Value (₱)</th><th>Supplier</th><th>Delivery Date</th><th>Status</th><th>Critical</th><th></th></tr></thead>
   <tbody>${data.length?data.map(m=>`<tr data-rowid="${m.id}" style="${m.critical?'border-left:3px solid var(--accent-amber)':''}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700">${m.id}</td>
-    <td style="font-weight:500;font-size:12px;min-width:180px">${m.name}</td>
+    <td style="font-weight:500;font-size:12px;min-width:180px">${esc(m.name)}</td>
     <td><select class="form-select" style="height:30px;font-size:11px;min-width:80px" onchange="mlSaveMaterial('${m.id}','projectId',this.value)">${projOpts(m.projectId)}</select></td>
     <td><input class="form-input" type="number" value="${m.qty}" style="width:80px;height:26px;font-family:var(--font-mono);font-size:11px" oninput="mlSaveMaterial('${m.id}','qty',+this.value);setTimeout(renderMlMaterials,700)" onchange="mlSaveMaterial('${m.id}','qty',+this.value);setTimeout(renderMlMaterials,700)"></td>
     <td><span class="badge badge-blue">${m.unit}</span></td>
@@ -26848,7 +26848,7 @@ function renderMlThirdParty(){
     const expSoon=t.contractEnd&&daysBetween(now,t.contractEnd)<60&&daysBetween(now,t.contractEnd)>0;
     return`<tr data-rowid="${t.id}" style="${expSoon?'background:rgba(248,81,73,.04)':''}">
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700">${t.id}</td>
-    <td style="font-weight:600;font-size:12px;min-width:150px">${t.name}</td>
+    <td style="font-weight:600;font-size:12px;min-width:150px">${esc(t.name)}</td>
     <td><span class="badge badge-purple">${t.category}</span></td>
     <td style="font-size:10px;color:var(--text-secondary);max-width:140px">${t.service}</td>
     <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.contactPerson,22)}<span style="font-size:11px">${t.contactPerson}</span></div></td>

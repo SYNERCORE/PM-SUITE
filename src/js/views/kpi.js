@@ -369,8 +369,8 @@ function renderDailyMeeting() {
             ${flagged ? '<i class="fas fa-flag" style="color:var(--accent-red);font-size:11px;margin-top:2px;flex-shrink:0"></i>' : ''}
             <div style="flex:1;min-width:0">
               <div style="font-size:10px;font-family:var(--font-mono);font-weight:700;color:var(--accent-blue);display:flex;align-items:center;gap:5px"><span>${p.id}</span>${prevLog ? `<button onclick="event.stopPropagation();dmShowHistory('${p.id}')" title="View update history" style="background:none;border:none;color:var(--accent-blue);opacity:.6;cursor:pointer;padding:0;font-size:9px"><i class="fas fa-clock-rotate-left"></i></button>` : ''}</div>
-              <div style="font-size:11px;font-weight:600;line-height:1.3">${p.name}</div>
-              ${p.client ? `<div style="font-size:9px;color:var(--text-muted)">${p.client}</div>` : ''}
+              <div style="font-size:11px;font-weight:600;line-height:1.3">${esc(p.name)}</div>
+              ${p.client ? `<div style="font-size:9px;color:var(--text-muted)">${esc(p.client)}</div>` : ''}
               ${notUpdatedToday ? '<div style="font-size:9px;color:var(--accent-amber);margin-top:2px"><i class="fas fa-exclamation-circle" style="margin-right:3px"></i>Not yet updated</div>' : ''}
               ${(actCounts.total>0||actCounts.overdue>0) ? `<div style="display:flex;gap:4px;margin-top:3px;flex-wrap:wrap">
                 ${actCounts.overdue>0?`<span style="font-size:8px;background:rgba(248,81,73,.15);color:#f85149;padding:1px 5px;border-radius:8px;font-weight:700"><i class="fas fa-exclamation-circle" style="margin-right:2px"></i>${actCounts.overdue} overdue</span>`:''}
@@ -1118,7 +1118,7 @@ function dmPrintMeeting(opts) {
         }
       }
       return `<tr>
-        <td style="padding:5px 7px;border:1px solid #ccc;font-size:10px;min-width:140px">${log.flagged ? '🚩 ' : ''}${p.id}<br><strong>${p.name}</strong>${p.client ? '<br><span style="color:#666">'+p.client+'</span>' : ''}</td>
+        <td style="padding:5px 7px;border:1px solid #ccc;font-size:10px;min-width:140px">${log.flagged ? '🚩 ' : ''}${p.id}<br><strong>${esc(p.name)}</strong>${p.client ? '<br><span style="color:#666">'+esc(p.client)+'</span>' : ''}</td>
         <td style="padding:5px 7px;border:1px solid #ccc;text-align:center;font-size:11px;font-weight:700">${p.progress || 0}%</td>
         <td style="padding:5px 7px;border:1px solid #ccc;text-align:center;font-size:11px;color:#666">${p.plannedProgress || 0}%</td>
         <td style="padding:5px 7px;border:1px solid #ccc;text-align:center;font-size:11px;font-weight:700">${durActual}</td>

@@ -142,9 +142,9 @@ function _renderProjTable(projects) {
             const progColor = (typeof pColor === 'function') ? pColor(p.progress) : '#388bfd';
             return `<tr style="border-bottom:1px solid var(--border);transition:background .15s" onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background=''">
               <td style="padding:8px 10px;font-family:var(--font-mono);font-size:10px;color:var(--accent-blue);font-weight:700;cursor:pointer;white-space:nowrap" onclick="showProjectDetail('${p.id}')" title="Open project detail">${p.id}</td>
-              <td style="padding:8px 10px;font-weight:600;cursor:pointer;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="showProjectDetail('${p.id}')" title="${(p.name||'').replace(/"/g,'&quot;')}">${p.name||'-'}</td>
-              <td style="padding:8px 10px;color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(p.client||'').replace(/"/g,'&quot;')}">${p.client||'-'}</td>
-              <td style="padding:8px 10px"><span style="font-size:9px;padding:2px 7px;border-radius:8px;background:var(--bg-hover);color:var(--text-secondary);text-transform:capitalize">${p.phase||'-'}</span></td>
+              <td style="padding:8px 10px;font-weight:600;cursor:pointer;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="showProjectDetail('${p.id}')" title="${esc(p.name||'')}">${esc(p.name||'-')}</td>
+              <td style="padding:8px 10px;color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.client||'')}">${esc(p.client||'-')}</td>
+              <td style="padding:8px 10px"><span style="font-size:9px;padding:2px 7px;border-radius:8px;background:var(--bg-hover);color:var(--text-secondary);text-transform:capitalize">${esc(p.phase||'-')}</span></td>
               <td style="padding:8px 10px"><span style="font-size:9px;padding:2px 8px;border-radius:8px;background:${statusColor}22;color:${statusColor};font-weight:700;text-transform:uppercase">${p.status||'-'}</span></td>
               <td style="padding:8px 10px">
                 <div style="display:flex;align-items:center;gap:6px">
@@ -182,13 +182,13 @@ function _renderProjList(projects) {
           <span style="width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0"></span>
           <span style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--accent-blue)">${p.id}</span>
           <span style="font-size:10px;padding:1px 7px;border-radius:8px;background:${statusColor}22;color:${statusColor};font-weight:700;text-transform:uppercase">${p.status||'-'}</span>
-          <span style="font-size:10px;color:var(--text-muted)">· ${p.client||'-'}${p.phase?' · '+p.phase:''}</span>
+          <span style="font-size:10px;color:var(--text-muted)">· ${esc(p.client||'-')}${p.phase?' · '+esc(p.phase):''}</span>
           ${p._flagged?'<i class="fas fa-flag" style="color:var(--accent-red);margin-left:auto"></i>':''}
           ${overdue?'<i class="fas fa-exclamation-triangle" style="color:var(--accent-amber);margin-left:auto"></i>':''}
           ${(()=>{const rd=_projectReadiness(p.id);return rd.overall==='go'?'<span style="font-size:9px;padding:1px 7px;border-radius:8px;background:rgba(63,185,80,.15);color:var(--accent-green);font-weight:700;margin-left:auto">GO</span>':rd.overall==='caution'?'<span style="font-size:9px;padding:1px 7px;border-radius:8px;background:rgba(240,164,80,.15);color:var(--accent-amber);font-weight:700;margin-left:auto">CAUTION</span>':'<span style="font-size:9px;padding:1px 7px;border-radius:8px;background:rgba(248,81,73,.15);color:var(--accent-red);font-weight:700;margin-left:auto">NOT READY</span>';})()}
           <button class="btn btn-secondary btn-sm btn-icon" style="height:24px;width:24px;font-size:10px;margin-left:5px" onclick="event.stopPropagation();showProjectForm('${p.id}')" title="Edit"><i class="fas fa-pen"></i></button>
         </div>
-        <div style="font-size:13px;font-weight:600;line-height:1.3;margin-bottom:6px">${p.name||'-'}</div>
+        <div style="font-size:13px;font-weight:600;line-height:1.3;margin-bottom:6px">${esc(p.name||'-')}</div>
         <div style="display:flex;align-items:center;gap:10px;font-size:10px;color:var(--text-muted)">
           <div style="flex:1;display:flex;align-items:center;gap:6px">
             <div style="flex:1;height:5px;background:var(--bg-hover);border-radius:3px;overflow:hidden"><div style="width:${p.progress||0}%;height:100%;background:${progColor}"></div></div>
@@ -212,8 +212,8 @@ function _renderProjCards(projects) {
       <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
         <div>
           <div class="project-card-id">${p.id}${p.discipline?'<span class="project-card-id-discipline">'+p.discipline+'</span>':''}</div>
-          <div class="project-card-name">${p.name}</div>
-          <div class="project-card-client"><i class="fas fa-building" style="font-size:9px"></i> ${p.client}</div>
+          <div class="project-card-name">${esc(p.name)}</div>
+          <div class="project-card-client"><i class="fas fa-building" style="font-size:9px"></i> ${esc(p.client)}</div>
           ${p.businessUnit?(()=>{const b=(AppState.data.businessUnits||[]).find(x=>x.id===p.businessUnit);return b?`<div style="margin-top:3px"><span style="font-size:9px;padding:1px 7px;border-radius:10px;background:${b.color||'#388bfd'}22;color:${b.color||'#388bfd'};font-weight:600;border:1px solid ${b.color||'#388bfd'}44"><i class="fas fa-layer-group" style="margin-right:3px;font-size:8px"></i>${b.name}</span></div>`:'';})():''}
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">${typeof sBadge==='function'?sBadge(p.status):p.status}${typeof pBadge==='function'?pBadge(p.priority):''}</div>
@@ -644,7 +644,7 @@ function printProjectDetail(pid){
     @media print{body{padding:10px}}
   </style></head><body>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-    <div><h1>${p.name}</h1><div style="font-size:11px;color:#555">${p.id} · ${p.client} · PM: ${p.pm||'—'}</div></div>
+    <div><h1>${esc(p.name)}</h1><div style="font-size:11px;color:#555">${p.id} · ${esc(p.client)} · PM: ${esc(p.pm||'—')}</div></div>
     <div style="font-size:10px;color:#777;text-align:right">Printed: ${new Date().toLocaleString()}<br>Status: ${p.status} · Priority: ${p.priority}</div>
   </div>
   <div class="grid">
@@ -757,13 +757,13 @@ function renderProjectDetail(){
       <div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
           <span style="font-size:18px;font-family:var(--font-mono);color:#f59e0b;font-weight:800;letter-spacing:.5px;padding:3px 12px;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);border-radius:6px">${p.id}</span>
-          <span style="font-size:10px;color:rgba(255,255,255,.6)">${p.discipline||'—'}</span>
+          <span style="font-size:10px;color:rgba(255,255,255,.6)">${esc(p.discipline||'—')}</span>
           <span style="font-size:10px;color:rgba(255,255,255,.6)">&middot;</span>
-          <span style="font-size:10px;color:rgba(255,255,255,.6)">Phase: ${p.phase||'—'}</span>
+          <span style="font-size:10px;color:rgba(255,255,255,.6)">Phase: ${esc(p.phase||'—')}</span>
           ${p.duration||(p.startDate&&p.endDate)?`<span style="font-size:10px;color:rgba(255,255,255,.6)">&middot;</span><span style="font-size:10px;color:rgba(255,255,255,.6)">Duration: ${p.duration||Math.max(1,Math.round((new Date(p.endDate)-new Date(p.startDate))/86400000)+1)} days</span>`:''}
         </div>
-        <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:4px">${p.name}</div>
-        <div style="font-size:13px;color:rgba(255,255,255,.7)"><i class="fas fa-building" style="margin-right:6px"></i>${p.client} &nbsp;|&nbsp; <i class="fas fa-map-marker-alt" style="margin-right:6px"></i>${p.location}</div>
+        <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:4px">${esc(p.name)}</div>
+        <div style="font-size:13px;color:rgba(255,255,255,.7)"><i class="fas fa-building" style="margin-right:6px"></i>${esc(p.client)} &nbsp;|&nbsp; <i class="fas fa-map-marker-alt" style="margin-right:6px"></i>${esc(p.location)}</div>
       </div>
       <div style="text-align:right">
         <div style="font-size:34px;font-weight:700;font-family:var(--font-mono);color:${pColor(p.progress)}">${p.progress}%</div>
@@ -1060,7 +1060,7 @@ function renderDetailReadiness(){
           <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-radius:6px;background:${statusBg(item.status)};border:1px solid ${statusBorder(item.status)}">
             ${statusIcon(item.status)}
             <div style="flex:1;min-width:0">
-              <div style="font-size:11px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.name}</div>
+              <div style="font-size:11px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(item.name)}</div>
               <div style="font-size:10px;color:var(--text-secondary);margin-top:1px">${item.detail}</div>
             </div>
             ${item.status!=='go'?`<button class="btn btn-secondary btn-sm" style="height:22px;font-size:9px;padding:0 7px;flex-shrink:0" onclick="navigate('${item.link||'masterlist'}')">Fix</button>`:''}
@@ -1139,8 +1139,8 @@ function renderDetailOverview(){
       <div style="font-size:14px;font-weight:600;margin-bottom:14px"><i class="fas fa-edit" style="color:var(--accent-blue);margin-right:7px"></i>Project Information</div>
       <div class="form-grid">
         <div class="form-group"><label class="form-label">Project ID</label><input class="form-input" id="dp_id" value="${p.id}" readonly style="opacity:.6;font-family:var(--font-mono)"></div>
-        <div class="form-group"><label class="form-label">Project Name</label><input class="form-input" id="dp_name" value="${(p.name||'').replace(/"/g,'&quot;')}"></div>
-        <div class="form-group"><label class="form-label">Client</label><input class="form-input" id="dp_client" value="${(p.client||'').replace(/"/g,'&quot;')}"></div>
+        <div class="form-group"><label class="form-label">Project Name</label><input class="form-input" id="dp_name" value="${esc(p.name||'')}"></div>
+        <div class="form-group"><label class="form-label">Client</label><input class="form-input" id="dp_client" value="${esc(p.client||'')}"></div>
         <div class="form-group"><label class="form-label">Location</label><input class="form-input" id="dp_loc" value="${(p.location||'').replace(/"/g,'&quot;')}"></div>
         <div class="form-group"><label class="form-label">Project Manager</label><input class="form-input" id="dp_pm" value="${(p.pm||'').replace(/"/g,'&quot;')}"></div>
         <div class="form-group"><label class="form-label">Discipline</label><input class="form-input" id="dp_disc" value="${(p.discipline||'').replace(/"/g,'&quot;')}"></div>
@@ -1388,7 +1388,7 @@ function renderDetailOverview(){
 
   // Alerts + Recent Transactions
   let alertItems=[];
-  overdueTasks.forEach(t=>{alertItems.push(`<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)"><i class="fas fa-clock" style="color:var(--accent-red);margin-top:2px;flex-shrink:0"></i><div><div style="font-size:11px;font-weight:500">Overdue Task: ${t.name}</div><div style="font-size:10px;color:var(--text-secondary)">Due: ${t.dueDate} &middot; ${t.assignee||'Unassigned'}</div></div></div>`);});
+  overdueTasks.forEach(t=>{alertItems.push(`<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)"><i class="fas fa-clock" style="color:var(--accent-red);margin-top:2px;flex-shrink:0"></i><div><div style="font-size:11px;font-weight:500">Overdue Task: ${esc(t.name)}</div><div style="font-size:10px;color:var(--text-secondary)">Due: ${t.dueDate} &middot; ${t.assignee||'Unassigned'}</div></div></div>`);});
   risks.filter(r=>r.status==='active'&&(r.impact||0)*(r.probability||0)>=6).forEach(r=>{alertItems.push(`<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)"><i class="fas fa-shield-alt" style="color:var(--accent-red);margin-top:2px;flex-shrink:0"></i><div><div style="font-size:11px;font-weight:500">High Risk: ${(r.description||'').substring(0,50)||'&#8212;'}</div><div style="font-size:10px;color:var(--text-secondary)">Score: ${(r.impact||0)*(r.probability||0)}</div></div></div>`);});
   lowStock.forEach(c=>{alertItems.push(`<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)"><i class="fas fa-exclamation-triangle" style="color:var(--accent-amber);margin-top:2px;flex-shrink:0"></i><div><div style="font-size:11px;font-weight:500">Low Stock: ${c.name}</div><div style="font-size:10px;color:var(--text-secondary)">${c.qtyOnHand} ${c.unit} &middot; Min: ${c.minStock}</div></div></div>`);});
   actions.filter(a=>a.status!=='closed'&&a.dueDate&&isOverdue(a.dueDate)).forEach(a=>{alertItems.push(`<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)"><i class="fas fa-clipboard-list" style="color:var(--accent-amber);margin-top:2px;flex-shrink:0"></i><div><div style="font-size:11px;font-weight:500">Overdue Action: ${(a.description||'').substring(0,50)||'&#8212;'}</div><div style="font-size:10px;color:var(--text-secondary)">Due: ${a.dueDate}</div></div></div>`);});
@@ -1502,7 +1502,7 @@ function renderDetailTaskRows(tasks){
   const ordered=typeof _orderTasksHier==='function'?_orderTasksHier(tasks):tasks.map(t=>({t,depth:0}));
   return ordered.map(({t,depth})=>{const isSum=typeof _taskHasChildren==='function'&&_taskHasChildren(t.id,tasks);return`<tr>
     <td style="font-size:10px;font-family:var(--font-mono);color:var(--text-muted)">${t.wbs||t.id}</td>
-    <td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${t.name}</div></td>
+    <td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${esc(t.name)}</div></td>
     <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.assignee,22)}<span style="font-size:11px">${t.assignee}</span></div></td>
     <td style="font-size:11px;color:var(--text-secondary)">${t.dept}</td>
     <td style="font-size:11px;font-family:var(--font-mono)">${t.startDate}</td>
@@ -1884,7 +1884,7 @@ function renderDetailResources(){
         const pct2=tc2>0?Math.round(dc/tc2*100):0;
         const res=(AppState.data.resources||[]).find(r=>r.id===m.resourceId)||{};
         return`<tr>
-        <td><div style="display:flex;align-items:center;gap:8px">${avatarH(m.name,30)}<div><div style="font-weight:600;font-size:12px">${m.name}</div><div style="font-size:9px;color:var(--text-muted)">${res.dept||m.department||'—'}</div></div></div></td>
+        <td><div style="display:flex;align-items:center;gap:8px">${avatarH(m.name,30)}<div><div style="font-weight:600;font-size:12px">${esc(m.name)}</div><div style="font-size:9px;color:var(--text-muted)">${res.dept||m.department||'—'}</div></div></div></td>
         <td><input class="form-input" value="${m.role||''}" style="min-width:110px;height:26px;font-size:11px" oninput="updateTeamMember('${m.id}','role',this.value)" onchange="updateTeamMember('${m.id}','role',this.value)"></td>
         <td style="font-size:11px">${m.department||res.dept||'—'}</td>
         <td>${sb(res.availability||'—')}</td>
@@ -2004,7 +2004,7 @@ function renderDetailDocRows(docs){
   return docs.map(d=>`<tr>
     <td style="font-size:10px;font-family:var(--font-mono);font-weight:700">${d.number}</td>
     <td><input class="form-input" value="${d.rev}" style="width:48px;height:26px;font-size:11px" onchange="updateDocField('${d.id}','rev',this.value)"></td>
-    <td><input class="form-input" value="${d.name}" style="min-width:160px;height:26px;font-size:12px;font-weight:500" onchange="updateDocField('${d.id}','name',this.value)"></td>
+    <td><input class="form-input" value="${esc(d.name)}" style="min-width:160px;height:26px;font-size:12px;font-weight:500" onchange="updateDocField('${d.id}','name',this.value)"></td>
     <td><select class="form-select" style="height:30px;font-size:11px" onchange="updateDocField('${d.id}','category',this.value)">${_getDropdown('doc_categories').map(c=>`<option ${d.category===c?'selected':''}>${c}</option>`).join('')}</select></td>
     <td><input class="form-input" value="${d.author}" style="min-width:100px;height:26px;font-size:11px" onchange="updateDocField('${d.id}','author',this.value)"></td>
     <td><input class="form-input" type="date" value="${safeDate(d.date)}" style="height:26px;font-size:11px" onchange="updateDocField('${d.id}','date',this.value)"></td>
@@ -2835,7 +2835,7 @@ function _ulFilterRes(i,query){
       style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)"
       onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">
       <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name}</div>
+        <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.name)}</div>
         <div style="font-size:10px;color:var(--text-muted)">${r.id} · ${r.unit}</div>
       </div>
       <span style="font-size:10px;padding:1px 7px;border-radius:10px;background:${_UL_TYPE_COLORS[r.type]||'#888'}22;color:${_UL_TYPE_COLORS[r.type]||'#888'};white-space:nowrap">${r.type}</span>
@@ -3817,16 +3817,16 @@ function renderDetailGantt(){
       barContent=`
         <div style="position:absolute;left:${lft}%;width:${wdt}%;min-width:4px;top:9px;height:${BAR_H}px;background:${c}33;border-radius:3px;border:1px solid ${c}88"></div>
         ${prog>0?`<div style="position:absolute;left:${lft}%;width:${prog}%;min-width:4px;top:9px;height:${BAR_H}px;background:${c};border-radius:3px;overflow:hidden;display:flex;align-items:center">
-          <span style="font-size:8px;color:#fff;padding:0 4px;white-space:nowrap;overflow:hidden">${t.name}</span>
+          <span style="font-size:8px;color:#fff;padding:0 4px;white-space:nowrap;overflow:hidden">${esc(t.name)}</span>
         </div>`:''}
         ${overdue?`<div style="position:absolute;left:calc(${lft+wdt}% + 2px);top:9px;font-size:9px;color:var(--accent-red)">⚠</div>`:''}`;
     }
 
-    rowsHtml+=`<div id="ganttRow_${t.id}" style="display:flex;border-bottom:1px solid var(--border)" title="${t.name}">
+    rowsHtml+=`<div id="ganttRow_${t.id}" style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)}">
       <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:5px 10px;border-right:1px solid var(--border);overflow:hidden">
         <div style="display:flex;align-items:center;gap:5px">
           <i class="fas ${isMile?'fa-diamond':'fa-circle'}" style="color:${isMile?'var(--accent-amber)':c};font-size:${isMile?'9':'6'}px;flex-shrink:0"></i>
-          <span style="font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.name}</span>
+          <span style="font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.name)}</span>
         </div>
         ${t.assignee?`<div style="font-size:9px;color:var(--text-muted);padding-left:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.assignee}</div>`:''}
       </div>

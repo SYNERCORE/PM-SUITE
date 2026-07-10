@@ -139,13 +139,13 @@ function renderDocTable(){
           <div style="display:flex;align-items:center;gap:8px">
             <i class="fas ${icon}" style="color:${color};font-size:16px;flex-shrink:0"></i>
             <div>
-              <div style="font-size:12px;font-weight:500">${d.name}</div>
-              ${d.description?`<div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">${d.description}</div>`:''}
+              <div style="font-size:12px;font-weight:500">${esc(d.name)}</div>
+              ${d.description?`<div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">${esc(d.description)}</div>`:''}
             </div>
           </div>
         </td>
         <td><span class="badge badge-blue">${d.projectId}</span></td>
-        <td><span class="badge badge-purple">${d.category}</span></td>
+        <td><span class="badge badge-purple">${esc(d.category)}</span></td>
         <td>
           <div style="display:flex;align-items:center;gap:5px">
             ${d.author?`<div style="width:22px;height:22px;border-radius:50%;background:${stringToColor(d.author)};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff">${d.author.charAt(0).toUpperCase()}</div>`:''}
@@ -220,13 +220,13 @@ function renderDocTable(){
           <div style="display:flex;align-items:center;gap:8px">
             <i class="fas ${icon}" style="color:${color};font-size:16px;flex-shrink:0"></i>
             <div>
-              <div style="font-size:12px;font-weight:500">${d.name}</div>
-              ${d.description?`<div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">${d.description}</div>`:''}
+              <div style="font-size:12px;font-weight:500">${esc(d.name)}</div>
+              ${d.description?`<div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">${esc(d.description)}</div>`:''}
             </div>
           </div>
         </td>
         <td><span class="badge badge-blue">${d.projectId}</span></td>
-        <td><span class="badge badge-purple">${d.category}</span></td>
+        <td><span class="badge badge-purple">${esc(d.category)}</span></td>
         <td>
           <div style="display:flex;align-items:center;gap:5px">
             ${d.author?`<div style="width:22px;height:22px;border-radius:50%;background:${stringToColor(d.author)};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff">${d.author.charAt(0).toUpperCase()}</div>`:''}

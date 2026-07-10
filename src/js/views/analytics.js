@@ -259,7 +259,7 @@ function _analyticsProcurement() {
         <thead><tr><th>Description</th><th>Supplier</th><th>Stage</th><th style="text-align:right">Amount</th></tr></thead>
         <tbody>
           ${top10.map(p=>`<tr>
-            <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.description||p.id}</td>
+            <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.description||p.id)}</td>
             <td style="font-size:11px;color:var(--text-secondary)">${p.supplier||'—'}</td>
             <td><span class="badge badge-blue" style="font-size:9px;text-transform:capitalize">${(p.stage||'').replace('_',' ')}</span></td>
             <td style="text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--accent-green)">${_fmt(parseFloat(p.amount)||0)}</td>
