@@ -7449,6 +7449,37 @@ function SHIC_OFFLOADED_KEYS_REFRESH() {
   return Object.values(SHIC_LIST_CONFIG).map(c => c.dataKey);
 }
 
+// ── Build the SHIC_AppData main-blob payload ─────────────────
+// When sub-lists push cleanly, the main blob carries only what has
+// no dedicated list: settings, tombstones, and the schema stamp.
+// When sub-lists fail, we fall back to the legacy full-shape blob
+// so SharePoint still holds the data.
+function _spBuildMainBlobPayload(subListsOk) {
+  if (subListsOk) {
+    return {
+      settings:      AppState.data.settings || {},
+      _deletedIds:   _spDeletedIds,
+      _schemaVersion: (typeof SHIC_SCHEMA_VERSION !== 'undefined') ? SHIC_SCHEMA_VERSION : 0,
+    };
+  }
+  // Fallback: sub-lists failed — keep legacy full-shape blob so SP has the data
+  const dataForPush = { ...AppState.data };
+  if ((dataForPush.activities || []).length > 200)
+    dataForPush.activities = dataForPush.activities.slice(-200);
+  if ((dataForPush.notifications || []).length > 100)
+    dataForPush.notifications = dataForPush.notifications.slice(-100);
+  if (dataForPush.documents && dataForPush.documents.length) {
+    dataForPush.documents = dataForPush.documents.map(d => {
+      const copy = { ...d };
+      if (copy.fileData) delete copy.fileData;
+      return copy;
+    });
+  }
+  dataForPush._deletedIds = _spDeletedIds;
+  dataForPush._schemaVersion = (typeof SHIC_SCHEMA_VERSION !== 'undefined') ? SHIC_SCHEMA_VERSION : 0;
+  return dataForPush;
+}
+
 async function spPushData(silent = false) {
   if (_spSyncing) return false;
   if (!_spConnected || !_spAccount) { if (!silent) showToast('Not connected to SharePoint', 'error'); return false; }
@@ -7521,34 +7552,13 @@ async function spPushData(silent = false) {
 
     // ── PHASE 2b: Build and push main blob ──────────────────
     spSetStatus('syncing', 'Uploading to SharePoint...');
-    // Prune large arrays to keep blob under 5MB SP limit
-    const dataForPush = { ...AppState.data };
-    if ((dataForPush.activities || []).length > 200)
-      dataForPush.activities = dataForPush.activities.slice(-200);
-    if ((dataForPush.notifications || []).length > 100)
-      dataForPush.notifications = dataForPush.notifications.slice(-100);
-    // ── ALWAYS strip embedded base64 file data from documents ──────
-    if (dataForPush.documents && dataForPush.documents.length) {
-      dataForPush.documents = dataForPush.documents.map(d => {
-        const copy = { ...d };
-        if (copy.fileData) delete copy.fileData;
-        return copy;
-      });
-    }
-
-    // Strip offloaded arrays from main blob ONLY after sub-lists were pushed successfully.
-    // If sub-lists failed, keep the arrays in the main blob as a fallback so SP has the data.
-    if (subListsOk) {
-      SHIC_OFFLOADED_KEYS.forEach(key => { dataForPush[key] = []; });
-    }
+    const dataForPush = _spBuildMainBlobPayload(subListsOk);
 
     // Safety: check the final payload size before pushing
     const payloadStr = JSON.stringify(dataForPush);
     if (payloadStr.length > 4 * 1024 * 1024) {
       console.warn('[SP] Payload size:', (payloadStr.length / 1024 / 1024).toFixed(2) + ' MB — may hit SP limits');
     }
-    // Include deletion tracking
-    dataForPush._deletedIds = _spDeletedIds;
     const payload = { ...dataForPush, _ts: nowTs, _by: _spAccount.username };
     await _spWriteRemote(token, siteId, listId, payload);
     _spLastWriteTs = nowTs;
