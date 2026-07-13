@@ -1,0 +1,30 @@
+[Unit]
+Description=ProMaster local API server
+Documentation=https://github.com/SYNERCORE/PM-SUITE
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=procmaster
+Group=procmaster
+WorkingDirectory=/opt/procmaster
+ExecStart=/usr/bin/node /opt/procmaster/server.js
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:/var/log/procmaster/api.log
+StandardError=append:/var/log/procmaster/api.err
+
+# Hardening — deny everything the app doesn't need
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/procmaster
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target
