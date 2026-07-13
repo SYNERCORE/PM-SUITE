@@ -30,7 +30,7 @@ $css = ReadFile('css\main.css')
 $out = $idx.Replace('<link rel="stylesheet" href="src/css/main.css">', "<style>`n$css`n</style>")
 
 $jsFiles = @(
-  'js\core.js', 'js\lib\store.js', 'js\lib\merge.js', 'js\templates.js', 'js\ui.js', 'js\auth.js', 'js\sync.js', 'js\session.js', 'js\hardening.js', 'js\cpm.js', 'js\baseline.js',
+  'js\core.js', 'js\lib\store.js', 'js\lib\merge.js', 'js\lib\deletions.js', 'js\templates.js', 'js\ui.js', 'js\auth.js', 'js\sync.js', 'js\session.js', 'js\hardening.js', 'js\cpm.js', 'js\baseline.js',
   'js\views\dashboard.js', 'js\views\projects.js', 'js\views\prospects.js',
   'js\views\deletionRequests.js', 'js\workflow.js', 'js\views\tasks.js', 'js\views\gantt.js', 'js\views\ganttExport.js',
   'js\views\resources.js', 'js\views\manpower.js', 'js\views\materials.js',

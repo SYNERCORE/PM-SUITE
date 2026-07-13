@@ -1542,8 +1542,9 @@ let _spOfflineQueue = !!localStorage.getItem('shic_sp_offlinequeue'); // persist
 let _spAvailable = true;      // tracks whether SharePoint is reachable
 let _spRetryTimer = null;     // retry timer when SP is unavailable
 // Track deletions so they survive merges (deleted records won't get re-added by returning users)
-let _spDeletedIds = JSON.parse(localStorage.getItem('shic_sp_deleted_ids') || '{}');
-// Format: { 'projects': ['PRJ-001', 'PRJ-002'], 'tasks': ['TSK-001'] }
+// Underlying map lives in Deletions facade (lib/deletions.js). Kept as an alias
+// so existing consumers (deletionRequests.js, SP push payload) work unchanged.
+let _spDeletedIds = Deletions.raw();
 const SP_DELETED_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // keep deletion records for 7 days
 
 const SP_SCOPES = ['https://graph.microsoft.com/Sites.ReadWrite.All', 'User.Read'];
@@ -1949,13 +1950,7 @@ async function connectSharePoint() {
           // SharePoint has data — merge if local edits exist, else pull remote
           console.log('[SP] Pulling from SharePoint on connect — remote _ts:', remote._ts);
           const { _ts, _by, _deletedIds: rd, ...cleanData } = remote;
-          if (rd) {
-            Object.keys(rd).forEach(k => {
-              if (!_spDeletedIds[k]) _spDeletedIds[k] = {};
-              Object.assign(_spDeletedIds[k], rd[k]);
-            });
-            localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
-          }
+          if (rd) Deletions.mergeRemote(rd);
           if (_spHasLocalEdits()) {
             // Never wipe local unsaved work on connect — merge then push
             _spApplyRemote(cleanData, _ts, _by);
@@ -2185,21 +2180,16 @@ async function _spWriteRemote(token, siteId, listId, payload, attempt = 0) {
 
 // ── Record a deletion so it survives future merges ───────
 function _spTrackDeletion(arrayKey, id) {
-  if (!_spDeletedIds[arrayKey]) _spDeletedIds[arrayKey] = {};
-  _spDeletedIds[arrayKey][id] = Date.now();
-  // Prune old entries (> 7 days)
-  const cutoff = Date.now() - SP_DELETED_MAX_AGE;
-  Object.keys(_spDeletedIds).forEach(k => {
-    Object.keys(_spDeletedIds[k]).forEach(did => {
-      if (_spDeletedIds[k][did] < cutoff) delete _spDeletedIds[k][did];
-    });
-  });
-  localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
+  const by = (typeof _currentUserProfile !== 'undefined')
+    ? (_currentUserProfile?.name || _currentUserProfile?.email || 'unknown')
+    : 'unknown';
+  Deletions.track(arrayKey, id, by);
+  Deletions.prune(SP_DELETED_MAX_AGE);
 }
 
 // ── Check if a record was locally deleted ─────────────────
 function _spWasDeleted(arrayKey, id) {
-  return !!(_spDeletedIds[arrayKey] && _spDeletedIds[arrayKey][id]);
+  return Deletions.was(arrayKey, id);
 }
 
 // Conflict visibility: records where a newer remote edit overwrote this
@@ -3291,14 +3281,7 @@ async function spPullData() {
       return;
     }
     const { _ts, _by, _deletedIds: remoteDeleted, ...cleanData } = remote;
-    // Merge remote deletion records into local
-    if (remoteDeleted) {
-      Object.keys(remoteDeleted).forEach(k => {
-        if (!_spDeletedIds[k]) _spDeletedIds[k] = {};
-        Object.assign(_spDeletedIds[k], remoteDeleted[k]);
-      });
-      localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
-    }
+    if (remoteDeleted) Deletions.mergeRemote(remoteDeleted);
     _spApplyRemote(cleanData, _ts, _by);
 
     // ── CRITICAL: Also fetch all sub-lists (Tasks, Projects, etc.) ──
@@ -3908,13 +3891,7 @@ async function spAutoInit() {
     }
 
     const { _ts, _by, _deletedIds: rd, ...remoteData } = remote;
-    if (rd) {
-      Object.keys(rd).forEach(k => {
-        if (!_spDeletedIds[k]) _spDeletedIds[k] = {};
-        Object.assign(_spDeletedIds[k], rd[k]);
-      });
-      localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
-    }
+    if (rd) Deletions.mergeRemote(rd);
 
     const remoteCount = _dataRecordCount(remoteData);
     console.log('[SP] Auto-init: local=' + localCount + ', remote=' + remoteCount);

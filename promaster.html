@@ -2374,6 +2374,120 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Merge;
 
 </script>
 <script>
+// ── Deletions tombstone facade ────────────────────────────────
+// First-class deletion tracking. Replaces the loose _spDeletedIds map
+// with a typed { entity, id, at, by, restoredAt? } shape.
+//
+// Storage: same localStorage key `shic_sp_deleted_ids` for zero-migration
+// upgrade. Legacy entries stored as `number` (timestamp only) are read
+// transparently and normalized on next write.
+//
+// Public API:
+//   Deletions.track(entity, id, by?)   → record a tombstone
+//   Deletions.was(entity, id)          → boolean, ignores restored entries
+//   Deletions.get(entity, id)          → { at, by, restoredAt? } | null
+//   Deletions.list(entity)             → array of live tombstone ids
+//   Deletions.forget(entity, id)       → remove tombstone entirely
+//   Deletions.restore(entity, id, by?) → mark restoredAt, keeps history
+//   Deletions.mergeRemote(remoteMap)   → union tombstones from SP push
+//   Deletions.prune(maxAgeMs)          → drop entries older than cutoff
+//   Deletions.raw()                    → underlying map (SP push serializes it)
+
+const Deletions = (function () {
+  const KEY = 'shic_sp_deleted_ids';
+  let _map = {};
+  try { _map = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { _map = {}; }
+
+  function _persist() {
+    try { localStorage.setItem(KEY, JSON.stringify(_map)); } catch (e) {}
+  }
+
+  function _normalize(entry) {
+    if (entry == null) return null;
+    if (typeof entry === 'number') return { at: entry, by: 'unknown' };
+    if (typeof entry === 'object' && typeof entry.at === 'number') return entry;
+    return null;
+  }
+
+  function track(entity, id, by) {
+    if (!entity || !id) return;
+    if (!_map[entity]) _map[entity] = {};
+    const existing = _normalize(_map[entity][id]);
+    _map[entity][id] = {
+      at: Date.now(),
+      by: by || (existing && existing.by) || 'unknown',
+    };
+    _persist();
+  }
+
+  function get(entity, id) {
+    if (!_map[entity]) return null;
+    return _normalize(_map[entity][id]);
+  }
+
+  function was(entity, id) {
+    const e = get(entity, id);
+    return !!(e && !e.restoredAt);
+  }
+
+  function list(entity) {
+    if (!_map[entity]) return [];
+    return Object.keys(_map[entity]).filter(id => was(entity, id));
+  }
+
+  function forget(entity, id) {
+    if (_map[entity] && _map[entity][id]) {
+      delete _map[entity][id];
+      _persist();
+    }
+  }
+
+  function restore(entity, id, by) {
+    const e = get(entity, id);
+    if (!e) return false;
+    e.restoredAt = Date.now();
+    e.restoredBy = by || 'unknown';
+    _map[entity][id] = e;
+    _persist();
+    return true;
+  }
+
+  function mergeRemote(remoteMap) {
+    if (!remoteMap || typeof remoteMap !== 'object') return;
+    Object.keys(remoteMap).forEach(entity => {
+      if (!_map[entity]) _map[entity] = {};
+      const remoteEntity = remoteMap[entity] || {};
+      Object.keys(remoteEntity).forEach(id => {
+        const incoming = _normalize(remoteEntity[id]);
+        const current  = _normalize(_map[entity][id]);
+        if (!incoming) return;
+        if (!current || incoming.at > current.at) _map[entity][id] = incoming;
+      });
+    });
+    _persist();
+  }
+
+  function prune(maxAgeMs) {
+    const cutoff = Date.now() - (maxAgeMs || 7 * 24 * 60 * 60 * 1000);
+    Object.keys(_map).forEach(entity => {
+      Object.keys(_map[entity]).forEach(id => {
+        const e = _normalize(_map[entity][id]);
+        if (!e || e.at < cutoff) delete _map[entity][id];
+      });
+      if (Object.keys(_map[entity]).length === 0) delete _map[entity];
+    });
+    _persist();
+  }
+
+  function raw() { return _map; }
+
+  return { track, get, was, list, forget, restore, mergeRemote, prune, raw };
+})();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = Deletions;
+
+</script>
+<script>
 // ── SHARED UI TEMPLATE HELPERS (Phase C3) ────────────────────
 // Named, readable replacements for cryptic one-letter helpers.
 // All functions return HTML strings for use in innerHTML assignments.
@@ -5791,8 +5905,9 @@ let _spOfflineQueue = !!localStorage.getItem('shic_sp_offlinequeue'); // persist
 let _spAvailable = true;      // tracks whether SharePoint is reachable
 let _spRetryTimer = null;     // retry timer when SP is unavailable
 // Track deletions so they survive merges (deleted records won't get re-added by returning users)
-let _spDeletedIds = JSON.parse(localStorage.getItem('shic_sp_deleted_ids') || '{}');
-// Format: { 'projects': ['PRJ-001', 'PRJ-002'], 'tasks': ['TSK-001'] }
+// Underlying map lives in Deletions facade (lib/deletions.js). Kept as an alias
+// so existing consumers (deletionRequests.js, SP push payload) work unchanged.
+let _spDeletedIds = Deletions.raw();
 const SP_DELETED_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // keep deletion records for 7 days
 
 const SP_SCOPES = ['https://graph.microsoft.com/Sites.ReadWrite.All', 'User.Read'];
@@ -6198,13 +6313,7 @@ async function connectSharePoint() {
           // SharePoint has data — merge if local edits exist, else pull remote
           console.log('[SP] Pulling from SharePoint on connect — remote _ts:', remote._ts);
           const { _ts, _by, _deletedIds: rd, ...cleanData } = remote;
-          if (rd) {
-            Object.keys(rd).forEach(k => {
-              if (!_spDeletedIds[k]) _spDeletedIds[k] = {};
-              Object.assign(_spDeletedIds[k], rd[k]);
-            });
-            localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
-          }
+          if (rd) Deletions.mergeRemote(rd);
           if (_spHasLocalEdits()) {
             // Never wipe local unsaved work on connect — merge then push
             _spApplyRemote(cleanData, _ts, _by);
@@ -6434,21 +6543,16 @@ async function _spWriteRemote(token, siteId, listId, payload, attempt = 0) {
 
 // ── Record a deletion so it survives future merges ───────
 function _spTrackDeletion(arrayKey, id) {
-  if (!_spDeletedIds[arrayKey]) _spDeletedIds[arrayKey] = {};
-  _spDeletedIds[arrayKey][id] = Date.now();
-  // Prune old entries (> 7 days)
-  const cutoff = Date.now() - SP_DELETED_MAX_AGE;
-  Object.keys(_spDeletedIds).forEach(k => {
-    Object.keys(_spDeletedIds[k]).forEach(did => {
-      if (_spDeletedIds[k][did] < cutoff) delete _spDeletedIds[k][did];
-    });
-  });
-  localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
+  const by = (typeof _currentUserProfile !== 'undefined')
+    ? (_currentUserProfile?.name || _currentUserProfile?.email || 'unknown')
+    : 'unknown';
+  Deletions.track(arrayKey, id, by);
+  Deletions.prune(SP_DELETED_MAX_AGE);
 }
 
 // ── Check if a record was locally deleted ─────────────────
 function _spWasDeleted(arrayKey, id) {
-  return !!(_spDeletedIds[arrayKey] && _spDeletedIds[arrayKey][id]);
+  return Deletions.was(arrayKey, id);
 }
 
 // Conflict visibility: records where a newer remote edit overwrote this
@@ -7540,14 +7644,7 @@ async function spPullData() {
       return;
     }
     const { _ts, _by, _deletedIds: remoteDeleted, ...cleanData } = remote;
-    // Merge remote deletion records into local
-    if (remoteDeleted) {
-      Object.keys(remoteDeleted).forEach(k => {
-        if (!_spDeletedIds[k]) _spDeletedIds[k] = {};
-        Object.assign(_spDeletedIds[k], remoteDeleted[k]);
-      });
-      localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
-    }
+    if (remoteDeleted) Deletions.mergeRemote(remoteDeleted);
     _spApplyRemote(cleanData, _ts, _by);
 
     // ── CRITICAL: Also fetch all sub-lists (Tasks, Projects, etc.) ──
@@ -8157,13 +8254,7 @@ async function spAutoInit() {
     }
 
     const { _ts, _by, _deletedIds: rd, ...remoteData } = remote;
-    if (rd) {
-      Object.keys(rd).forEach(k => {
-        if (!_spDeletedIds[k]) _spDeletedIds[k] = {};
-        Object.assign(_spDeletedIds[k], rd[k]);
-      });
-      localStorage.setItem('shic_sp_deleted_ids', JSON.stringify(_spDeletedIds));
-    }
+    if (rd) Deletions.mergeRemote(rd);
 
     const remoteCount = _dataRecordCount(remoteData);
     console.log('[SP] Auto-init: local=' + localCount + ', remote=' + remoteCount);
