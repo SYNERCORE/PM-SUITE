@@ -1677,44 +1677,14 @@ const HARDENING_BUILD_DATE = '2026-06-17';
 
 // ── 1. AUDIT LOG ──────────────────────────────────────────
 // Captures sync events, errors, conflicts, ID renames, deletes, restores.
-// Stored locally (last 500 entries) + optionally pushed to SP audit list.
-const AUDIT_LOG_KEY = 'shic_audit_log';
+// Audit log persistence lives in the Audit facade (lib/audit.js).
+// This wrapper preserves the (category, message, details) call shape
+// used across masterlist.js / prospects.js / deletionRequests.js.
+const AUDIT_LOG_KEY = 'shic_audit_log'; // kept for legacy readers
 const AUDIT_LOG_MAX = 500;
-let _auditLog = [];
+Object.defineProperty(window, '_auditLog', { get: () => Audit.all(), configurable: true });
 
-function _loadAuditLog() {
-  try { _auditLog = JSON.parse(localStorage.getItem(AUDIT_LOG_KEY) || '[]'); } catch(e) { _auditLog = []; }
-}
-function _saveAuditLog() {
-  try {
-    if (_auditLog.length > AUDIT_LOG_MAX) _auditLog = _auditLog.slice(-AUDIT_LOG_MAX);
-    localStorage.setItem(AUDIT_LOG_KEY, JSON.stringify(_auditLog));
-  } catch(e) {
-    // Quota — drop the oldest half
-    _auditLog = _auditLog.slice(-Math.floor(AUDIT_LOG_MAX / 2));
-    try { localStorage.setItem(AUDIT_LOG_KEY, JSON.stringify(_auditLog)); } catch(e2) {}
-  }
-}
-
-function auditLog(category, message, details) {
-  const entry = {
-    ts: Date.now(),
-    iso: new Date().toISOString(),
-    category, // 'sync', 'error', 'conflict', 'collision', 'delete', 'restore', 'auth', 'backup', 'reset'
-    message: String(message || ''),
-    details: details || null,
-    user: (typeof _currentUserProfile !== 'undefined' && _currentUserProfile?.email) || (typeof _currentUser !== 'undefined' && _currentUser?.email) || 'unknown',
-    page: (typeof AppState !== 'undefined' && AppState.currentPage) || '',
-    version: HARDENING_VERSION,
-  };
-  _auditLog.push(entry);
-  _saveAuditLog();
-  // Mirror to console at appropriate level
-  if (category === 'error') console.error('[Audit]', message, details);
-  else if (category === 'conflict' || category === 'collision') console.warn('[Audit]', message, details);
-  else console.log('[Audit]', message);
-}
-_loadAuditLog();
+function auditLog(...args) { Audit.record(...args); }
 auditLog('boot', 'App loaded v' + HARDENING_VERSION);
 
 // ── 2. GLOBAL ERROR BOUNDARY ──────────────────────────────
@@ -2064,8 +2034,7 @@ function _diagViewLog() {
 
 function _clearAuditLog() {
   if (!confirm('Clear all audit log entries? This is irreversible.')) return;
-  _auditLog = [];
-  _saveAuditLog();
+  Audit.clear();
   showToast('Audit log cleared', 'warning');
   showDiagnostics();
 }

@@ -2488,6 +2488,161 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Deletions;
 
 </script>
 <script>
+// ── Files utility ──────────────────────────────────────────────
+// Small facade over document file references. Docs no longer hold
+// base64 blobs — they carry SP file coords ({spDriveId, spItemId,
+// fileUrl, fileWebUrl}) instead. This module keeps the check-and-
+// strip logic in one place so future writers can't reintroduce the
+// bloated shape.
+//
+// Public API:
+//   Files.strip(doc)            → new doc with base64 fileData removed
+//   Files.stripMany(docs)       → array-mapped strip
+//   Files.hasAttachment(doc)    → true if any file reference (SP or legacy) present
+//   Files.hasBlob(doc)          → true if legacy base64 fileData is still on the record
+
+const Files = (function () {
+  function hasBlob(doc) {
+    return !!(doc && typeof doc.fileData === 'string' && doc.fileData.length > 0);
+  }
+
+  function hasAttachment(doc) {
+    if (!doc) return false;
+    return !!(doc.fileData || doc.fileUrl || doc.fileWebUrl || (doc.spDriveId && doc.spItemId));
+  }
+
+  function strip(doc) {
+    if (!doc || !hasBlob(doc)) return doc;
+    const copy = { ...doc };
+    delete copy.fileData;
+    return copy;
+  }
+
+  function stripMany(docs) {
+    if (!Array.isArray(docs)) return docs;
+    return docs.map(strip);
+  }
+
+  return { strip, stripMany, hasAttachment, hasBlob };
+})();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = Files;
+
+</script>
+<script>
+// ── Audit facade ───────────────────────────────────────────────
+// Unifies the two legacy `auditLog` signatures that used to collide:
+//
+//   Family A  auditLog(category, message, details)          — masterlist.js
+//   Family B  auditLog(action, module, entity, entityId,    — sync.js
+//                       before, after, notes)
+//
+// Detection: if the second arg is a string AND there are ≥ 4 args
+// (or the 3rd arg looks like an entity name), treat as Family B.
+// Otherwise Family A.
+//
+// Sinks:
+//   • localStorage `shic_audit_log` (canonical, always written, capped)
+//   • SharePoint AuditLog list via _auditQueue + _flushAuditQueue
+//     (best-effort — only when SP is connected)
+//
+// Public API:
+//   Audit.record(...args)  → normalize + persist
+//   Audit.all()            → array of recent entries (newest last)
+//   Audit.clear()          → wipe local log
+//   Audit.errorCount()     → count of entries with category='error'
+
+const Audit = (function () {
+  const KEY = 'shic_audit_log';
+  const MAX = 500;
+  let _log = [];
+  try { _log = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { _log = []; }
+
+  function _persist() {
+    try {
+      if (_log.length > MAX) _log = _log.slice(-MAX);
+      localStorage.setItem(KEY, JSON.stringify(_log));
+    } catch (e) {
+      _log = _log.slice(-Math.floor(MAX / 2));
+      try { localStorage.setItem(KEY, JSON.stringify(_log)); } catch (e2) {}
+    }
+  }
+
+  function _who() {
+    try {
+      if (typeof _currentUserProfile !== 'undefined' && _currentUserProfile?.email) return _currentUserProfile.email;
+      if (typeof _currentUser !== 'undefined' && _currentUser?.email) return _currentUser.email;
+    } catch (e) {}
+    return 'unknown';
+  }
+
+  function _normalize(args) {
+    // Family B: (action, module, entity, entityId, before, after, notes)
+    if (args.length >= 4 && typeof args[1] === 'string' && typeof args[2] === 'string') {
+      const [action, module, entity, entityId, before, after, notes] = args;
+      return {
+        category: String(action).toLowerCase(),
+        message: `${module} · ${entity} ${entityId || ''}`.trim(),
+        details: { module, entity, entityId, before, after, notes },
+      };
+    }
+    // Family A: (category, message, details)
+    const [category, message, details] = args;
+    return {
+      category: String(category || 'info'),
+      message: String(message || ''),
+      details: details || null,
+    };
+  }
+
+  function record(...args) {
+    const { category, message, details } = _normalize(args);
+    const entry = {
+      ts: Date.now(),
+      iso: new Date().toISOString(),
+      category, message, details,
+      user: _who(),
+      page: (typeof AppState !== 'undefined' && AppState.currentPage) || '',
+      version: (typeof HARDENING_VERSION !== 'undefined') ? HARDENING_VERSION : '',
+    };
+    _log.push(entry);
+    _persist();
+
+    if (category === 'error') console.error('[Audit]', message, details);
+    else if (category === 'conflict' || category === 'collision') console.warn('[Audit]', message, details);
+    else console.log('[Audit]', message);
+
+    // Best-effort SP mirror — only when the SP audit queue exists and is connected.
+    try {
+      if (typeof _auditQueue !== 'undefined' && typeof _spConnected !== 'undefined' && _spConnected) {
+        _auditQueue.push({
+          ts: entry.iso,
+          action: entry.category.toUpperCase(),
+          module: details?.module || entry.page || '',
+          entity: details?.entity || '',
+          entityId: details?.entityId || '',
+          userEmail: entry.user,
+          before: details?.before || null,
+          after: details?.after || details || null,
+          notes: details?.notes || message,
+        });
+        if (typeof _flushAuditQueue === 'function') setTimeout(_flushAuditQueue, 500);
+      }
+    } catch (e) { /* SP mirror best-effort */ }
+  }
+
+  function all()          { return _log.slice(); }
+  function clear()        { _log = []; _persist(); }
+  function errorCount()   { return _log.filter(e => e.category === 'error').length; }
+  function conflictCount(){ return _log.filter(e => e.category === 'conflict' || e.category === 'collision').length; }
+
+  return { record, all, clear, errorCount, conflictCount };
+})();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = Audit;
+
+</script>
+<script>
 // ── SHARED UI TEMPLATE HELPERS (Phase C3) ────────────────────
 // Named, readable replacements for cryptic one-letter helpers.
 // All functions return HTML strings for use in innerHTML assignments.
@@ -7468,13 +7623,7 @@ function _spBuildMainBlobPayload(subListsOk) {
     dataForPush.activities = dataForPush.activities.slice(-200);
   if ((dataForPush.notifications || []).length > 100)
     dataForPush.notifications = dataForPush.notifications.slice(-100);
-  if (dataForPush.documents && dataForPush.documents.length) {
-    dataForPush.documents = dataForPush.documents.map(d => {
-      const copy = { ...d };
-      if (copy.fileData) delete copy.fileData;
-      return copy;
-    });
-  }
+  dataForPush.documents = Files.stripMany(dataForPush.documents || []);
   dataForPush._deletedIds = _spDeletedIds;
   dataForPush._schemaVersion = (typeof SHIC_SCHEMA_VERSION !== 'undefined') ? SHIC_SCHEMA_VERSION : 0;
   return dataForPush;
@@ -8667,22 +8816,11 @@ async function _flushAuditQueue() {
   finally { _auditFlushing = false; }
 }
 
-// Public function — call this everywhere you want to log
-function auditLog(action, module, entity, entityId, before, after, notes) {
-  const entry = {
-    ts: new Date().toISOString(),
-    action, // 'CREATE' | 'UPDATE' | 'DELETE'
-    module, // 'Warehouse' | 'Procurement' | 'Projects' etc
-    entity, // 'StockTransaction' | 'WarehouseItem' | 'IssuanceRequest' etc
-    entityId: entityId||'',
-    userEmail: AppState.currentUser?.email || _currentUser?.email || '',
-    before: before||null,
-    after: after||null,
-    notes: notes||'',
-  };
-  _auditQueue.push(entry);
-  // Flush async — don't block the UI
-  if (_spConnected) setTimeout(_flushAuditQueue, 500);
+// SP-shape audit call — routes through the unified Audit facade
+// (lib/audit.js), which handles localStorage persistence AND SP mirror.
+// Kept for backwards-compat with warehouse.js / reports.js call sites.
+function auditLogSP(action, module, entity, entityId, before, after, notes) {
+  Audit.record(action, module, entity, entityId, before, after, notes);
 }
 
 // Audit Log viewer for admin panel
@@ -28452,44 +28590,14 @@ const HARDENING_BUILD_DATE = '2026-06-17';
 
 // ── 1. AUDIT LOG ──────────────────────────────────────────
 // Captures sync events, errors, conflicts, ID renames, deletes, restores.
-// Stored locally (last 500 entries) + optionally pushed to SP audit list.
-const AUDIT_LOG_KEY = 'shic_audit_log';
+// Audit log persistence lives in the Audit facade (lib/audit.js).
+// This wrapper preserves the (category, message, details) call shape
+// used across masterlist.js / prospects.js / deletionRequests.js.
+const AUDIT_LOG_KEY = 'shic_audit_log'; // kept for legacy readers
 const AUDIT_LOG_MAX = 500;
-let _auditLog = [];
+Object.defineProperty(window, '_auditLog', { get: () => Audit.all(), configurable: true });
 
-function _loadAuditLog() {
-  try { _auditLog = JSON.parse(localStorage.getItem(AUDIT_LOG_KEY) || '[]'); } catch(e) { _auditLog = []; }
-}
-function _saveAuditLog() {
-  try {
-    if (_auditLog.length > AUDIT_LOG_MAX) _auditLog = _auditLog.slice(-AUDIT_LOG_MAX);
-    localStorage.setItem(AUDIT_LOG_KEY, JSON.stringify(_auditLog));
-  } catch(e) {
-    // Quota — drop the oldest half
-    _auditLog = _auditLog.slice(-Math.floor(AUDIT_LOG_MAX / 2));
-    try { localStorage.setItem(AUDIT_LOG_KEY, JSON.stringify(_auditLog)); } catch(e2) {}
-  }
-}
-
-function auditLog(category, message, details) {
-  const entry = {
-    ts: Date.now(),
-    iso: new Date().toISOString(),
-    category, // 'sync', 'error', 'conflict', 'collision', 'delete', 'restore', 'auth', 'backup', 'reset'
-    message: String(message || ''),
-    details: details || null,
-    user: (typeof _currentUserProfile !== 'undefined' && _currentUserProfile?.email) || (typeof _currentUser !== 'undefined' && _currentUser?.email) || 'unknown',
-    page: (typeof AppState !== 'undefined' && AppState.currentPage) || '',
-    version: HARDENING_VERSION,
-  };
-  _auditLog.push(entry);
-  _saveAuditLog();
-  // Mirror to console at appropriate level
-  if (category === 'error') console.error('[Audit]', message, details);
-  else if (category === 'conflict' || category === 'collision') console.warn('[Audit]', message, details);
-  else console.log('[Audit]', message);
-}
-_loadAuditLog();
+function auditLog(...args) { Audit.record(...args); }
 auditLog('boot', 'App loaded v' + HARDENING_VERSION);
 
 // ── 2. GLOBAL ERROR BOUNDARY ──────────────────────────────
@@ -28839,8 +28947,7 @@ function _diagViewLog() {
 
 function _clearAuditLog() {
   if (!confirm('Clear all audit log entries? This is irreversible.')) return;
-  _auditLog = [];
-  _saveAuditLog();
+  Audit.clear();
   showToast('Audit log cleared', 'warning');
   showDiagnostics();
 }

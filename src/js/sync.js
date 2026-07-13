@@ -3105,13 +3105,7 @@ function _spBuildMainBlobPayload(subListsOk) {
     dataForPush.activities = dataForPush.activities.slice(-200);
   if ((dataForPush.notifications || []).length > 100)
     dataForPush.notifications = dataForPush.notifications.slice(-100);
-  if (dataForPush.documents && dataForPush.documents.length) {
-    dataForPush.documents = dataForPush.documents.map(d => {
-      const copy = { ...d };
-      if (copy.fileData) delete copy.fileData;
-      return copy;
-    });
-  }
+  dataForPush.documents = Files.stripMany(dataForPush.documents || []);
   dataForPush._deletedIds = _spDeletedIds;
   dataForPush._schemaVersion = (typeof SHIC_SCHEMA_VERSION !== 'undefined') ? SHIC_SCHEMA_VERSION : 0;
   return dataForPush;
@@ -4304,22 +4298,11 @@ async function _flushAuditQueue() {
   finally { _auditFlushing = false; }
 }
 
-// Public function — call this everywhere you want to log
-function auditLog(action, module, entity, entityId, before, after, notes) {
-  const entry = {
-    ts: new Date().toISOString(),
-    action, // 'CREATE' | 'UPDATE' | 'DELETE'
-    module, // 'Warehouse' | 'Procurement' | 'Projects' etc
-    entity, // 'StockTransaction' | 'WarehouseItem' | 'IssuanceRequest' etc
-    entityId: entityId||'',
-    userEmail: AppState.currentUser?.email || _currentUser?.email || '',
-    before: before||null,
-    after: after||null,
-    notes: notes||'',
-  };
-  _auditQueue.push(entry);
-  // Flush async — don't block the UI
-  if (_spConnected) setTimeout(_flushAuditQueue, 500);
+// SP-shape audit call — routes through the unified Audit facade
+// (lib/audit.js), which handles localStorage persistence AND SP mirror.
+// Kept for backwards-compat with warehouse.js / reports.js call sites.
+function auditLogSP(action, module, entity, entityId, before, after, notes) {
+  Audit.record(action, module, entity, entityId, before, after, notes);
 }
 
 // Audit Log viewer for admin panel
