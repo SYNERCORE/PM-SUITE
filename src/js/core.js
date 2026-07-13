@@ -856,19 +856,12 @@ function _tfInRange(dateStr){
 
 // Canonical overlap check: does the project's execution window intersect the
 // given [rangeStart, rangeEnd] range? Used by every period-scoped view
-// (dashboard, KPI, Analytics, Reports) so results are consistent. A project
-// with no startDate/_createdAt is excluded; a project with no end date is
-// treated as "still open through the end of the range".
+// (dashboard, KPI, Analytics, Reports) so results are consistent.
+// The implementation lives in src/js/lib/merge.js — this thin wrapper stays
+// here so every existing call site (and unit tests that pre-date the extract)
+// keeps working. Safe because Merge is loaded before any view calls this.
 function _projectOverlapsRange(p, rangeStart, rangeEnd){
-  if(!p||!rangeStart||!rangeEnd)return false;
-  const startStr=p.startDate||p._createdAt;
-  if(!startStr)return false;
-  const s=new Date((''+startStr).length>10?startStr:(startStr+'T00:00:00'));
-  if(isNaN(s))return false;
-  const endStr=p.completedDate||p.endDate;
-  const e=endStr?new Date((''+endStr).length>10?endStr:(endStr+'T00:00:00')):rangeEnd;
-  if(isNaN(e))return false;
-  return s<=rangeEnd&&e>=rangeStart;
+  return Merge.projectOverlapsRange(p, rangeStart, rangeEnd);
 }
 
 // A project is "in scope" for the shared time filter if its execution window

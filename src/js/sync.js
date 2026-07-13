@@ -2218,63 +2218,18 @@ function _spFlushMergeConflicts() {
 // Local wins only for records added locally that aren't in remote yet
 // Local FIELD edits to existing records are preserved if remote record unchanged
 // Deletions tracked in _spDeletedIds are respected — deleted records NOT re-added
+// Thin wrappers around the pure logic in src/js/lib/merge.js. Existing
+// callers keep using the _sp* names so no other module needs to change.
+// Global dependencies (_spWasDeleted, _spMergeConflicts) are injected
+// via callbacks so the merge module stays pure.
 function _spMergeArrays(localArr, remoteArr, localEdited, arrayKey) {
-  if (!remoteArr.length && !localArr.length) return [];
-  const remoteMap = new Map(remoteArr.map(r => [r.id, r]));
-  const localMap  = new Map(localArr.map(r => [r.id, r]));
-  const result = [];
-  // Start with remote as the base, skipping records we deleted locally
-  remoteArr.forEach(remoteRec => {
-    if (arrayKey && _spWasDeleted(arrayKey, remoteRec.id)) return;
-    const localRec = localMap.get(remoteRec.id);
-    if (localRec) {
-      // When BOTH copies carry a modified timestamp, the NEWER edit wins the fields.
-      // Falls back to the localEdited flag when timestamps are missing (old records).
-      let localWins;
-      if (localRec._mAt && remoteRec._mAt) localWins = localRec._mAt > remoteRec._mAt;
-      else if (localRec._mAt && !remoteRec._mAt) localWins = true;
-      else if (!localRec._mAt && remoteRec._mAt) localWins = false;
-      else localWins = !!localEdited;
-      // Winner's fields + union of append-only sub-arrays so no updates are lost
-      // Conflict visibility: remote overwrote a record this device had edited
-      if (!localWins && localRec._mAt && remoteRec._mAt && localRec._mAt !== remoteRec._mAt) {
-        _spMergeConflicts.push({ arrayKey, id: remoteRec.id, label: remoteRec.name || remoteRec.description || remoteRec.title || remoteRec.id });
-      }
-      result.push(localWins
-        ? _spMergeAppendArrays(localRec, remoteRec)
-        : _spMergeAppendArrays(remoteRec, localRec));
-    } else {
-      result.push(remoteRec);
-    }
+  return Merge.arrays(localArr, remoteArr, localEdited, {
+    wasDeleted: id => arrayKey ? _spWasDeleted(arrayKey, id) : false,
+    onConflict: ({ id, label }) => _spMergeConflicts.push({ arrayKey, id, label }),
   });
-  // Add records that only exist locally (newly added, not deleted)
-  localArr.forEach(localRec => {
-    if (!remoteMap.has(localRec.id) && !(arrayKey && _spWasDeleted(arrayKey, localRec.id))) {
-      result.push(localRec);
-    }
-  });
-  return result;
 }
-
-// Union append-only sub-arrays (updates, comments, attachments) from donor into base.
-// Deduplicates by 'at' timestamp — safe for arrays where each entry is immutable once added.
 function _spMergeAppendArrays(base, donor) {
-  if (!donor) return base;
-  const APPEND_FIELDS = ['updates','comments','attachments','notes','wfActions'];
-  let merged = base;
-  APPEND_FIELDS.forEach(field => {
-    const baseArr = Array.isArray(base[field]) ? base[field] : [];
-    const donorArr = Array.isArray(donor[field]) ? donor[field] : [];
-    if (donorArr.length === 0) return;
-    const baseAts = new Set(baseArr.map(u => u && u.at).filter(Boolean));
-    const extra = donorArr.filter(u => u && u.at && !baseAts.has(u.at));
-    if (extra.length > 0) {
-      merged = Object.assign({}, merged, {
-        [field]: [...baseArr, ...extra].sort((a,b)=>((a&&a.at||'')<(b&&b.at||'')?-1:1))
-      });
-    }
-  });
-  return merged;
+  return Merge.appendArrays(base, donor);
 }
 
 // ── True when local changes haven't been confirmed on SharePoint ──

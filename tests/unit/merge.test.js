@@ -4,104 +4,29 @@
  *
  *   npm run test:unit
  *
- * The functions below are IN-SYNC copies of the pure logic in
- *   src/js/core.js  → _projectOverlapsRange
- *   src/js/sync.js  → _spMergeArrays, _spMergeAppendArrays, settings-merge
- *
- * When you edit the source functions, edit these copies too — the tests are
- * the contract, not the implementation.
+ * These tests now exercise the REAL production code in src/js/lib/merge.js
+ * (loaded via a script-tag-style eval — the file uses `const Merge = ...`
+ * plus `if (typeof module !== 'undefined') module.exports = Merge` at the
+ * bottom). If a regression sneaks into the real module, these tests fail.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const src = readFileSync(path.join(__dirname, '..', '..', 'src', 'js', 'lib', 'merge.js'), 'utf8');
+const Merge = new Function(src + '; return Merge;')();
 
-// ── Copies-of-record ────────────────────────────────────────────────────────
-
-function _projectOverlapsRange(p, rangeStart, rangeEnd) {
-  if (!p || !rangeStart || !rangeEnd) return false;
-  const startStr = p.startDate || p._createdAt;
-  if (!startStr) return false;
-  const s = new Date(('' + startStr).length > 10 ? startStr : (startStr + 'T00:00:00'));
-  if (isNaN(s)) return false;
-  const endStr = p.completedDate || p.endDate;
-  const e = endStr ? new Date(('' + endStr).length > 10 ? endStr : (endStr + 'T00:00:00')) : rangeEnd;
-  if (isNaN(e)) return false;
-  return s <= rangeEnd && e >= rangeStart;
-}
-
-function _spMergeAppendArrays(base, donor) {
-  if (!donor) return base;
-  const APPEND_FIELDS = ['updates', 'comments', 'attachments', 'notes', 'wfActions'];
-  let merged = base;
-  APPEND_FIELDS.forEach(field => {
-    const baseArr = Array.isArray(base[field]) ? base[field] : [];
-    const donorArr = Array.isArray(donor[field]) ? donor[field] : [];
-    if (donorArr.length === 0) return;
-    const baseAts = new Set(baseArr.map(u => u && u.at).filter(Boolean));
-    const extra = donorArr.filter(u => u && u.at && !baseAts.has(u.at));
-    if (extra.length > 0) {
-      merged = Object.assign({}, merged, {
-        [field]: [...baseArr, ...extra].sort((a, b) => ((a && a.at || '') < (b && b.at || '') ? -1 : 1))
-      });
-    }
-  });
-  return merged;
-}
-
-// Simplified merge that accepts a deletion-check callback so the pure logic
-// is testable without touching global state.
+// ── Thin adapters that map the older test names onto the Merge API ────────
+// Older tests were written before the extraction; this keeps them expressive.
+const _projectOverlapsRange = Merge.projectOverlapsRange;
+const _spMergeAppendArrays = Merge.appendArrays;
 function _spMergeArrays(localArr, remoteArr, localEdited, wasDeleted = () => false) {
-  if (!remoteArr.length && !localArr.length) return [];
-  const remoteMap = new Map(remoteArr.map(r => [r.id, r]));
-  const localMap = new Map(localArr.map(r => [r.id, r]));
-  const result = [];
-  remoteArr.forEach(remoteRec => {
-    if (wasDeleted(remoteRec.id)) return;
-    const localRec = localMap.get(remoteRec.id);
-    if (localRec) {
-      let localWins;
-      if (localRec._mAt && remoteRec._mAt) localWins = localRec._mAt > remoteRec._mAt;
-      else if (localRec._mAt && !remoteRec._mAt) localWins = true;
-      else if (!localRec._mAt && remoteRec._mAt) localWins = false;
-      else localWins = !!localEdited;
-      result.push(localWins
-        ? _spMergeAppendArrays(localRec, remoteRec)
-        : _spMergeAppendArrays(remoteRec, localRec));
-    } else {
-      result.push(remoteRec);
-    }
-  });
-  localArr.forEach(localRec => {
-    if (!remoteMap.has(localRec.id) && !wasDeleted(localRec.id)) {
-      result.push(localRec);
-    }
-  });
-  return result;
+  return Merge.arrays(localArr, remoteArr, localEdited, { wasDeleted });
 }
-
-// The settings-merge branch in _spApplyRemote's "has local edits" path.
-function _settingsMergeHasLocalEdits(remoteSettings, localSettings) {
-  const merged = Object.assign({}, remoteSettings, localSettings);
-  const rPA = remoteSettings.dropdowns?._adminPushedAt || 0;
-  const lPA = localSettings.dropdowns?._adminPushedAt || 0;
-  if (rPA > lPA) {
-    merged.dropdowns = Object.assign({}, remoteSettings.dropdowns || {});
-  }
-  return merged;
-}
-
-// The no-local-edits branch (fixed in commit 4de3011 — was wiping local
-// dropdowns wholesale before this guard was added).
-function _settingsMergeNoLocalEdits(remoteData, localData) {
-  const merged = Object.assign({}, remoteData);
-  const rDrop = remoteData.settings?.dropdowns || {};
-  const lDrop = localData.settings?.dropdowns || {};
-  const rPA = rDrop._adminPushedAt || 0;
-  const lPA = lDrop._adminPushedAt || 0;
-  if (lPA >= rPA && Object.keys(lDrop).length > 0) {
-    merged.settings = Object.assign({}, merged.settings || {}, { dropdowns: lDrop });
-  }
-  return merged;
-}
+const _settingsMergeHasLocalEdits = Merge.settingsWithLocalEdits;
+const _settingsMergeNoLocalEdits = Merge.settingsNoLocalEdits;
 
 // ── Tests: _projectOverlapsRange ────────────────────────────────────────────
 
