@@ -31,7 +31,7 @@ $out = $idx.Replace('<link rel="stylesheet" href="src/css/main.css">', "<style>`
 
 $jsFiles = @(
   'js\core.js', 'js\lib\store.js', 'js\lib\merge.js', 'js\lib\deletions.js', 'js\lib\files.js', 'js\lib\audit.js', 'js\templates.js', 'js\ui.js', 'js\auth.js', 'js\sync.js', 'js\session.js', 'js\hardening.js', 'js\cpm.js', 'js\baseline.js',
-  'js\views\dashboard.js', 'js\views\projects.js', 'js\views\prospects.js',
+  'js\views\dashboard.js', 'js\views\myWork.js', 'js\views\projects.js', 'js\views\prospects.js',
   'js\views\deletionRequests.js', 'js\workflow.js', 'js\views\tasks.js', 'js\views\gantt.js', 'js\views\ganttExport.js',
   'js\views\resources.js', 'js\views\manpower.js', 'js\views\materials.js',
   'js\views\procurement.js', 'js\views\costs.js', 'js\views\qaqc.js',

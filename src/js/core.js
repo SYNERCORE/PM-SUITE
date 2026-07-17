@@ -895,6 +895,7 @@ function _tfFilterHTML(onchange){
 
 const NAV_ITEMS=[
 {id:'dashboard',label:'Dashboard',icon:'fas fa-chart-pie',section:'Overview'},
+{id:'myWork',label:'My Work',icon:'fas fa-inbox',section:'Overview'},
 {id:'projects',label:'Projects',icon:'fas fa-briefcase',section:'Overview'},
 {id:'prospects',label:'Prospects',icon:'fas fa-search-dollar',section:'Overview'},
 {id:'tasks',label:'Task Management',icon:'fas fa-tasks',section:'Planning'},
