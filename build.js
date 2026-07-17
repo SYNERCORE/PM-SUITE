@@ -17,8 +17,8 @@ function read(rel) {
 }
 
 const jsFiles = [
-  'js/core.js', 'js/lib/store.js', 'js/lib/merge.js', 'js/lib/deletions.js', 'js/lib/files.js', 'js/lib/audit.js', 'js/ui.js', 'js/auth.js', 'js/sync.js', 'js/hardening.js',
-  'js/views/dashboard.js', 'js/views/myWork.js', 'js/views/projects.js', 'js/views/prospects.js',
+  'js/core.js', 'js/lib/store.js', 'js/lib/merge.js', 'js/lib/deletions.js', 'js/lib/files.js', 'js/lib/audit.js', 'js/lib/api.js', 'js/ui.js', 'js/auth.js', 'js/sync.js', 'js/hardening.js',
+  'js/views/dashboard.js', 'js/views/myWork.js', 'js/views/teamLoad.js', 'js/views/projects.js', 'js/views/prospects.js',
   'js/views/deletionRequests.js', 'js/views/tasks.js', 'js/views/gantt.js',
   'js/views/resources.js', 'js/views/manpower.js', 'js/views/materials.js',
   'js/views/procurement.js', 'js/views/costs.js', 'js/views/qaqc.js',

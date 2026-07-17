@@ -84,6 +84,30 @@
     return out;
   }
 
+  function _projectsIOwn(name) {
+    return (AppState.data.projects || [])
+      .filter(p => !p._deleted && _assigneeMatches(p.pm, name))
+      .sort((a, b) => String(a.status || '').localeCompare(String(b.status || '')));
+  }
+
+  function _recentlyDone(name) {
+    const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    const out = [];
+    (AppState.data.tasks || []).forEach(t => {
+      if (t._deleted || t.status !== 'completed') return;
+      if (!_assigneeMatches(t.assignee, name)) return;
+      const ts = new Date(t._mAt || t.completedAt || 0).getTime();
+      if (ts >= cutoff) out.push({ kind: 'task', label: t.name || t.id, project: t.projectId, at: ts });
+    });
+    (AppState.data.actions || []).forEach(a => {
+      if (a._deleted || (a.status !== 'closed' && a.status !== 'completed')) return;
+      if (!_assigneeMatches(a.assignee, name)) return;
+      const ts = new Date(a._mAt || a.closedAt || 0).getTime();
+      if (ts >= cutoff) out.push({ kind: 'action', label: a.description || a.id, project: a.projectId, at: ts });
+    });
+    return out.sort((a, b) => b.at - a.at);
+  }
+
   function _delReqsBy(name, email) {
     return (AppState.data.deletionRequests || [])
       .filter(r => !r._deleted && (
@@ -133,6 +157,31 @@
     </tr>`).join('')}</tbody></table>`;
   }
 
+  function _projectsTable(rows) {
+    if (!rows.length) return `<div class="empty-state" style="padding:24px;font-size:12px">No projects.</div>`;
+    return `<table class="data-table"><thead><tr>
+      <th>Project</th><th>Status</th><th>Client</th><th>Start</th><th>End</th>
+    </tr></thead><tbody>${rows.map(p => `<tr>
+      <td>${_escape(p.name || p.id)}</td>
+      <td><span class="badge">${_escape(p.status || '—')}</span></td>
+      <td>${_escape(p.client || '—')}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${p.startDate || '—'}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${p.endDate || '—'}</td>
+    </tr>`).join('')}</tbody></table>`;
+  }
+
+  function _doneTable(rows) {
+    if (!rows.length) return `<div class="empty-state" style="padding:24px;font-size:12px">Nothing completed in the last 14 days.</div>`;
+    return `<table class="data-table"><thead><tr>
+      <th>Item</th><th>Type</th><th>Project</th><th>When</th>
+    </tr></thead><tbody>${rows.map(r => `<tr>
+      <td>${_escape(r.label)}</td>
+      <td><span class="badge">${r.kind}</span></td>
+      <td>${_escape(_projectName(r.project))}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${r.at ? new Date(r.at).toLocaleDateString() : '—'}</td>
+    </tr>`).join('')}</tbody></table>`;
+  }
+
   function _delReqsTable(rows) {
     if (!rows.length) return `<div class="empty-state" style="padding:24px;font-size:12px">No requests raised.</div>`;
     return `<table class="data-table"><thead><tr>
@@ -175,6 +224,8 @@
     const actions   = _openActionsFor(target);
     const approvals = _approvalsFor(target, targetEmail);
     const delReqs   = _delReqsBy(target, targetEmail);
+    const owned     = _projectsIOwn(target);
+    const done      = _recentlyDone(target);
 
     const total = tasks.length + actions.length + approvals.length + delReqs.length;
 
@@ -201,10 +252,12 @@
         ${_kpiTile('Del. Reqs',  delReqs.length,   'fa-trash-restore',   'var(--accent-red)')}
       </div>
 
-      ${_section('Open Tasks',                'fa-tasks',          _tasksTable(tasks),         'tasks')}
-      ${_section('Open Action Items',         'fa-clipboard-list', _actionsTable(actions),     'actions')}
-      ${_section('Pending Workflow Approvals','fa-stamp',          _approvalsTable(approvals), 'approvals')}
-      ${_section('Deletion Requests I Raised','fa-trash-restore',  _delReqsTable(delReqs),     'deletionRequests')}
+      ${_section('Open Tasks',                'fa-tasks',           _tasksTable(tasks),         'tasks')}
+      ${_section('Open Action Items',         'fa-clipboard-list',  _actionsTable(actions),     'actions')}
+      ${_section('Pending Workflow Approvals','fa-stamp',           _approvalsTable(approvals), 'approvals')}
+      ${owned.length ? _section('Projects Led as PM', 'fa-briefcase', _projectsTable(owned), 'projects') : ''}
+      ${_section('Deletion Requests Raised',  'fa-trash-restore',   _delReqsTable(delReqs),     'deletionRequests')}
+      ${_section('Recently Completed (14d)',  'fa-check-circle',    _doneTable(done),           null)}
     `;
   }
 
