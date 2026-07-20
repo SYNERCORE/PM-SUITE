@@ -75,10 +75,37 @@
     return `<div style="height:6px;width:${pct}%;background:var(--accent-blue);border-radius:3px;margin-top:4px"></div>`;
   }
 
+  // Return names of people whose Resource.manager === the given manager name.
+  // Case-insensitive, first-name-tolerant so "John Doe" matches Resource
+  // records tagged with "John" or "john.doe@..." on the manager field.
+  function _directReports(managerName) {
+    if (!managerName) return null;
+    const target = String(managerName).trim().toLowerCase();
+    const out = new Set();
+    (AppState.data.resources || []).forEach(r => {
+      if (r._deleted || !r.manager) return;
+      const m = String(r.manager).trim().toLowerCase();
+      if (m === target || m.includes(target) || target.includes(m)) out.add(String(r.name).trim());
+    });
+    return out;
+  }
+
   function renderTeamLoad() {
     const el = document.getElementById('teamLoad');
     if (!el) return;
-    const rows = _collectLoad();
+
+    const me = (typeof _currentUserProfile !== 'undefined' && _currentUserProfile) || null;
+    const myName = me?.name || '';
+    const isAdmin = !!(me && (me.isAdmin || me.role === 'Admin'));
+
+    // Scope state — 'reports' (default) or 'all'
+    if (!window._teamLoadScopeState) window._teamLoadScopeState = isAdmin ? 'all' : 'reports';
+    const scope = window._teamLoadScopeState;
+
+    const reportSet = scope === 'reports' ? _directReports(myName) : null;
+    const allRows = _collectLoad();
+    const rows = reportSet ? allRows.filter(r => reportSet.has(r.name)) : allRows;
+    const reportCount = reportSet ? reportSet.size : 0;
 
     if (!window._teamLoadSortState) window._teamLoadSortState = { key: 'total', dir: 'desc' };
     const { key, dir } = window._teamLoadSortState;
@@ -93,9 +120,19 @@
       <div class="page-header">
         <div>
           <h1 class="page-title"><i class="fas fa-users-cog" style="margin-right:8px;color:var(--accent-blue)"></i>Team Load</h1>
-          <p class="page-subtitle">Open workload across the team · ${peopleWithWork} people with active items</p>
+          <p class="page-subtitle">
+            ${scope === 'reports'
+              ? `Your direct reports · ${peopleWithWork} of ${reportCount} with active items${reportCount === 0 ? ' — no one lists you as their manager yet' : ''}`
+              : `All people with active items · ${peopleWithWork}`}
+          </p>
         </div>
-        <button class="btn btn-sm btn-secondary" onclick="renderTeamLoad()"><i class="fas fa-sync"></i> Refresh</button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="btn-group" role="tablist" style="display:inline-flex;background:var(--bg-hover);border-radius:6px;padding:2px">
+            <button class="btn btn-sm ${scope === 'reports' ? 'btn-primary' : 'btn-secondary'}" style="border:0" onclick="_teamLoadScopeClick('reports')"><i class="fas fa-user-friends"></i> My Reports</button>
+            <button class="btn btn-sm ${scope === 'all' ? 'btn-primary' : 'btn-secondary'}" style="border:0" onclick="_teamLoadScopeClick('all')"><i class="fas fa-users"></i> All</button>
+          </div>
+          <button class="btn btn-sm btn-secondary" onclick="renderTeamLoad()"><i class="fas fa-sync"></i> Refresh</button>
+        </div>
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px">
@@ -163,5 +200,9 @@
   window._teamLoadOpen = function (name) {
     window._myWorkTarget = name;
     navigate('myWork');
+  };
+  window._teamLoadScopeClick = function (scope) {
+    window._teamLoadScopeState = scope;
+    renderTeamLoad();
   };
 })();

@@ -243,6 +243,7 @@ function showEditPersonnel(id){
     <div class="form-group"><label class="form-label">Utilization %</label><input class="form-input" type="number" id="prUtil" value="${r?.utilization||0}" min="0" max="100"></div>
     <div class="form-group"><label class="form-label">Availability</label><select class="form-select" id="prAvail">${_getDropdown('personnel_avail').map(s=>`<option value="${s}" ${r?.availability===s?'selected':''}>${s}</option>`).join('')}</select></div>
     <div class="form-group"><label class="form-label">Contact / Mobile</label><input class="form-input" id="prContact" value="${r?.contact||''}" placeholder="+63-xxx-xxx-xxxx"></div>
+    <div class="form-group"><label class="form-label">Reports To <span style="color:var(--text-muted);font-size:10px">(direct manager)</span></label><select class="form-select" id="prManager"><option value="">— none —</option>${(AppState.data.resources||[]).filter(x=>!x._deleted&&x.id!==r?.id).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''))).map(x=>`<option value="${(x.name||'').replace(/"/g,'&quot;')}" ${r?.manager===x.name?'selected':''}>${x.name||x.id}</option>`).join('')}</select></div>
     <div class="form-group" style="grid-column:1/-1"><label class="form-label">Skills <span style="color:var(--text-muted);font-size:10px">(comma separated)</span></label><input class="form-input" id="prSkills" value="${(r?.skills||[]).join(', ')}" placeholder="e.g., Welding, Structural, AutoCAD"></div>
     <div class="form-group" style="grid-column:1/-1"><label class="form-label">Certifications <span style="color:var(--text-muted);font-size:10px">(comma separated)</span></label><input class="form-input" id="prCerts" value="${(r?.certifications||[]).join(', ')}" placeholder="e.g., PMP, AWS-CWI, OSHA-30"></div>
     <div class="form-group" style="grid-column:1/-1"><label class="form-label">Notes</label><input class="form-input" id="prNotes" value="${r?.notes||''}" placeholder="Additional info..."></div>
@@ -264,6 +265,7 @@ function savePersonnel(id){
     utilization:parseInt($('#prUtil')?.value)||0,
     availability:$('#prAvail')?.value||'available',
     contact:$('#prContact')?.value||'',
+    manager:$('#prManager')?.value||'',
     skills:($('#prSkills')?.value||'').split(',').map(s=>s.trim()).filter(Boolean),
     certifications:($('#prCerts')?.value||'').split(',').map(s=>s.trim()).filter(Boolean),
     notes:$('#prNotes')?.value||''
