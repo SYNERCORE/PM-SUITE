@@ -3258,6 +3258,30 @@ setTimeout(()=>document.addEventListener('click',function h(e){
 if(!$('#notifBtn').contains(e.target)){p.classList.remove('open');document.removeEventListener('click',h);}
 }),10);}}
 
+// ── Notification snooze (localStorage-backed) ─────────────
+// Map of notifId → epoch ms until which the notif should stay hidden.
+// Cleared automatically when the timestamp passes.
+const _NOTIF_SNOOZE_KEY='shic_notif_snooze';
+function _notifSnoozeMap(){
+  try{return JSON.parse(localStorage.getItem(_NOTIF_SNOOZE_KEY)||'{}');}catch(e){return{};}
+}
+function _notifSnoozeSet(id,hours){
+  const m=_notifSnoozeMap();
+  m[id]=Date.now()+hours*3600*1000;
+  try{localStorage.setItem(_NOTIF_SNOOZE_KEY,JSON.stringify(m));}catch(e){}
+}
+function _notifIsSnoozed(id){
+  const m=_notifSnoozeMap();
+  if(!m[id])return false;
+  if(m[id]<Date.now()){delete m[id];try{localStorage.setItem(_NOTIF_SNOOZE_KEY,JSON.stringify(m));}catch(e){}return false;}
+  return true;
+}
+function snoozeNotif(id,hours){
+  _notifSnoozeSet(id,hours||24);
+  showToast('Snoozed for '+(hours||24)+'h','info',2000);
+  renderNotifPanel();
+}
+
 function _generateSmartNotifs(){
   // Auto-generate notifications from live data — never persisted, always fresh
   const smart=[];
@@ -3339,7 +3363,8 @@ function _generateSmartNotifs(){
         onclick:`navigate('warehouse')`,read:false,auto:true});
     });
   }
-  return smart;
+  // Drop snoozed items
+  return smart.filter(n=>!_notifIsSnoozed(n.id));
 }
 
 function renderNotifPanel(){
@@ -3355,14 +3380,64 @@ const icons={error:'🔴',warning:'🟠',info:'🔵',success:'🟢'};
 $('#notifPanel').innerHTML=`<div class="notif-panel-header">Notifications <span class="badge badge-red">${unread}</span>
 <span style="font-size:10px;cursor:pointer;color:var(--accent-blue)" onclick="markAllRead()">Mark all read</span></div>
 <div style="max-height:340px;overflow-y:auto">
-${all.length?all.map(n=>`<div class="notif-item ${n.read?'':'unread'}" ${n.onclick?`onclick="${n.onclick};toggleNotifications()"style="cursor:pointer"`:''}>
-<span style="font-size:14px">${icons[n.type]||'●'}</span>
-<div><div class="notif-title">${esc(n.title)}</div><div class="notif-time">${esc(n.message||'')}</div>${n.time?`<div class="notif-time">${esc(n.time)}</div>`:''}</div>
+${all.length?all.map(n=>`<div class="notif-item ${n.read?'':'unread'}" style="display:flex;gap:8px;align-items:flex-start">
+<span style="font-size:14px;flex-shrink:0">${icons[n.type]||'●'}</span>
+<div style="flex:1;min-width:0${n.onclick?';cursor:pointer':''}" ${n.onclick?`onclick="${n.onclick};toggleNotifications()"`:''}><div class="notif-title">${esc(n.title)}</div><div class="notif-time">${esc(n.message||'')}</div>${n.time?`<div class="notif-time">${esc(n.time)}</div>`:''}</div>
+<button class="btn btn-secondary btn-sm" title="Snooze for 24 hours" style="padding:2px 6px;font-size:10px;flex-shrink:0" onclick="event.stopPropagation();snoozeNotif('${n.id}',24)"><i class="fas fa-bell-slash"></i></button>
 </div>`).join(''):'<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px"><i class="fas fa-check-circle" style="font-size:20px;display:block;margin-bottom:6px;opacity:.3"></i>All caught up!</div>'}
 </div>`;
 $('#notifDot').style.display=unread?'':'none';}
 
 function markAllRead(){(AppState.data.notifications||[]).forEach(n=>n.read=true);renderNotifPanel();}
+
+// ── Notification poller + browser-notification bridge ───────────
+// Runs every 60s. Refreshes the bell badge from current smart-notif
+// state. Also fires an OS-level Notification (if the user granted
+// permission) for any NEW critical (type=error) item since last tick,
+// so warehouse staff on a tablet see stock-outs without opening the app.
+const _SEEN_NOTIFS_KEY='shic_notif_seen';
+function _notifSeenSet(){
+  try{return new Set(JSON.parse(sessionStorage.getItem(_SEEN_NOTIFS_KEY)||'[]'));}catch(e){return new Set();}
+}
+function _notifSaveSeen(set){
+  try{sessionStorage.setItem(_SEEN_NOTIFS_KEY,JSON.stringify([...set]));}catch(e){}
+}
+
+function _notifRefreshBadge(){
+  if(!AppState.data)return;
+  const _myEmailN=(typeof _currentUserProfile!=='undefined'?(_currentUserProfile?.email||''):'').toLowerCase();
+  const stored=(AppState.data.notifications||[]).filter(n=>!n.targets||!n.targets.length||n.targets.includes(_myEmailN));
+  const smart=_generateSmartNotifs();
+  const all=[...smart,...stored.filter(n=>!smart.find(s=>s.id===n.id))];
+  const unread=all.filter(n=>!n.read).length;
+  const dot=document.getElementById('notifDot');
+  if(dot)dot.style.display=unread?'':'none';
+  // Fire OS-level notif for new critical items
+  if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
+    const seen=_notifSeenSet();
+    smart.filter(n=>n.type==='error'&&!seen.has(n.id)).forEach(n=>{
+      try{new Notification(n.title,{body:n.message||'',tag:n.id,icon:'/favicon.ico',silent:false});}catch(e){}
+      seen.add(n.id);
+    });
+    _notifSaveSeen(seen);
+  }
+}
+
+function requestNotifPermission(){
+  if(typeof Notification==='undefined'){showToast('Browser does not support notifications','warning');return;}
+  if(Notification.permission==='granted'){showToast('Notifications already enabled','info');return;}
+  if(Notification.permission==='denied'){showToast('Notifications are blocked — enable them in browser settings','warning',5000);return;}
+  Notification.requestPermission().then(p=>{
+    if(p==='granted')showToast('Notifications enabled — you will be alerted on critical events','success',4000);
+    else showToast('Notifications not enabled','info');
+  });
+}
+
+(function _initNotifPoller(){
+  // First tick after 2s so app-boot completes; then every 60s.
+  setTimeout(_notifRefreshBadge,2000);
+  setInterval(_notifRefreshBadge,60*1000);
+})();
 let _modalOpener = null;
 function openModal(id){
   const el=$(`#${id}`);if(!el)return;
@@ -23935,6 +24010,7 @@ ${renderSpPanel()}
       <button class="btn btn-secondary" onclick="restorePreSyncSnapshot()" title="Undo the last SharePoint sync merge — restores your data to the state just before it"><i class="fas fa-clock-rotate-left"></i> Restore Pre-Sync Snapshot</button>
       <button class="btn btn-secondary" onclick="showSnapshotRestore()" title="Restore data from one of the last 3 automatic local snapshots"><i class="fas fa-history"></i> Restore from Snapshot</button>
       <div id="storageUsageBar" style="margin-top:4px"></div>
+      <button class="btn btn-secondary" onclick="requestNotifPermission()"><i class="fas fa-bell" style="margin-right:6px;color:var(--accent-blue)"></i> Enable Desktop Notifications</button>
       <button class="btn btn-secondary" onclick="clearDemoData()" style="border-color:var(--accent-amber);color:var(--accent-amber)"><i class="fas fa-broom" style="margin-right:6px"></i> Clear Demo Data &amp; Start Fresh</button>
       <div id="adminOnlyBtns" style="display:none;flex-direction:column;gap:8px">
         <div style="font-size:10px;color:var(--accent-amber);padding:6px 10px;background:rgba(248,81,73,.07);border-radius:6px;border-left:3px solid var(--accent-amber)">

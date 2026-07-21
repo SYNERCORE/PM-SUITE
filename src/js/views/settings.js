@@ -221,6 +221,7 @@ ${renderSpPanel()}
       <button class="btn btn-secondary" onclick="restorePreSyncSnapshot()" title="Undo the last SharePoint sync merge — restores your data to the state just before it"><i class="fas fa-clock-rotate-left"></i> Restore Pre-Sync Snapshot</button>
       <button class="btn btn-secondary" onclick="showSnapshotRestore()" title="Restore data from one of the last 3 automatic local snapshots"><i class="fas fa-history"></i> Restore from Snapshot</button>
       <div id="storageUsageBar" style="margin-top:4px"></div>
+      <button class="btn btn-secondary" onclick="requestNotifPermission()"><i class="fas fa-bell" style="margin-right:6px;color:var(--accent-blue)"></i> Enable Desktop Notifications</button>
       <button class="btn btn-secondary" onclick="clearDemoData()" style="border-color:var(--accent-amber);color:var(--accent-amber)"><i class="fas fa-broom" style="margin-right:6px"></i> Clear Demo Data &amp; Start Fresh</button>
       <div id="adminOnlyBtns" style="display:none;flex-direction:column;gap:8px">
         <div style="font-size:10px;color:var(--accent-amber);padding:6px 10px;background:rgba(248,81,73,.07);border-radius:6px;border-left:3px solid var(--accent-amber)">
