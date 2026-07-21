@@ -8,6 +8,7 @@
     "js/lib/files.js",
     "js/lib/audit.js",
     "js/lib/api.js",
+    "js/lib/namespace.js",
     "js/templates.js",
     "js/ui.js",
     "js/auth.js",
