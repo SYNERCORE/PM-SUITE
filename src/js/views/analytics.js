@@ -2,7 +2,13 @@
 // Spend, supplier performance, warehouse turnover, procurement cycle time,
 // manpower cost trends, project cost-at-completion variance
 
-let _analyticsTab = 'spend';
+let _analyticsTab = (function(){ try { return localStorage.getItem('shic_analytics_tab') || 'spend'; } catch(e) { return 'spend'; } })();
+
+function _analyticsSetTab(id) {
+  _analyticsTab = id;
+  try { localStorage.setItem('shic_analytics_tab', id); } catch(e) {}
+  renderAnalytics();
+}
 
 function renderAnalytics() {
   AppState.ensureData();
@@ -30,7 +36,7 @@ function renderAnalytics() {
     ].map(([id,label,icon])=>`
     <button class="btn btn-sm ${_analyticsTab===id?'btn-primary':'btn-secondary'}"
       style="border-radius:6px 6px 0 0;border-bottom:none;font-size:11px"
-      onclick="_analyticsTab='${id}';renderAnalytics()">
+      onclick="_analyticsSetTab('${id}')">
       <i class="${icon}" style="margin-right:4px"></i>${label}
     </button>`).join('')}
   </div>
@@ -92,11 +98,17 @@ function _analyticsSpend() {
 
   const procTotal = procItems.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
 
+  // Period-over-period comparison
+  const _prev = _tfPreviousRange();
+  const totalPrev = _aSpendInRange(_prev);
+  const procPrev  = _aProcInRange(_prev);
+  const avgPrev = months.length ? totalPrev / months.length : 0;
+
   return `
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
-    ${_aKpi('Total WH Spend', _fmt(total), 'fas fa-warehouse', 'var(--accent-blue)')}
-    ${_aKpi('Monthly Avg', _fmt(avg), 'fas fa-calendar', 'var(--accent-green)')}
-    ${_aKpi('Procurement Value', _fmt(procTotal), 'fas fa-shopping-cart', 'var(--accent-amber)')}
+    ${_aKpiDelta('Total WH Spend', total, totalPrev, 'fas fa-warehouse', 'var(--accent-blue)')}
+    ${_aKpiDelta('Monthly Avg', avg, avgPrev, 'fas fa-calendar', 'var(--accent-green)')}
+    ${_aKpiDelta('Procurement Value', procTotal, procPrev, 'fas fa-shopping-cart', 'var(--accent-amber)')}
   </div>
   <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">
     <div class="card">
@@ -145,7 +157,8 @@ function _analyticsSuppliers() {
       <tbody>
         ${rows.map(([vendor, v]) => {
           const po = procVendors[vendor] || { orders: 0, value: 0 };
-          return `<tr>
+          const vEsc = String(vendor).replace(/'/g, "\\'");
+          return `<tr style="cursor:pointer" onclick="_analyticsSupplierDetail('${vEsc}')" title="Click for details">
             <td style="font-weight:600;font-size:12px">${vendor}</td>
             <td style="text-align:right;font-family:var(--font-mono)">${v.deliveries}</td>
             <td style="text-align:right;font-family:var(--font-mono)">${v.items.toLocaleString()}</td>
@@ -394,6 +407,57 @@ function _aKpi(label, value, icon, color) {
   </div>`;
 }
 
+// KPI tile with period-over-period delta indicator.
+// `current` and `previous` are raw numbers; formats them with _fmt and
+// computes % change. Positive delta shows green ▲ for spend-style
+// metrics (higher is better) unless invert=true (e.g., overdue count).
+function _aKpiDelta(label, current, previous, icon, color, opts) {
+  const invert = !!(opts && opts.invert);
+  const showAbs = !!(opts && opts.showAbsolute);
+  const cur = Number(current) || 0;
+  const prev = Number(previous) || 0;
+  let deltaHtml = '';
+  if (prev > 0) {
+    const pct = ((cur - prev) / prev) * 100;
+    const up = pct > 0;
+    const good = invert ? !up : up;
+    const arrow = pct > 0.5 ? '▲' : pct < -0.5 ? '▼' : '▬';
+    const dcolor = Math.abs(pct) < 0.5 ? 'var(--text-muted)' : (good ? 'var(--accent-green)' : 'var(--accent-red)');
+    deltaHtml = `<div style="font-size:10px;margin-top:3px;color:${dcolor}">${arrow} ${Math.abs(pct).toFixed(1)}%<span style="color:var(--text-muted);margin-left:4px">vs prev</span></div>`;
+  } else if (cur > 0) {
+    deltaHtml = `<div style="font-size:10px;margin-top:3px;color:var(--text-muted)">new</div>`;
+  }
+  const valueStr = showAbs ? String(cur.toLocaleString()) : _fmt(cur);
+  return `<div class="card" style="text-align:center;padding:14px">
+    <i class="${icon}" style="color:${color};font-size:20px;margin-bottom:6px;display:block"></i>
+    <div style="font-size:18px;font-weight:700;color:${color}">${valueStr}</div>
+    <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${label}</div>
+    ${deltaHtml}
+  </div>`;
+}
+
+// Returns the previous period matching the current _tfRange() length.
+// e.g. current = July 2026 → previous = June 2026
+function _tfPreviousRange() {
+  const r = _tfRange();
+  const len = r.end.getTime() - r.start.getTime();
+  return { start: new Date(r.start.getTime() - len - 1), end: new Date(r.start.getTime() - 1), label: 'previous period' };
+}
+
+// Sum warehouse-receive spend inside a given range.
+function _aSpendInRange(range) {
+  const _inR = (d) => { if (!d) return false; const dt = new Date(d.length > 10 ? d : (d + 'T00:00:00')); return !isNaN(dt) && dt >= range.start && dt <= range.end; };
+  return (AppState.data.whTransactions || []).filter(t => !t._deleted && t.type === 'receive' && _inR(t.date || t.postedAt))
+    .reduce((s, t) => s + (t.lines || []).reduce((ss, l) => ss + (parseFloat(l.qty) || 0) * (parseFloat(l.unitCost) || 0), 0), 0);
+}
+
+// Sum procurement value inside a given range.
+function _aProcInRange(range) {
+  const _inR = (d) => { if (!d) return false; const dt = new Date(d.length > 10 ? d : (d + 'T00:00:00')); return !isNaN(dt) && dt >= range.start && dt <= range.end; };
+  return (AppState.data.procurement || []).filter(p => !p._deleted && _inR(p.date || p.createdAt))
+    .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+}
+
 function _aBarChart(labels, values, color = 'var(--accent-blue)') {
   const max = Math.max(...values, 1);
   const barW = Math.max(14, Math.floor(420 / labels.length) - 6);
@@ -512,3 +576,61 @@ function _analyticsExportCSV() {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
   showToast(`Exported ${rows.length - 1} rows`, 'success');
 }
+
+// ── Supplier drilldown modal ─────────────────────────────────
+function _analyticsSupplierDetail(vendor) {
+  const title = document.getElementById('genericModalTitle');
+  const body  = document.getElementById('genericModalBody');
+  const foot  = document.getElementById('genericModalFooter');
+  if (!title || !body || !foot) return;
+
+  const tx = (AppState.data.whTransactions || [])
+    .filter(t => !t._deleted && t.type === 'receive' && t.vendor === vendor)
+    .sort((a, b) => String(b.date || b.postedAt || '').localeCompare(String(a.date || a.postedAt || '')));
+  const pos = (AppState.data.procurement || []).filter(p => !p._deleted && p.supplier === vendor);
+
+  const totalSpend = tx.reduce((s, t) => s + (t.lines || []).reduce((ss, l) => ss + (parseFloat(l.qty) || 0) * (parseFloat(l.unitCost) || 0), 0), 0);
+  const totalPOs = pos.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+  const monthly = {};
+  tx.forEach(t => {
+    const mo = String(t.date || t.postedAt || '').slice(0, 7);
+    if (!mo) return;
+    const cost = (t.lines || []).reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.unitCost) || 0), 0);
+    monthly[mo] = (monthly[mo] || 0) + cost;
+  });
+  const months = Object.keys(monthly).sort();
+  const values = months.map(m => monthly[m]);
+
+  const _escVendor = String(vendor).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  title.textContent = 'Supplier: ' + vendor;
+  body.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+      ${_aKpi('Deliveries', String(tx.length), 'fas fa-truck', 'var(--accent-blue)')}
+      ${_aKpi('Total Spend', _fmt(totalSpend), 'fas fa-dollar-sign', 'var(--accent-green)')}
+      ${_aKpi('PO Count', String(pos.length), 'fas fa-file-invoice', 'var(--accent-amber)')}
+      ${_aKpi('PO Value', _fmt(totalPOs), 'fas fa-shopping-cart', 'var(--accent-amber)')}
+    </div>
+    ${months.length ? `<div class="card" style="margin-bottom:14px">
+      <div style="font-weight:600;font-size:13px;margin-bottom:12px"><i class="fas fa-chart-bar" style="color:var(--accent-blue);margin-right:6px"></i>Monthly Spend</div>
+      ${_aBarChart(months, values, 'var(--accent-blue)')}
+    </div>` : ''}
+    <div class="card">
+      <div style="font-weight:600;font-size:13px;margin-bottom:12px"><i class="fas fa-list" style="color:var(--accent-blue);margin-right:6px"></i>Recent Deliveries (${Math.min(tx.length, 20)} of ${tx.length})</div>
+      ${tx.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Date</th><th>Ref</th><th style="text-align:right">Lines</th><th style="text-align:right">Value</th></tr></thead>
+        <tbody>${tx.slice(0, 20).map(t => {
+          const val = (t.lines || []).reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.unitCost) || 0), 0);
+          return `<tr>
+            <td style="font-family:var(--font-mono);font-size:11px">${t.date || t.postedAt || '—'}</td>
+            <td style="font-size:11px">${t.ref || '—'}</td>
+            <td style="text-align:right;font-family:var(--font-mono)">${(t.lines || []).length}</td>
+            <td style="text-align:right;font-family:var(--font-mono);color:var(--accent-green)">${_fmt(val)}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>` : '<div class="empty-state" style="padding:20px">No deliveries yet</div>'}
+    </div>
+  `;
+  foot.innerHTML = `<button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>`;
+  openModal('genericModal');
+}
+
