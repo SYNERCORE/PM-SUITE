@@ -921,7 +921,7 @@ function saveEditConsumable(id){
   c.supplier=$('#ecSupp')?.value||'';
   c.notes=$('#ecNotes')?.value||'';
   c.status=c.qtyOnHand<=c.minStock?'low-stock':'in-stock';
-  AppState.save();closeModal('genericModal');renderMlConsumables();showToast('Consumable updated','success');
+  AppState.save();closeModal('genericModal');if($('#mlTabContent'))renderMlConsumables();showToast('Consumable updated','success');
 }
 
 function showAddThirdParty(){

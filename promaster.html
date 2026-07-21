@@ -18540,7 +18540,7 @@ function saveEditConsumable(id){
   c.supplier=$('#ecSupp')?.value||'';
   c.notes=$('#ecNotes')?.value||'';
   c.status=c.qtyOnHand<=c.minStock?'low-stock':'in-stock';
-  AppState.save();closeModal('genericModal');renderMlConsumables();showToast('Consumable updated','success');
+  AppState.save();closeModal('genericModal');if($('#mlTabContent'))renderMlConsumables();showToast('Consumable updated','success');
 }
 
 function showAddThirdParty(){
@@ -23942,6 +23942,7 @@ ${renderSpPanel()}
         </div>
         <button class="btn btn-secondary" onclick="showAuditLogPanel()"><i class="fas fa-history" style="margin-right:6px;color:var(--accent-blue)"></i> Audit Trail</button>
         <button class="btn btn-secondary" onclick="showDropdownManager()"><i class="fas fa-list-ul" style="margin-right:6px;color:var(--accent-blue)"></i> Manage Dropdown Options</button>
+        <button class="btn btn-secondary" onclick="showOrgChartImporter()"><i class="fas fa-sitemap" style="margin-right:6px;color:var(--accent-blue)"></i> Import Org Chart (Reports-To)</button>
       </div>
     </div>
     <div style="margin-top:12px;padding:10px;background:var(--bg-hover);border-radius:6px;font-size:10px;color:var(--text-secondary);line-height:1.7">
@@ -24858,6 +24859,134 @@ function _openRecentItem(r) {
   }
 })();
 
+// ── Org Chart Importer ────────────────────────────────────────
+// Paste CSV/TSV with two columns: Name, Reports To. First row can be
+// a header (auto-detected). Preview shows exact matches and misses,
+// then Apply sets resource.manager on each matched Resource.
+function showOrgChartImporter() {
+  const title = document.getElementById('genericModalTitle');
+  const body  = document.getElementById('genericModalBody');
+  const foot  = document.getElementById('genericModalFooter');
+  if (!title || !body || !foot) return;
+  title.textContent = 'Import Org Chart (Reports-To)';
+  body.innerHTML = `
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;line-height:1.6">
+      Paste your org chart below. Two columns per line: <strong>Employee Name</strong>, <strong>Reports To</strong>.
+      Separator can be a comma, tab, or semicolon. Names must match Personnel records exactly (case-insensitive).
+      Existing Reports-To values are overwritten by this import.
+      <details style="margin-top:6px"><summary style="cursor:pointer;color:var(--accent-blue)">Example</summary>
+        <pre style="font-size:11px;background:var(--bg-hover);padding:8px;border-radius:6px;margin-top:6px">Name,Reports To
+Alice Manager,
+Bob Worker,Alice Manager
+Carol Dev,Alice Manager
+Dave Extern,Alice Manager</pre>
+      </details>
+    </div>
+    <textarea id="_orgChartCsv" class="form-input" style="width:100%;min-height:180px;font-family:var(--font-mono);font-size:12px" placeholder="Paste rows here (name, manager)"></textarea>
+    <div id="_orgChartPreview" style="margin-top:10px;font-size:12px"></div>
+  `;
+  foot.innerHTML = `
+    <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+    <button class="btn btn-secondary" onclick="_orgChartPreview()"><i class="fas fa-eye"></i> Preview</button>
+    <button class="btn btn-primary" onclick="_orgChartApply()" id="_orgChartApplyBtn" disabled><i class="fas fa-check"></i> Apply</button>
+  `;
+  openModal('genericModal');
+}
+
+function _orgChartParse(text) {
+  const rows = [];
+  const lines = String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return rows;
+  // Auto-detect header if first row looks like column names
+  const first = lines[0].toLowerCase();
+  const hasHeader = /\b(name|employee|person)\b/.test(first) && /\b(reports?|manager|supervisor)\b/.test(first);
+  const start = hasHeader ? 1 : 0;
+  for (let i = start; i < lines.length; i++) {
+    const parts = lines[i].split(/[,;\t]/).map(p => p.trim().replace(/^["']|["']$/g, ''));
+    if (!parts[0]) continue;
+    rows.push({ name: parts[0], manager: parts[1] || '' });
+  }
+  return rows;
+}
+
+function _orgChartResolve(rows) {
+  const resources = (AppState.data.resources || []).filter(r => !r._deleted);
+  const byLower = new Map(resources.map(r => [String(r.name).toLowerCase(), r]));
+  const matches = [];
+  const misses  = [];
+  const managerMisses = new Set();
+  for (const row of rows) {
+    const person = byLower.get(row.name.toLowerCase());
+    if (!person) { misses.push(row.name); continue; }
+    let managerName = '';
+    if (row.manager) {
+      const mgr = byLower.get(row.manager.toLowerCase());
+      if (mgr) managerName = mgr.name;
+      else managerMisses.add(row.manager);
+    }
+    matches.push({ id: person.id, name: person.name, from: person.manager || '', to: managerName });
+  }
+  return { matches, misses, managerMisses: Array.from(managerMisses) };
+}
+
+function _orgChartPreview() {
+  const text = document.getElementById('_orgChartCsv')?.value || '';
+  const rows = _orgChartParse(text);
+  const previewEl = document.getElementById('_orgChartPreview');
+  const applyBtn = document.getElementById('_orgChartApplyBtn');
+  if (!previewEl || !applyBtn) return;
+  if (!rows.length) {
+    previewEl.innerHTML = '<div class="empty-state" style="padding:14px;font-size:12px">No rows detected.</div>';
+    applyBtn.disabled = true;
+    return;
+  }
+  const { matches, misses, managerMisses } = _orgChartResolve(rows);
+  const changes = matches.filter(m => m.from !== m.to);
+  applyBtn.disabled = changes.length === 0;
+  applyBtn.dataset.rows = JSON.stringify(matches);
+  previewEl.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:10px">
+      <div class="stat-card" style="padding:8px 10px"><div style="font-size:18px;font-weight:700">${rows.length}</div><div style="font-size:10px;color:var(--text-muted)">ROWS PARSED</div></div>
+      <div class="stat-card" style="padding:8px 10px"><div style="font-size:18px;font-weight:700;color:var(--accent-green)">${changes.length}</div><div style="font-size:10px;color:var(--text-muted)">CHANGES</div></div>
+      <div class="stat-card" style="padding:8px 10px"><div style="font-size:18px;font-weight:700;color:var(--accent-red)">${misses.length}</div><div style="font-size:10px;color:var(--text-muted)">UNKNOWN PEOPLE</div></div>
+      <div class="stat-card" style="padding:8px 10px"><div style="font-size:18px;font-weight:700;color:var(--accent-amber)">${managerMisses.length}</div><div style="font-size:10px;color:var(--text-muted)">UNKNOWN MANAGERS</div></div>
+    </div>
+    ${changes.length ? `<div style="max-height:180px;overflow:auto;border:1px solid var(--border);border-radius:6px">
+      <table class="data-table" style="margin:0"><thead><tr><th>Person</th><th>Current</th><th>New</th></tr></thead>
+      <tbody>${changes.map(c => `<tr>
+        <td>${c.name}</td>
+        <td style="color:var(--text-muted)">${c.from || '—'}</td>
+        <td style="font-weight:600">${c.to || '(clear)'}</td>
+      </tr>`).join('')}</tbody></table>
+    </div>` : '<div style="color:var(--text-muted);font-size:12px">No changes to apply — everyone already matches.</div>'}
+    ${misses.length ? `<div style="margin-top:8px;padding:8px;background:rgba(248,81,73,.08);border-left:3px solid var(--accent-red);border-radius:4px;font-size:11px">
+      <strong>Unknown people (skipped):</strong> ${misses.slice(0, 20).join(', ')}${misses.length > 20 ? ` … +${misses.length - 20} more` : ''}
+    </div>` : ''}
+    ${managerMisses.length ? `<div style="margin-top:6px;padding:8px;background:rgba(210,153,34,.08);border-left:3px solid var(--accent-amber);border-radius:4px;font-size:11px">
+      <strong>Unknown managers (will be cleared):</strong> ${managerMisses.slice(0, 20).join(', ')}${managerMisses.length > 20 ? ` … +${managerMisses.length - 20} more` : ''}
+    </div>` : ''}
+  `;
+}
+
+function _orgChartApply() {
+  const btn = document.getElementById('_orgChartApplyBtn');
+  const rows = btn?.dataset?.rows ? JSON.parse(btn.dataset.rows) : [];
+  if (!rows.length) return;
+  let changed = 0;
+  const resources = AppState.data.resources || [];
+  for (const row of rows) {
+    const rec = resources.find(r => r.id === row.id);
+    if (!rec) continue;
+    if ((rec.manager || '') === (row.to || '')) continue;
+    rec.manager = row.to || '';
+    if (typeof _stampEdit === 'function') _stampEdit(rec);
+    changed++;
+  }
+  AppState.save();
+  if (typeof Audit !== 'undefined') Audit.record('import', `Org chart applied · ${changed} record${changed === 1 ? '' : 's'} updated`, { changed });
+  closeModal('genericModal');
+  showToast(`Org chart applied — ${changed} record${changed === 1 ? '' : 's'} updated`, 'success', 4000);
+}
 
 // ═══════════════════════════════════════════════════════════
 </script>
@@ -27817,7 +27946,7 @@ function savePersonnel(id){
     if((AppState.data.resources||[]).find(r=>r.id===rec.id))rec.id='RES-'+Date.now().toString().slice(-5);
     AppState.data.resources.push(rec);
   }
-  AppState.save();closeModal('genericModal');renderMlPersonnel();showToast(id?'Personnel updated':'Personnel added','success');
+  AppState.save();closeModal('genericModal');if($('#mlTabContent'))renderMlPersonnel();showToast(id?'Personnel updated':'Personnel added','success');
 }
 
 

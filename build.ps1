@@ -29,18 +29,10 @@ $idx = ReadFile('index.html')
 $css = ReadFile('css\main.css')
 $out = $idx.Replace('<link rel="stylesheet" href="src/css/main.css">', "<style>`n$css`n</style>")
 
-$jsFiles = @(
-  'js\core.js', 'js\lib\store.js', 'js\lib\merge.js', 'js\lib\deletions.js', 'js\lib\files.js', 'js\lib\audit.js', 'js\lib\api.js', 'js\templates.js', 'js\ui.js', 'js\auth.js', 'js\sync.js', 'js\session.js', 'js\hardening.js', 'js\cpm.js', 'js\baseline.js',
-  'js\views\dashboard.js', 'js\views\myWork.js', 'js\views\teamLoad.js', 'js\views\projects.js', 'js\views\prospects.js',
-  'js\views\deletionRequests.js', 'js\workflow.js', 'js\views\tasks.js', 'js\views\gantt.js', 'js\views\ganttExport.js',
-  'js\views\resources.js', 'js\views\manpower.js', 'js\views\materials.js',
-  'js\views\procurement.js', 'js\views\costs.js', 'js\views\qaqc.js',
-  'js\views\risks.js', 'js\views\actions.js', 'js\views\library.js',
-  'js\views\documents.js', 'js\views\progress.js', 'js\views\kpi.js',
-  'js\views\analytics.js',
-  'js\views\calendar.js', 'js\views\reports.js', 'js\views\settings.js',
-  'js\views\warehouse.js', 'js\views\masterlist.js', 'js\views\trash.js'
-)
+# Bundle order comes from src\bundle.json — single source of truth
+# shared with build.js. Add new modules there, not here.
+$bundleJson = [System.IO.File]::ReadAllText("$src\bundle.json", $enc)
+$jsFiles = @(($bundleJson | ConvertFrom-Json).js | ForEach-Object { $_ -replace '/', '\' })
 
 foreach ($f in $jsFiles) {
   $fwd  = $f -replace '\\', '/'

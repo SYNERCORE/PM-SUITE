@@ -279,7 +279,7 @@ function savePersonnel(id){
     if((AppState.data.resources||[]).find(r=>r.id===rec.id))rec.id='RES-'+Date.now().toString().slice(-5);
     AppState.data.resources.push(rec);
   }
-  AppState.save();closeModal('genericModal');renderMlPersonnel();showToast(id?'Personnel updated':'Personnel added','success');
+  AppState.save();closeModal('genericModal');if($('#mlTabContent'))renderMlPersonnel();showToast(id?'Personnel updated':'Personnel added','success');
 }
 
 
