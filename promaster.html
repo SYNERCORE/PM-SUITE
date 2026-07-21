@@ -25933,10 +25933,17 @@ function _whUpdateRcvTotals(){
 // ── BARCODE SCANNER ──────────────────────────────────────────
 let _whScanStream=null;
 
-async function _whScanBarcode(lineIdx){
+// Opens the camera scanner modal. Result routes through the callback
+// keyed at _whScanCallbacks[<key>]. Existing callers pass a line index;
+// generic callers register their own callback and pass its key.
+let _whScanCallbacks={};
+async function _whScanBarcode(lineIdx,callbackKey){
+  // Legacy contract: numeric lineIdx = apply to Receive line by that index
+  const key = callbackKey || ('rcv:'+lineIdx);
+  if (!callbackKey) _whScanCallbacks[key] = code => _whApplyScan(lineIdx, code);
   // Build modal
   const modalHtml=`
-  <div class="modal-overlay open" data-dynamic="1" id="whBarcodeModal">
+  <div class="modal-overlay open" data-dynamic="1" id="whBarcodeModal" data-key="${key}">
     <div class="modal" style="max-width:420px">
       <div class="modal-header">
         <div class="modal-title"><i class="fas fa-barcode" style="color:var(--accent-blue);margin-right:8px"></i>Scan Barcode</div>
@@ -25955,8 +25962,8 @@ async function _whScanBarcode(lineIdx){
         <div style="text-align:center;margin-bottom:10px;font-size:11px;color:var(--text-muted)">— or enter barcode manually —</div>
         <div style="display:flex;gap:6px">
           <input id="wh-scan-manual" class="form-control" placeholder="Type or paste barcode…" style="flex:1"
-            onkeydown="if(event.key==='Enter')_whScanManual(${lineIdx})">
-          <button class="btn btn-primary btn-sm" onclick="_whScanManual(${lineIdx})">Find</button>
+            onkeydown="if(event.key==='Enter')_whScanManual()">
+          <button class="btn btn-primary btn-sm" onclick="_whScanManual()">Find</button>
         </div>
       </div>
     </div>
@@ -25984,7 +25991,7 @@ async function _whScanBarcode(lineIdx){
         if(barcodes.length){
           const code=barcodes[0].rawValue;
           _whStopScan();
-          _whApplyScan(lineIdx,code);
+          _whDispatchScan(key,code);
           return;
         }
       }catch{}
@@ -26002,11 +26009,20 @@ function _whStopScan(){
   const m=document.getElementById('whBarcodeModal');if(m)m.remove();
 }
 
-function _whScanManual(lineIdx){
+function _whScanManual(){
   const val=(document.getElementById('wh-scan-manual')?.value||'').trim();
   if(!val){showToast('Enter a barcode value','warning');return;}
+  const key=document.getElementById('whBarcodeModal')?.dataset?.key||'';
   _whStopScan();
-  _whApplyScan(lineIdx,val);
+  _whDispatchScan(key,val);
+}
+
+function _whDispatchScan(key,code){
+  const cb=_whScanCallbacks[key];
+  if(cb){
+    try{cb(code);}catch(e){console.warn('[wh-scan] callback failed:',e);}
+    delete _whScanCallbacks[key];
+  }
 }
 
 function _whApplyScan(lineIdx,code){
@@ -26021,6 +26037,33 @@ function _whApplyScan(lineIdx,code){
   _whRcvAutoFillCost(lineIdx);
   _whRefreshRcv();
   showToast(`Found: ${found.name}`,'success');
+}
+
+// Scan target: Issue form line
+function _whScanForIssue(lineIdx){
+  const key='iss:'+lineIdx;
+  _whScanCallbacks[key]=code=>{
+    const items=_whItems();
+    const found=items.find(i=>i.barcode===code)||items.find(i=>i.code===code)||items.find(i=>i.name===code);
+    if(!found){showToast(`No item found for barcode "${code}"`,'warning',5000);return;}
+    _whIssLines[lineIdx].itemId=found.id;
+    _whRefreshIss();
+    showToast(`Found: ${found.name}`,'success');
+  };
+  _whScanBarcode(lineIdx,key);
+}
+
+// Scan target: assign the scanned code to the item form's barcode field
+function _whScanForItemForm(){
+  const key='item-barcode';
+  _whScanCallbacks[key]=code=>{
+    const fld=document.getElementById('wh-add-barcode');
+    if(!fld){showToast('Barcode field not found','warning');return;}
+    fld.value=code;
+    fld.dispatchEvent(new Event('input',{bubbles:true}));
+    showToast(`Barcode captured: ${code}`,'success');
+  };
+  _whScanBarcode(null,key);
 }
 
 function _whRcvAutoFillCost(idx){
@@ -26049,9 +26092,12 @@ function _whIssLinesHTML(){
     const itemOpts=items.map(i=>`<option value="${i.id}"${i.id===ln.itemId?' selected':''}>${i.name} (${i.code||i.id})</option>`).join('');
     return`<tr>
       <td style="padding:5px 4px">
-        <select class="form-control" style="font-size:12px;width:100%" onchange="_whIssLines[${idx}].itemId=this.value;_whRefreshIss()">
-          <option value="">— Select Item —</option>${itemOpts}
-        </select>
+        <div style="display:flex;gap:4px">
+          <select class="form-control" style="font-size:12px;flex:1;min-width:0" onchange="_whIssLines[${idx}].itemId=this.value;_whRefreshIss()">
+            <option value="">— Select Item —</option>${itemOpts}
+          </select>
+          <button class="btn btn-secondary btn-sm" style="padding:3px 7px" title="Scan barcode" onclick="_whScanForIssue(${idx})"><i class="fas fa-barcode"></i></button>
+        </div>
       </td>
       <td style="padding:5px 4px;font-size:11px;text-align:center;width:70px">
         ${q?`<span style="color:${availColor};font-weight:700">${avail}</span><br><span style="color:var(--text-secondary);font-size:10px">${item?.unit||''}</span>`:'—'}
@@ -27384,7 +27430,10 @@ function _whShowAddItem(editId){
           </div>
           <div class="form-group">
             <label class="form-label">Barcode / QR <span style="font-size:10px;color:var(--text-secondary)">(for scanner lookup)</span></label>
-            <input class="form-control" id="wh-add-barcode" placeholder="e.g. 4806512345678" value="${existing?.barcode||''}">
+            <div style="display:flex;gap:6px">
+              <input class="form-control" id="wh-add-barcode" placeholder="e.g. 4806512345678" value="${existing?.barcode||''}" style="flex:1;min-width:0">
+              <button type="button" class="btn btn-secondary btn-sm" title="Scan with camera" onclick="_whScanForItemForm()"><i class="fas fa-barcode"></i></button>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">Category *</label>
