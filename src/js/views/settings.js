@@ -239,6 +239,30 @@ ${renderSpPanel()}
       Use <strong>SharePoint sync</strong> (M365) or OneDrive sync above, or Export JSON to back up across devices.
     </div>
   </div>
+  <div class="card" style="grid-column:1/-1;border:1px solid rgba(56,139,253,.25)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:36px;height:36px;background:linear-gradient(135deg,#0ea5e9,#0369a1);border-radius:9px;display:flex;align-items:center;justify-content:center"><i class="fas fa-server" style="color:#fff"></i></div>
+        <div>
+          <div style="font-size:14px;font-weight:600">Local Server (LAN)</div>
+          <div style="font-size:11px;color:var(--text-secondary)">Optional in-house PostgreSQL + API. Runs alongside SharePoint.</div>
+        </div>
+        <span id="localSrvDot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--text-muted);margin-left:6px" title="Not tested"></span>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="_localSrvTestConnection()"><i class="fas fa-plug"></i> Test Connection</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end">
+      <div class="form-group" style="margin:0">
+        <label class="form-label" style="font-size:11px">Server URL <span style="color:var(--text-muted);font-weight:400">(e.g. https://procmaster.local)</span></label>
+        <input class="form-input" id="localSrvUrl" placeholder="https://procmaster.local" value="${(settings.localServerUrl||'').replace(/"/g,'&quot;')}">
+      </div>
+      <button class="btn btn-primary" onclick="_localSrvSave()"><i class="fas fa-save"></i> Save</button>
+    </div>
+    <div id="localSrvStatus" style="font-size:11px;color:var(--text-muted);margin-top:10px;min-height:16px"></div>
+    <div style="font-size:10px;color:var(--text-muted);margin-top:10px;line-height:1.6">
+      Leave blank to disable. When set, the app will call <code style="background:var(--bg-hover);padding:1px 5px;border-radius:3px">GET /health</code> to verify. See <code style="background:var(--bg-hover);padding:1px 5px;border-radius:3px">deploy/README.md</code> for IT setup.
+    </div>
+  </div>
   <div class="card" style="grid-column:1/-1">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
       <div style="font-size:14px;font-weight:600"><i class="fas fa-users-cog" style="color:var(--accent-blue);margin-right:7px"></i>User Management <span style="font-size:11px;font-weight:400;color:var(--text-secondary)">— Admin only</span></div>
@@ -1144,6 +1168,93 @@ function _openRecentItem(r) {
       return orig.apply(this, arguments);
     };
   }
+})();
+
+// ── Local Server config + health probe ────────────────────────
+// Persists settings.localServerUrl and wires the Api facade to it.
+// Test button pings /health; result rendered inline with a colored
+// dot indicator. When healthy, subsequent app work can flip specific
+// entities over to the local server via Store's backend flag.
+function _localSrvSave() {
+  const raw = (document.getElementById('localSrvUrl')?.value || '').trim().replace(/\/+$/, '');
+  AppState.data.settings = AppState.data.settings || {};
+  AppState.data.settings.localServerUrl = raw;
+  AppState.save();
+  if (raw && typeof Api !== 'undefined' && Api.configure) {
+    Api.configure({
+      baseUrl: raw,
+      getToken: async () => {
+        try {
+          if (typeof _spMsalApp !== 'undefined' && _spMsalApp && _spAccount) {
+            const clientId = (typeof _spClientId !== 'undefined') ? _spClientId : '';
+            const r = await _spMsalApp.acquireTokenSilent({
+              scopes: [ 'api://' + clientId + '/access_as_user' ],
+              account: _spAccount,
+            });
+            return r?.accessToken || '';
+          }
+        } catch (e) { console.warn('[local-srv] token failed:', e.message); }
+        return '';
+      },
+    });
+  }
+  showToast(raw ? 'Local server URL saved' : 'Local server disabled', 'success', 2500);
+  _localSrvUpdateDot('unknown', 'Saved — click Test Connection');
+}
+
+async function _localSrvTestConnection() {
+  const raw = (document.getElementById('localSrvUrl')?.value || '').trim().replace(/\/+$/, '');
+  if (!raw) { _localSrvUpdateDot('bad', 'Enter a URL first'); return; }
+  _localSrvUpdateDot('pending', 'Contacting server…');
+  try {
+    const started = Date.now();
+    const res = await fetch(raw + '/health');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const body = await res.json();
+    const ms = Date.now() - started;
+    const dbOk = body.db === 'connected';
+    _localSrvUpdateDot(dbOk ? 'good' : 'warn',
+      `${dbOk ? '✓' : '⚠'} status=${body.status} · db=${body.db} · v${body.version || '?'} · ${ms}ms`);
+  } catch (e) {
+    _localSrvUpdateDot('bad', 'Unreachable: ' + e.message);
+  }
+}
+
+function _localSrvUpdateDot(state, msg) {
+  const dot = document.getElementById('localSrvDot');
+  const status = document.getElementById('localSrvStatus');
+  const colors = { good: 'var(--accent-green)', warn: 'var(--accent-amber)', bad: 'var(--accent-red)', pending: 'var(--accent-blue)', unknown: 'var(--text-muted)' };
+  if (dot) { dot.style.background = colors[state] || colors.unknown; dot.title = msg || ''; }
+  if (status) {
+    const colorMap = { good: 'var(--accent-green)', warn: 'var(--accent-amber)', bad: 'var(--accent-red)' };
+    status.style.color = colorMap[state] || 'var(--text-muted)';
+    status.textContent = msg || '';
+  }
+}
+
+// Auto-configure Api on app boot from persisted setting.
+(function _localSrvBoot() {
+  try {
+    const url = AppState?.data?.settings?.localServerUrl;
+    if (url && typeof Api !== 'undefined' && Api.configure) {
+      Api.configure({
+        baseUrl: url,
+        getToken: async () => {
+          try {
+            if (typeof _spMsalApp !== 'undefined' && _spMsalApp && _spAccount) {
+              const clientId = (typeof _spClientId !== 'undefined') ? _spClientId : '';
+              const r = await _spMsalApp.acquireTokenSilent({
+                scopes: [ 'api://' + clientId + '/access_as_user' ],
+                account: _spAccount,
+              });
+              return r?.accessToken || '';
+            }
+          } catch (e) {}
+          return '';
+        },
+      });
+    }
+  } catch (e) { /* boot best-effort */ }
 })();
 
 // ── Org Chart Importer ────────────────────────────────────────
