@@ -35,6 +35,15 @@ await app.register(cors, {
   origin: (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
   credentials: true,
 });
+
+// Chrome Private Network Access preflight — allows browsers that
+// loaded the app from a public origin (SharePoint / GitHub Pages) to
+// fetch this LAN server. Without this the browser rejects the request
+// with 'Failed to fetch' before the CORS layer even runs.
+app.addHook('onSend', async (req, reply, payload) => {
+  reply.header('Access-Control-Allow-Private-Network', 'true');
+  return payload;
+});
 await app.register(rateLimit, {
   max: 600,
   timeWindow: '1 minute',
