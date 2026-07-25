@@ -112,6 +112,7 @@ const Store = (function () {
     }
     if (_txDepth === 0) AppState.save();
     _notify(entity);
+    _shadowMirror(entity, arr[idx >= 0 ? idx : arr.length - 1], 'put');
     return arr[idx >= 0 ? idx : arr.length - 1];
   }
 
@@ -133,6 +134,7 @@ const Store = (function () {
     }
     if (_txDepth === 0) AppState.save();
     _notify(entity);
+    _shadowMirror(entity, { id: id }, 'remove');
     return true;
   }
 
@@ -174,7 +176,70 @@ const Store = (function () {
     }
   }
 
-  return { list, get, put, remove, subscribe, tx, _generateId };
+  // ── Dual-backend layer (shadow-write to local server) ───
+  // Foreground reads stay synchronous from AppState. Writes are
+  // fire-and-forget mirrored to the Local Server (deploy/) if:
+  //   • Api is configured
+  //   • settings.forceSharepointMode !== true
+  //   • settings.apiEntities includes this entity
+  // Failures are logged to Audit as warnings — the local write already
+  // succeeded so nothing user-visible breaks.
+  function _isApiEntity(entity) {
+    try {
+      if (typeof Api === 'undefined' || !Api.enabled || !Api.enabled()) return false;
+      const s = (typeof AppState !== 'undefined' && AppState.data && AppState.data.settings) || {};
+      if (s.forceSharepointMode) return false;
+      const opts = Array.isArray(s.apiEntities) ? s.apiEntities : [];
+      return opts.indexOf(entity) >= 0;
+    } catch (e) { return false; }
+  }
+
+  function _shadowMirror(entity, record, op) {
+    if (!_isApiEntity(entity) || !record || !record.id) return;
+    const p = op === 'remove'
+      ? Api.remove(entity, record.id)
+      : Api.put(entity, record.id, record);
+    Promise.resolve(p).catch(err => {
+      try {
+        if (typeof Audit !== 'undefined') Audit.record('warning',
+          '[Api mirror] ' + op + ' ' + entity + ':' + record.id + ' failed', { error: err.message });
+      } catch (e) {}
+    });
+  }
+
+  // Pull the server's copy of an entity and replace AppState.data[entity].
+  // Called manually or on boot for opted-in entities. Returns a promise
+  // that resolves with the row count fetched, or rejects with the error.
+  async function hydrate(entity) {
+    if (typeof Api === 'undefined' || !Api.enabled || !Api.enabled())
+      throw new Error('Api not configured');
+    const items = await Api.list(entity);
+    const rows = items.map(r => r.data ? Object.assign({}, r.data, { id: r.id, _mAt: r.updated_at }) : r);
+    AppState.data[entity] = rows;
+    AppState.save();
+    _notify(entity);
+    if (typeof Audit !== 'undefined') Audit.record('sync', 'Hydrated ' + entity + ' from server', { count: rows.length });
+    return rows.length;
+  }
+
+  // One-shot migration: push every existing local record to the server.
+  // Reports { total, migrated, failed } via progressCb after each row.
+  async function migrate(entity, progressCb) {
+    if (typeof Api === 'undefined' || !Api.enabled || !Api.enabled())
+      throw new Error('Api not configured');
+    const arr = _arr(entity).filter(r => r && r.id);
+    let migrated = 0, failed = 0;
+    for (const rec of arr) {
+      try { await Api.put(entity, rec.id, rec); migrated++; }
+      catch (e) { failed++; }
+      if (typeof progressCb === 'function') progressCb({ total: arr.length, migrated, failed });
+    }
+    if (typeof Audit !== 'undefined') Audit.record('sync',
+      'Migrated ' + entity + ' to server', { total: arr.length, migrated, failed });
+    return { total: arr.length, migrated, failed };
+  }
+
+  return { list, get, put, remove, subscribe, tx, hydrate, migrate, _generateId };
 })();
 
 // Dual export: browser global (Store) + CommonJS/ESM for unit tests.

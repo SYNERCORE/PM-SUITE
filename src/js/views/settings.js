@@ -259,8 +259,26 @@ ${renderSpPanel()}
       <button class="btn btn-primary" onclick="_localSrvSave()"><i class="fas fa-save"></i> Save</button>
     </div>
     <div id="localSrvStatus" style="font-size:11px;color:var(--text-muted);margin-top:10px;min-height:16px"></div>
+
+    <!-- Per-entity opt-in + rollback + migrate -->
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:12px;font-weight:600;margin-bottom:8px">Entity Routing</div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 0">
+        <input type="checkbox" id="apiEnt_warehouseItems" ${((settings.apiEntities||[]).includes('warehouseItems'))?'checked':''} onchange="_apiToggleEntity('warehouseItems',this.checked)">
+        <span><strong>Warehouse Items</strong> <span style="font-size:10px;color:var(--text-muted)">— reads stay local; writes mirror to server</span></span>
+        <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="_apiMigrateEntity('warehouseItems')" title="Push every local warehouse item to the server (safe to re-run)"><i class="fas fa-cloud-upload-alt"></i> Migrate now</button>
+        <button class="btn btn-secondary btn-sm" onclick="_apiHydrateEntity('warehouseItems')" title="Pull server copy — replaces local data for this entity"><i class="fas fa-cloud-download-alt"></i> Pull</button>
+      </label>
+      <div id="apiEntStatus_warehouseItems" style="font-size:11px;color:var(--text-muted);margin-left:26px;min-height:14px"></div>
+
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:10px 0 4px;border-top:1px dashed var(--border);margin-top:10px">
+        <input type="checkbox" id="apiForceSP" ${settings.forceSharepointMode?'checked':''} onchange="_apiToggleForceSP(this.checked)">
+        <span><strong>Force SharePoint Mode</strong> <span style="font-size:10px;color:var(--accent-red)">— emergency rollback, disables all server routing</span></span>
+      </label>
+    </div>
+
     <div style="font-size:10px;color:var(--text-muted);margin-top:10px;line-height:1.6">
-      Leave blank to disable. When set, the app will call <code style="background:var(--bg-hover);padding:1px 5px;border-radius:3px">GET /health</code> to verify. See <code style="background:var(--bg-hover);padding:1px 5px;border-radius:3px">deploy/README.md</code> for IT setup.
+      Leave URL blank to disable. When set, the app will call <code style="background:var(--bg-hover);padding:1px 5px;border-radius:3px">GET /health</code> to verify. See <code style="background:var(--bg-hover);padding:1px 5px;border-radius:3px">deploy/README.md</code> for IT setup.
     </div>
   </div>
   <div class="card" style="grid-column:1/-1">
@@ -1229,6 +1247,56 @@ function _localSrvUpdateDot(state, msg) {
     const colorMap = { good: 'var(--accent-green)', warn: 'var(--accent-amber)', bad: 'var(--accent-red)' };
     status.style.color = colorMap[state] || 'var(--text-muted)';
     status.textContent = msg || '';
+  }
+}
+
+// Per-entity opt-in — writes are mirrored to server for entities in this list.
+function _apiToggleEntity(entity, on) {
+  AppState.data.settings = AppState.data.settings || {};
+  const list = new Set(AppState.data.settings.apiEntities || []);
+  if (on) list.add(entity); else list.delete(entity);
+  AppState.data.settings.apiEntities = Array.from(list);
+  AppState.save();
+  showToast(on ? `${entity} writes will mirror to server` : `${entity} routed to SharePoint only`, 'info', 2500);
+}
+
+function _apiToggleForceSP(on) {
+  AppState.data.settings = AppState.data.settings || {};
+  AppState.data.settings.forceSharepointMode = !!on;
+  AppState.save();
+  showToast(on ? 'Force SharePoint Mode ON — server routing disabled' : 'Server routing re-enabled', on ? 'warning' : 'info', 3500);
+}
+
+async function _apiMigrateEntity(entity) {
+  const el = document.getElementById('apiEntStatus_' + entity);
+  if (!confirm(`Push every local ${entity} record to the local server?\n\nSafe to re-run — the server upserts by id.`)) return;
+  if (el) { el.style.color = 'var(--accent-blue)'; el.textContent = 'Starting…'; }
+  try {
+    const res = await Store.migrate(entity, p => {
+      if (el) el.textContent = `Migrating… ${p.migrated}/${p.total} (${p.failed} failed)`;
+    });
+    if (el) {
+      el.style.color = res.failed ? 'var(--accent-amber)' : 'var(--accent-green)';
+      el.textContent = `✓ ${res.migrated}/${res.total} migrated${res.failed ? ` · ${res.failed} failed` : ''}`;
+    }
+    showToast(`Migrated ${res.migrated} of ${res.total} ${entity}`, res.failed ? 'warning' : 'success', 4000);
+  } catch (e) {
+    if (el) { el.style.color = 'var(--accent-red)'; el.textContent = 'Failed: ' + e.message; }
+    showToast('Migration failed: ' + e.message, 'error', 5000);
+  }
+}
+
+async function _apiHydrateEntity(entity) {
+  const el = document.getElementById('apiEntStatus_' + entity);
+  if (!confirm(`Replace local ${entity} data with the server copy?\n\nAnything not on the server will be lost. Consider Migrate first.`)) return;
+  if (el) { el.style.color = 'var(--accent-blue)'; el.textContent = 'Pulling…'; }
+  try {
+    const n = await Store.hydrate(entity);
+    if (el) { el.style.color = 'var(--accent-green)'; el.textContent = `✓ ${n} records pulled from server`; }
+    showToast(`Pulled ${n} ${entity} from server`, 'success', 3500);
+  } catch (e) {
+    if (el) { el.style.color = 'var(--accent-red)'; el.textContent = 'Failed: ' + e.message; }
+    showToast('Pull failed: ' + e.message, 'error', 5000);
   }
 }
 
