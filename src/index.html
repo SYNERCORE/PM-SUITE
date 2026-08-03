@@ -42,6 +42,10 @@
           <i class="fas fa-exclamation-triangle" style="margin-right:5px"></i>
           SharePoint not configured. <a href="#" onclick="showAuthForm('setup')" style="color:#f59e0b;font-weight:600">Set up first</a>
         </div>
+        <!-- Always-available reconfigure link so bad settings are never a dead end -->
+        <div style="margin-top:14px;text-align:center;font-size:11px;color:#6e7681">
+          <a href="#" onclick="showAuthForm('setup');return false;" style="color:#8b949e;text-decoration:underline">Change SharePoint settings</a>
+        </div>
       </div>
 
       <!-- Pending Approval -->
