@@ -1,14 +1,19 @@
-# Caddy 2 reverse proxy for ProMaster.
-# Auto-HTTPS is on by default. For internal hostnames Caddy issues
-# its own cert from a local CA; install that CA on client machines.
+# Caddy 2 reverse proxy + static host for ProMaster.
+#
+# Phase 1: Caddy serves promaster.html directly AND proxies /api/* to Node.
+# One URL for the whole app — replaces GitHub Pages / SharePoint hosting.
 #
 # Location on disk:
-#   Ubuntu   /etc/caddy/Caddyfile   (systemctl reload caddy)
-#   Windows  C:\Program Files\Caddy\Caddyfile   (Restart-Service caddy)
+#   Ubuntu   /etc/caddy/Caddyfile                     (systemctl reload caddy)
+#   Windows  C:\Program Files\Caddy\Caddyfile         (Restart-Service caddy)
+#
+# The hostname must resolve to this server on the LAN (internal DNS or
+# hosts file on each client). For internal-only HTTPS Caddy issues its
+# own cert from a local CA — install that root CA on each client machine.
 
-procmaster.local {
-    # Internal-only cert. Delete this line and Caddy will fetch a
-    # real Let's Encrypt cert IF the hostname resolves publicly.
+procmaster.sy3.local {
+    # Internal-only cert. Delete this line if the hostname resolves
+    # publicly and you want a real Let's Encrypt cert.
     tls internal
 
     encode zstd gzip
@@ -22,11 +27,27 @@ procmaster.local {
         -Server
     }
 
-    # API traffic → Node service on localhost:3000
-    reverse_proxy 127.0.0.1:3000
+    # API and health — proxy to the Node service on localhost:3000
+    handle /api/* {
+        reverse_proxy 127.0.0.1:3000
+    }
+    handle /health {
+        reverse_proxy 127.0.0.1:3000
+    }
+
+    # Everything else — serve the built app
+    handle {
+        # Windows: C:\ProcMaster-Web
+        # Ubuntu:  /var/www/procmaster
+        root * C:\ProcMaster-Web
+        try_files {path} /promaster.html
+        file_server
+    }
 
     log {
-        output file /var/log/caddy/procmaster.log {
+        # Windows: C:\ProcMaster\logs\access.log
+        # Ubuntu:  /var/log/caddy/procmaster.log
+        output file C:\ProcMaster\logs\access.log {
             roll_size 50MiB
             roll_keep 10
         }
