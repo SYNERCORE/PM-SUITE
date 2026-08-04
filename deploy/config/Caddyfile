@@ -11,10 +11,10 @@
 # hosts file on each client). For internal-only HTTPS Caddy issues its
 # own cert from a local CA — install that root CA on each client machine.
 
-procmaster.sy3.local {
-    # Internal-only cert. Delete this line if the hostname resolves
-    # publicly and you want a real Let's Encrypt cert.
-    tls internal
+procmaster.synercore.ph {
+    # Public hostname — Caddy will auto-fetch a Let's Encrypt cert
+    # if this server is reachable on port 80/443 from the internet
+    # (needed once during cert issuance).
 
     encode zstd gzip
 
