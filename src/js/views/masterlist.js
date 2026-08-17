@@ -979,7 +979,9 @@ function executeImport(){
     thirdparty:{id:'ID',name:'Name',category:'Category',service:'Service',contactPerson:'ContactPerson',contactNo:'ContactNo',projectId:'ProjectID',contractStart:'ContractStart',contractEnd:'ContractEnd',monthlyRate:'MonthlyRate',accreditation:'Accreditation',accreditationExpiry:'AccreditationExpiry',status:'Status',notes:'Notes'},
   };
   const map=fieldMap[typeKey]||{};
-  const listKey={thirdparty:'thirdParty'}[typeKey]||typeKey;
+  // Personnel imports land in AppState.data.resources (what the tab actually reads);
+  // thirdparty → thirdParty. Everything else uses its own key.
+  const listKey={personnel:'resources',thirdparty:'thirdParty'}[typeKey]||typeKey;
   if(!AppState.data[listKey])AppState.data[listKey]=[];
   const list=AppState.data[listKey];
 

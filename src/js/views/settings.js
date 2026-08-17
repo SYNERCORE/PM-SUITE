@@ -1202,17 +1202,31 @@ function _localSrvSave() {
     Api.configure({
       baseUrl: raw,
       getToken: async () => {
+        if (typeof _spMsalApp === 'undefined' || !_spMsalApp || !_spAccount) return '';
+        const clientId = (typeof _spClientId !== 'undefined') ? _spClientId : '';
+        const scopes = [ 'api://' + clientId + '/access_as_user' ];
         try {
-          if (typeof _spMsalApp !== 'undefined' && _spMsalApp && _spAccount) {
-            const clientId = (typeof _spClientId !== 'undefined') ? _spClientId : '';
-            const r = await _spMsalApp.acquireTokenSilent({
-              scopes: [ 'api://' + clientId + '/access_as_user' ],
-              account: _spAccount,
-            });
-            return r?.accessToken || '';
+          const r = await _spMsalApp.acquireTokenSilent({ scopes, account: _spAccount });
+          return r?.accessToken || '';
+        } catch (e) {
+          // First-time consent for a newly-added scope needs interaction.
+          // Also: token cache from before the scope existed forces interaction.
+          const needsPopup = e && (e.errorCode === 'consent_required'
+            || e.errorCode === 'interaction_required'
+            || e.errorCode === 'login_required'
+            || /interaction_required|consent_required|invalid_grant|AADSTS65001|AADSTS65004|AADSTS50076/i.test(e.message || ''));
+          if (needsPopup) {
+            try {
+              const r = await _spMsalApp.acquireTokenPopup({ scopes, account: _spAccount });
+              return r?.accessToken || '';
+            } catch (e2) {
+              console.warn('[local-srv] token popup failed:', e2.message);
+              return '';
+            }
           }
-        } catch (e) { console.warn('[local-srv] token failed:', e.message); }
-        return '';
+          console.warn('[local-srv] token failed:', e.message);
+          return '';
+        }
       },
     });
   }
@@ -1308,17 +1322,25 @@ async function _apiHydrateEntity(entity) {
       Api.configure({
         baseUrl: url,
         getToken: async () => {
+          if (typeof _spMsalApp === 'undefined' || !_spMsalApp || !_spAccount) return '';
+          const clientId = (typeof _spClientId !== 'undefined') ? _spClientId : '';
+          const scopes = [ 'api://' + clientId + '/access_as_user' ];
           try {
-            if (typeof _spMsalApp !== 'undefined' && _spMsalApp && _spAccount) {
-              const clientId = (typeof _spClientId !== 'undefined') ? _spClientId : '';
-              const r = await _spMsalApp.acquireTokenSilent({
-                scopes: [ 'api://' + clientId + '/access_as_user' ],
-                account: _spAccount,
-              });
-              return r?.accessToken || '';
+            const r = await _spMsalApp.acquireTokenSilent({ scopes, account: _spAccount });
+            return r?.accessToken || '';
+          } catch (e) {
+            const needsPopup = e && (e.errorCode === 'consent_required'
+              || e.errorCode === 'interaction_required'
+              || e.errorCode === 'login_required'
+              || /interaction_required|consent_required|invalid_grant|AADSTS65001|AADSTS65004|AADSTS50076/i.test(e.message || ''));
+            if (needsPopup) {
+              try {
+                const r = await _spMsalApp.acquireTokenPopup({ scopes, account: _spAccount });
+                return r?.accessToken || '';
+              } catch (e2) { return ''; }
             }
-          } catch (e) {}
-          return '';
+            return '';
+          }
         },
       });
     }
