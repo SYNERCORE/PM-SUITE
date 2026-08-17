@@ -2255,15 +2255,30 @@ const Store = (function () {
 
   // One-shot migration: push every existing local record to the server.
   // Reports { total, migrated, failed } via progressCb after each row.
+  // Throttled to stay under the server's rate limit (default 600/min).
+  // On 429 responses we back off and retry once — anything else counts as failed.
   async function migrate(entity, progressCb) {
     if (typeof Api === 'undefined' || !Api.enabled || !Api.enabled())
       throw new Error('Api not configured');
     const arr = _arr(entity).filter(r => r && r.id);
     let migrated = 0, failed = 0;
+    const PACE_MS = 120;         // ~500 req/min — under the 600/min server cap
+    const RETRY_BACKOFF_MS = 3000;
+    const _sleep = ms => new Promise(r => setTimeout(r, ms));
     for (const rec of arr) {
-      try { await Api.put(entity, rec.id, rec); migrated++; }
-      catch (e) { failed++; }
+      let ok = false;
+      try { await Api.put(entity, rec.id, rec); ok = true; }
+      catch (e) {
+        // On 429, wait then retry once
+        if (/\b429\b/.test(e.message || '')) {
+          await _sleep(RETRY_BACKOFF_MS);
+          try { await Api.put(entity, rec.id, rec); ok = true; }
+          catch (e2) { /* second failure — count below */ }
+        }
+      }
+      if (ok) migrated++; else failed++;
       if (typeof progressCb === 'function') progressCb({ total: arr.length, migrated, failed });
+      await _sleep(PACE_MS);
     }
     if (typeof Audit !== 'undefined') Audit.record('sync',
       'Migrated ' + entity + ' to server', { total: arr.length, migrated, failed });
