@@ -70,6 +70,25 @@ app.addHook('preHandler', async (req, reply) => {
     req.log.warn({ err: e.message }, 'token verification failed');
     return reply.code(401).send({ error: 'invalid token' });
   }
+  // Upsert the user so FK constraints (created_by / updated_by) always resolve.
+  // Cheap: one INSERT ... ON CONFLICT per request; Postgres treats a duplicate
+  // as a no-op after the first successful insert.
+  try {
+    const email = req.user?.email;
+    if (email) {
+      await pool.query(
+        `INSERT INTO users (email, name, last_seen_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (email) DO UPDATE
+           SET name = COALESCE(EXCLUDED.name, users.name),
+               last_seen_at = NOW()`,
+        [email, req.user.name || email]
+      );
+    }
+  } catch (e) {
+    req.log.warn({ err: e.message }, 'user upsert failed');
+    // Don't 500 — let the route try; if it needs the FK it'll fail with a clearer error
+  }
 });
 
 // ── Route registration ────────────────────────────────────
