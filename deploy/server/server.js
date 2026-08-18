@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { pool } from './db.js';
 import { verifyAzureToken } from './auth.js';
 import warehouseItems from './routes/warehouseItems.js';
+import { makeEntityRoutes } from './routes/_entityRoutes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -93,6 +94,11 @@ app.addHook('preHandler', async (req, reply) => {
 
 // ── Route registration ────────────────────────────────────
 await app.register(warehouseItems, { prefix: '/api/warehouse-items' });
+await app.register(makeEntityRoutes({ table: 'projects',    entityName: 'projects',    filters: [{ query: 'status', column: 'status' }] }), { prefix: '/api/projects' });
+await app.register(makeEntityRoutes({ table: 'tasks',       entityName: 'tasks',       hasProjectId: true, filters: [{ query: 'status', column: 'status' }] }), { prefix: '/api/tasks' });
+await app.register(makeEntityRoutes({ table: 'resources',   entityName: 'resources',   filters: [{ query: 'type', column: 'res_type' }] }), { prefix: '/api/resources' });
+await app.register(makeEntityRoutes({ table: 'procurement', entityName: 'procurement', hasProjectId: true, filters: [{ query: 'status', column: 'po_status' }] }), { prefix: '/api/procurement' });
+await app.register(makeEntityRoutes({ table: 'costs',       entityName: 'costs',       hasProjectId: true, filters: [{ query: 'category', column: 'cost_category' }] }), { prefix: '/api/costs' });
 
 // ── Start ─────────────────────────────────────────────────
 const port = Number(process.env.PORT || 3000);

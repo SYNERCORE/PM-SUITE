@@ -4283,7 +4283,7 @@ async function _flushAuditQueue() {
   _auditFlushing = true;
   try {
     const token = await getM365AuthToken();
-    const siteId = await getSharePointSiteId(token);
+    const { siteId } = await spResolveSiteAndList(token);
     const listId = await _getOrCreateAuditListId(token, siteId);
     if (!listId) { _auditFlushing = false; return; }
     while (_auditQueue.length) {
@@ -4324,7 +4324,7 @@ async function showAuditLog() {
   openModal('genericModal');
   try {
     const token = await getM365AuthToken();
-    const siteId = await getSharePointSiteId(token);
+    const { siteId } = await spResolveSiteAndList(token);
     const listId = await _getOrCreateAuditListId(token, siteId);
     if (!listId) { $('#genericModalBody').innerHTML = `<div class="empty-state">Audit log list not available</div>`; return; }
     const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$orderby=fields/Title desc&$top=100`, { headers: { Authorization: 'Bearer ' + token } });
