@@ -2231,6 +2231,12 @@ function _spHasLocalEdits() {
 function _spApplyRemote(data, _ts, _by) {
   const hash = _spHash(data) + _ts;
   if (hash === _spDataHash) return; // no change
+  // Never overwrite local arrays while a migration is running — it would
+  // stomp on records the user is actively pushing to the local server.
+  if (typeof Store !== 'undefined' && Store.migrating && Store.migrating()) {
+    console.info('[SP] apply-remote deferred — migration in progress');
+    return;
+  }
   if (typeof _capturePreSyncSnapshot === 'function') _capturePreSyncSnapshot(); // safety net
   _spDataHash = hash;
   _spLastWriteTs = _ts || Date.now();
@@ -3113,6 +3119,11 @@ function _spBuildMainBlobPayload(subListsOk) {
 
 async function spPushData(silent = false) {
   if (_spSyncing) return false;
+  // Don't push mid-migration — SP would race the local API and confuse the counters.
+  if (typeof Store !== 'undefined' && Store.migrating && Store.migrating()) {
+    if (!silent) console.info('[SP] push deferred — migration in progress');
+    return false;
+  }
   if (!_spConnected || !_spAccount) { if (!silent) showToast('Not connected to SharePoint', 'error'); return false; }
   _spSyncing = true;
   _ssm.transition('PUSHING');

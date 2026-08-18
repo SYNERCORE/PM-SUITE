@@ -2253,6 +2253,11 @@ const Store = (function () {
     return rows.length;
   }
 
+  // Global lock other subsystems (SP sync) can check to avoid stomping on
+  // an in-flight migration. Exposed as Store.migrating().
+  let _migrating = false;
+  function migrating() { return _migrating; }
+
   // One-shot migration: push every existing local record to the server.
   // Reports { total, migrated, failed } via progressCb after each row.
   // Throttled to stay under the server's rate limit (default 600/min).
@@ -2260,6 +2265,7 @@ const Store = (function () {
   async function migrate(entity, progressCb) {
     if (typeof Api === 'undefined' || !Api.enabled || !Api.enabled())
       throw new Error('Api not configured');
+    _migrating = true;
     const arr = _arr(entity).filter(r => r && r.id);
     let migrated = 0, failed = 0;
     const PACE_MS = 120;         // ~500 req/min — under the 600/min server cap
@@ -2282,10 +2288,11 @@ const Store = (function () {
     }
     if (typeof Audit !== 'undefined') Audit.record('sync',
       'Migrated ' + entity + ' to server', { total: arr.length, migrated, failed });
+    _migrating = false;
     return { total: arr.length, migrated, failed };
   }
 
-  return { list, get, put, remove, subscribe, tx, hydrate, migrate, _generateId };
+  return { list, get, put, remove, subscribe, tx, hydrate, migrate, migrating, _generateId };
 })();
 
 // Dual export: browser global (Store) + CommonJS/ESM for unit tests.
@@ -7088,6 +7095,12 @@ function _spHasLocalEdits() {
 function _spApplyRemote(data, _ts, _by) {
   const hash = _spHash(data) + _ts;
   if (hash === _spDataHash) return; // no change
+  // Never overwrite local arrays while a migration is running — it would
+  // stomp on records the user is actively pushing to the local server.
+  if (typeof Store !== 'undefined' && Store.migrating && Store.migrating()) {
+    console.info('[SP] apply-remote deferred — migration in progress');
+    return;
+  }
   if (typeof _capturePreSyncSnapshot === 'function') _capturePreSyncSnapshot(); // safety net
   _spDataHash = hash;
   _spLastWriteTs = _ts || Date.now();
@@ -7970,6 +7983,11 @@ function _spBuildMainBlobPayload(subListsOk) {
 
 async function spPushData(silent = false) {
   if (_spSyncing) return false;
+  // Don't push mid-migration — SP would race the local API and confuse the counters.
+  if (typeof Store !== 'undefined' && Store.migrating && Store.migrating()) {
+    if (!silent) console.info('[SP] push deferred — migration in progress');
+    return false;
+  }
   if (!_spConnected || !_spAccount) { if (!silent) showToast('Not connected to SharePoint', 'error'); return false; }
   _spSyncing = true;
   _ssm.transition('PUSHING');

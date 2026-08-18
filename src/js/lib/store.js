@@ -222,6 +222,11 @@ const Store = (function () {
     return rows.length;
   }
 
+  // Global lock other subsystems (SP sync) can check to avoid stomping on
+  // an in-flight migration. Exposed as Store.migrating().
+  let _migrating = false;
+  function migrating() { return _migrating; }
+
   // One-shot migration: push every existing local record to the server.
   // Reports { total, migrated, failed } via progressCb after each row.
   // Throttled to stay under the server's rate limit (default 600/min).
@@ -229,6 +234,7 @@ const Store = (function () {
   async function migrate(entity, progressCb) {
     if (typeof Api === 'undefined' || !Api.enabled || !Api.enabled())
       throw new Error('Api not configured');
+    _migrating = true;
     const arr = _arr(entity).filter(r => r && r.id);
     let migrated = 0, failed = 0;
     const PACE_MS = 120;         // ~500 req/min — under the 600/min server cap
@@ -251,10 +257,11 @@ const Store = (function () {
     }
     if (typeof Audit !== 'undefined') Audit.record('sync',
       'Migrated ' + entity + ' to server', { total: arr.length, migrated, failed });
+    _migrating = false;
     return { total: arr.length, migrated, failed };
   }
 
-  return { list, get, put, remove, subscribe, tx, hydrate, migrate, _generateId };
+  return { list, get, put, remove, subscribe, tx, hydrate, migrate, migrating, _generateId };
 })();
 
 // Dual export: browser global (Store) + CommonJS/ESM for unit tests.
