@@ -939,6 +939,7 @@ function saveProcurement(id){
   if(!_req(_reqIds)){showToast('Fill in required fields','error');return;}
 
   let oldStatus='draft';
+  const _existing=id?(AppState.data.procurement||[]).find(x=>x.id===id):null;
   const rec={
     id:id||$('#poId')?.value?.trim()||'PO-'+Date.now().toString().slice(-5),
     requestNumber:$('#poReqNum')?.value?.trim()||'',
@@ -950,7 +951,7 @@ function saveProcurement(id){
       // Only save a PO number if explicitly entered AND we're at PO stage or editing existing
       if(poVal&&poVal!==nextId)return poVal;
       if(isPoStage&&!poVal)return nextId; // auto-assign when PO is issued with no number entered
-      return p?.poNumber||''; // keep existing, or blank for new PRs
+      return _existing?.poNumber||''; // keep existing, or blank for new PRs
     })(),
     description:desc,
     category:$('#poCat')?.value||'Materials',
