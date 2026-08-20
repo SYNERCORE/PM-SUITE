@@ -70,8 +70,10 @@ export function makeEntityRoutes(opts) {
       const hasProjectId = opts.hasProjectId === true;
       const projectId = hasProjectId ? (data.projectId || null) : null;
 
+      // Pass each value exactly once — postgres rejects bind messages whose
+      // parameter count exceeds the highest placeholder number.
       const cols = ['id', 'data', 'created_by', 'updated_by'];
-      const vals = [id, data, email, email];
+      const vals = [id, data, email];
       const placeholders = ['$1', '$2', '$3', '$3'];
       if (hasProjectId) {
         cols.push('project_id');
