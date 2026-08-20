@@ -2326,6 +2326,18 @@ function _spApplyRemote(data, _ts, _by) {
           merged.settings = Object.assign({}, merged.settings || {}, { dropdowns: _lDrop });
         }
       }
+      // ── Device-local settings: never let a remote blob overwrite these.
+      //    Local-server routing is per-device (each machine opts in on its
+      //    own); a teammate's SP push without these keys was silently
+      //    clearing them here, breaking Api.enabled() until re-saved.
+      {
+        const _lSet = AppState.data.settings || {};
+        const _keep = {};
+        for (const k of ['localServerUrl', 'apiEntities', 'forceSharepointMode']) {
+          if (_lSet[k] !== undefined) _keep[k] = _lSet[k];
+        }
+        merged.settings = Object.assign({}, merged.settings || {}, _keep);
+      }
       AppState.data = Object.assign(getDefaultData(), merged);
     }
     if (typeof migrateData === 'function') migrateData();
@@ -4278,6 +4290,38 @@ async function _getOrCreateAuditListId(token, siteId) {
   } catch(e) { console.warn('[Audit] List init failed:', e.message); return null; }
 }
 
+// Cache of column names that actually exist on the SHIC_AuditLog list.
+// The list may have been created by an older build that failed partway
+// through column creation — Graph 400s any write naming a missing column,
+// so we filter every payload down to columns the list really has.
+let _auditListCols = null;
+async function _getAuditListCols(token, siteId, listId) {
+  if (_auditListCols) return _auditListCols;
+  try {
+    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/columns?$select=name`, { headers: { Authorization: 'Bearer ' + token } });
+    const data = await res.json();
+    _auditListCols = new Set((data.value || []).map(c => c.name));
+    // Try to add any of our columns that are missing (older list versions)
+    const wanted = [
+      ['Action', false], ['Entity', false], ['EntityId', false], ['Module', false],
+      ['UserEmail', false], ['Before', true], ['After', true], ['Notes', true],
+    ];
+    for (const [col, multi] of wanted) {
+      if (_auditListCols.has(col)) continue;
+      try {
+        const cr = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/columns`, {
+          method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: col, text: { allowMultipleLines: multi } })
+        });
+        if (cr.ok) _auditListCols.add(col);
+      } catch (e) { /* keep going — the filter below handles what's missing */ }
+    }
+  } catch (e) {
+    _auditListCols = null; // unknown — send Title only this round
+  }
+  return _auditListCols;
+}
+
 async function _flushAuditQueue() {
   if (_auditFlushing || !_auditQueue.length) return;
   _auditFlushing = true;
@@ -4286,23 +4330,34 @@ async function _flushAuditQueue() {
     const { siteId } = await spResolveSiteAndList(token);
     const listId = await _getOrCreateAuditListId(token, siteId);
     if (!listId) { _auditFlushing = false; return; }
+    const availCols = await _getAuditListCols(token, siteId, listId);
     while (_auditQueue.length) {
       const entry = _auditQueue.shift();
       try {
-        await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`, {
+        const allFields = {
+          Title: entry.ts,
+          Action: entry.action,
+          Entity: entry.entity,
+          EntityId: String(entry.entityId||'').slice(0,255),
+          Module: entry.module||'',
+          UserEmail: entry.userEmail||'',
+          Before: entry.before ? JSON.stringify(entry.before).slice(0,5000) : '',
+          After: entry.after ? JSON.stringify(entry.after).slice(0,5000) : '',
+          Notes: entry.notes||'',
+        };
+        // Filter to columns that actually exist on the list (Title always does)
+        const fields = {};
+        for (const [k, v] of Object.entries(allFields)) {
+          if (k === 'Title' || !availCols || availCols.has(k)) fields[k] = v;
+        }
+        const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`, {
           method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fields: {
-            Title: entry.ts,
-            Action: entry.action,
-            Entity: entry.entity,
-            EntityId: String(entry.entityId||'').slice(0,255),
-            Module: entry.module||'',
-            UserEmail: entry.userEmail||'',
-            Before: entry.before ? JSON.stringify(entry.before).slice(0,5000) : '',
-            After: entry.after ? JSON.stringify(entry.after).slice(0,5000) : '',
-            Notes: entry.notes||'',
-          }})
+          body: JSON.stringify({ fields })
         });
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          console.warn('[Audit] Write rejected (' + res.status + '):', body.slice(0, 200));
+        }
       } catch(e) { console.warn('[Audit] Write failed:', e.message); }
     }
   } catch(e) { console.warn('[Audit] Flush failed:', e.message); }

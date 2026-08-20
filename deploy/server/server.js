@@ -99,6 +99,11 @@ await app.register(makeEntityRoutes({ table: 'tasks',       entityName: 'tasks',
 await app.register(makeEntityRoutes({ table: 'resources',   entityName: 'resources',   filters: [{ query: 'type', column: 'res_type' }] }), { prefix: '/api/resources' });
 await app.register(makeEntityRoutes({ table: 'procurement', entityName: 'procurement', hasProjectId: true, filters: [{ query: 'status', column: 'po_status' }] }), { prefix: '/api/procurement' });
 await app.register(makeEntityRoutes({ table: 'costs',       entityName: 'costs',       hasProjectId: true, filters: [{ query: 'category', column: 'cost_category' }] }), { prefix: '/api/costs' });
+await app.register(makeEntityRoutes({ table: 'qaqc',        entityName: 'qaqc',        hasProjectId: true }), { prefix: '/api/qaqc' });
+await app.register(makeEntityRoutes({ table: 'risks',       entityName: 'risks',       hasProjectId: true }), { prefix: '/api/risks' });
+await app.register(makeEntityRoutes({ table: 'actions',     entityName: 'actions',     hasProjectId: true }), { prefix: '/api/actions' });
+await app.register(makeEntityRoutes({ table: 'documents',   entityName: 'documents',   hasProjectId: true }), { prefix: '/api/documents' });
+await app.register(makeEntityRoutes({ table: 'stock_transactions', entityName: 'stockTransactions', hasProjectId: true, extraCols: [{ column: 'item_id', dataKey: 'itemId' }], filters: [{ query: 'type', column: 'tx_type' }] }), { prefix: '/api/stock-transactions' });
 
 // ── Start ─────────────────────────────────────────────────
 const port = Number(process.env.PORT || 3000);

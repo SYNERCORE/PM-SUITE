@@ -66,27 +66,30 @@ export function makeEntityRoutes(opts) {
       if (typeof data !== 'object')
         return reply.code(400).send({ error: 'body must be a JSON object' });
 
-      // Some tables carry a project_id FK — populate from data.projectId if present
-      const hasProjectId = opts.hasProjectId === true;
-      const projectId = hasProjectId ? (data.projectId || null) : null;
+      // Optional real columns lifted out of the JSON for joins/indexes.
+      // hasProjectId is shorthand for the common project_id case; extraCols
+      // handles anything else, e.g. [{ column:'item_id', dataKey:'itemId' }].
+      const lifted = [];
+      if (opts.hasProjectId === true) lifted.push({ column: 'project_id', dataKey: 'projectId' });
+      for (const c of (opts.extraCols || [])) lifted.push(c);
 
       // Pass each value exactly once — postgres rejects bind messages whose
       // parameter count exceeds the highest placeholder number.
       const cols = ['id', 'data', 'created_by', 'updated_by'];
       const vals = [id, data, email];
       const placeholders = ['$1', '$2', '$3', '$3'];
-      if (hasProjectId) {
-        cols.push('project_id');
-        vals.push(projectId);
-        placeholders.push('$' + vals.length);
-      }
       const updateSet = [
         'data = EXCLUDED.data',
         'updated_by = EXCLUDED.updated_by',
         'updated_at = NOW()',
         'deleted = FALSE',
       ];
-      if (hasProjectId) updateSet.push('project_id = EXCLUDED.project_id');
+      for (const { column, dataKey } of lifted) {
+        cols.push(column);
+        vals.push(data[dataKey] || null);
+        placeholders.push('$' + vals.length);
+        updateSet.push(`${column} = EXCLUDED.${column}`);
+      }
 
       await pool.query(
         `INSERT INTO ${table} (${cols.join(', ')})

@@ -271,11 +271,11 @@ ${renderSpPanel()}
       </label>
       <div id="apiEntStatus_warehouseItems" style="font-size:11px;color:var(--text-muted);margin-left:26px;min-height:14px"></div>
 
-      ${['projects','tasks','resources','procurement','costs'].map(ent => `
+      ${[['projects','Projects'],['tasks','Tasks'],['resources','Resources'],['procurement','Procurement'],['costs','Costs'],['qaqc','QA/QC'],['risks','Risks'],['actions','Action Items'],['documents','Documents'],['stockTransactions','Stock Transactions']].map(([ent,label]) => `
       <label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 0;border-top:1px dashed var(--border);margin-top:6px">
         <input type="checkbox" id="apiEnt_${ent}" ${((settings.apiEntities||[]).includes(ent))?'checked':''} onchange="_apiToggleEntity('${ent}',this.checked)">
-        <span><strong>${ent.charAt(0).toUpperCase()+ent.slice(1)}</strong> <span style="font-size:10px;color:var(--text-muted)">— reads stay local; writes mirror to server</span></span>
-        <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="_apiMigrateEntity('${ent}')" title="Push every local ${ent} row to the server (safe to re-run)"><i class="fas fa-cloud-upload-alt"></i> Migrate now</button>
+        <span><strong>${label}</strong> <span style="font-size:10px;color:var(--text-muted)">— reads stay local; writes mirror to server</span></span>
+        <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="_apiMigrateEntity('${ent}')" title="Push every local ${label} row to the server (safe to re-run)"><i class="fas fa-cloud-upload-alt"></i> Migrate now</button>
         <button class="btn btn-secondary btn-sm" onclick="_apiHydrateEntity('${ent}')" title="Pull server copy — replaces local data for this entity"><i class="fas fa-cloud-download-alt"></i> Pull</button>
       </label>
       <div id="apiEntStatus_${ent}" style="font-size:11px;color:var(--text-muted);margin-left:26px;min-height:14px"></div>`).join('')}
