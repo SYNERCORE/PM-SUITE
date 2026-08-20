@@ -8,33 +8,27 @@
 --   psql -U postgres -d proc_master -f 003-safe-generated-columns.sql
 -- Idempotent — safe to re-run.
 --
--- Note: Postgres requires generated column expressions to be IMMUTABLE.
---   * text::DATE is STABLE (depends on DateStyle) → rejected
---   * to_date(text, 'YYYY-MM-DD') is IMMUTABLE → OK
---   * text::NUMERIC is IMMUTABLE → OK
+-- Note: Postgres requires generated column expressions to be strictly
+-- IMMUTABLE. text::DATE and to_date(text,'YYYY-MM-DD') are both STABLE
+-- in Postgres 16 (they depend on datestyle/session state). The only
+-- IMMUTABLE date builder is make_date(int,int,int).
+--
+-- Since none of the DATE generated columns are read by any current query
+-- (routes select id/data/updated_at only, no date filters), the pragmatic
+-- fix is to DROP them. When a date filter/index is actually needed, add
+-- it back with make_date(). NUMERIC casts stay because they are immutable
+-- and warehouse relies on qty_on_hand for the reorder index.
 
 BEGIN;
 
--- ── projects: startDate / endDate ──
+-- ── projects: drop date columns (unused) ──
 ALTER TABLE projects DROP COLUMN IF EXISTS start_date;
 ALTER TABLE projects DROP COLUMN IF EXISTS end_date;
-ALTER TABLE projects ADD COLUMN start_date DATE GENERATED ALWAYS AS (
-  CASE WHEN data->>'startDate' ~ '^\d{4}-\d{2}-\d{2}$'
-       THEN to_date(data->>'startDate', 'YYYY-MM-DD') ELSE NULL END
-) STORED;
-ALTER TABLE projects ADD COLUMN end_date DATE GENERATED ALWAYS AS (
-  CASE WHEN data->>'endDate' ~ '^\d{4}-\d{2}-\d{2}$'
-       THEN to_date(data->>'endDate', 'YYYY-MM-DD') ELSE NULL END
-) STORED;
 
--- ── tasks: startDate ──
+-- ── tasks: drop start_date (unused) ──
 ALTER TABLE tasks DROP COLUMN IF EXISTS start_date;
-ALTER TABLE tasks ADD COLUMN start_date DATE GENERATED ALWAYS AS (
-  CASE WHEN data->>'startDate' ~ '^\d{4}-\d{2}-\d{2}$'
-       THEN to_date(data->>'startDate', 'YYYY-MM-DD') ELSE NULL END
-) STORED;
 
--- ── warehouse_items: qtyOnHand / reorderLevel ──
+-- ── warehouse_items: rebuild NUMERIC columns with regex guard ──
 ALTER TABLE warehouse_items DROP COLUMN IF EXISTS qty_on_hand;
 ALTER TABLE warehouse_items DROP COLUMN IF EXISTS reorder_level;
 ALTER TABLE warehouse_items ADD COLUMN qty_on_hand NUMERIC GENERATED ALWAYS AS (
@@ -45,16 +39,11 @@ ALTER TABLE warehouse_items ADD COLUMN reorder_level NUMERIC GENERATED ALWAYS AS
   CASE WHEN data->>'reorderLevel' ~ '^-?[0-9]+(\.[0-9]+)?$'
        THEN (data->>'reorderLevel')::NUMERIC ELSE NULL END
 ) STORED;
--- Re-create the reorder index that referenced the dropped columns
 CREATE INDEX IF NOT EXISTS warehouse_items_reorder_idx ON warehouse_items(qty_on_hand) WHERE qty_on_hand <= reorder_level;
 
--- ── stock_transactions: date + qty ──
+-- ── stock_transactions: drop date (unused), rebuild qty with regex guard ──
 ALTER TABLE stock_transactions DROP COLUMN IF EXISTS tx_date;
 ALTER TABLE stock_transactions DROP COLUMN IF EXISTS qty;
-ALTER TABLE stock_transactions ADD COLUMN tx_date DATE GENERATED ALWAYS AS (
-  CASE WHEN data->>'date' ~ '^\d{4}-\d{2}-\d{2}$'
-       THEN to_date(data->>'date', 'YYYY-MM-DD') ELSE NULL END
-) STORED;
 ALTER TABLE stock_transactions ADD COLUMN qty NUMERIC GENERATED ALWAYS AS (
   CASE WHEN data->>'qty' ~ '^-?[0-9]+(\.[0-9]+)?$'
        THEN (data->>'qty')::NUMERIC ELSE NULL END
