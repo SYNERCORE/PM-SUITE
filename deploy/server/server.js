@@ -105,6 +105,13 @@ await app.register(makeEntityRoutes({ table: 'actions',     entityName: 'actions
 await app.register(makeEntityRoutes({ table: 'documents',   entityName: 'documents',   hasProjectId: true }), { prefix: '/api/documents' });
 await app.register(makeEntityRoutes({ table: 'stock_transactions', entityName: 'stockTransactions', hasProjectId: true, extraCols: [{ column: 'item_id', dataKey: 'itemId' }], filters: [{ query: 'type', column: 'tx_type' }] }), { prefix: '/api/stock-transactions' });
 
+// Batch 4 — the cost chain behind Cost Control's figures
+await app.register(makeEntityRoutes({ table: 'resource_allocations', entityName: 'resourceAllocations', hasProjectId: true, filters: [{ query: 'type', column: 'resource_type' }, { query: 'status', column: 'alloc_status' }] }), { prefix: '/api/resource-allocations' });
+await app.register(makeEntityRoutes({ table: 'resource_usage_logs', entityName: 'resourceUsageLogs', hasProjectId: true, extraCols: [{ column: 'allocation_id', dataKey: 'allocationId' }], filters: [{ query: 'type', column: 'tx_type' }, { query: 'allocationId', column: 'allocation_id' }] }), { prefix: '/api/resource-usage-logs' });
+await app.register(makeEntityRoutes({ table: 'manpower',    entityName: 'manpower',    hasProjectId: true, filters: [{ query: 'trade', column: 'trade' }] }), { prefix: '/api/manpower' });
+await app.register(makeEntityRoutes({ table: 'procurement_logs', entityName: 'procurementLogs', extraCols: [{ column: 'proc_id', dataKey: 'procId' }], filters: [{ query: 'procId', column: 'proc_id' }] }), { prefix: '/api/procurement-logs' });
+await app.register(makeEntityRoutes({ table: 'issuance_requests', entityName: 'issuanceRequests', hasProjectId: true, extraCols: [{ column: 'item_id', dataKey: 'itemId' }], filters: [{ query: 'status', column: 'req_status' }] }), { prefix: '/api/issuance-requests' });
+
 // ── Start ─────────────────────────────────────────────────
 const port = Number(process.env.PORT || 3000);
 try {
