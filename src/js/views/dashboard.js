@@ -1,4 +1,8 @@
-let _dashDateFilter=localStorage.getItem('shic_dash_filter')||'all';
+// Dashboard opens on This Year. The key is versioned because every existing
+// device already has the old 'all' default written to shic_dash_filter — a
+// new default alone would never reach them. Bumping to _v2 applies it once,
+// after which each device keeps whatever the user picks.
+let _dashDateFilter=localStorage.getItem('shic_dash_filter_v2')||'year';
 // Compute the [start, end] window for the currently-selected dashboard tab.
 function _dashRange(){
   const now=new Date();
@@ -11,7 +15,7 @@ function _dashFilterProjects(all){
   const{start,end}=_dashRange();
   return all.filter(p=>_projectOverlapsRange(p,start,end));
 }
-function setDashFilter(val){_dashDateFilter=val;localStorage.setItem('shic_dash_filter',val);renderDashboard();}
+function setDashFilter(val){_dashDateFilter=val;localStorage.setItem('shic_dash_filter_v2',val);renderDashboard();}
 
 function renderDashboard(){
 AppState.ensureData();
