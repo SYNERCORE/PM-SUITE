@@ -165,6 +165,17 @@ ${renderSpPanel()}
         <span style="font-size:10px;color:var(--text-muted)">(once per day — saves a JSON file to your Downloads folder)</span>
       </label>
     </div>
+    <div class="form-group" style="grid-column:1/-1;border-top:1px dashed var(--border);padding-top:12px">
+      <label class="form-label" style="display:flex;align-items:center;gap:10px">
+        <label class="toggle" style="width:38px;height:20px"><input type="checkbox" id="sSharedPC" ${(typeof isSharedComputer==='function'&&isSharedComputer())?'checked':''} onchange="_toggleSharedPC(this.checked)"><span class="toggle-slider"></span></label>
+        Shared computer
+        <span style="font-size:10px;color:var(--text-muted)">— require a password at every sign-in, and fully clear the account on sign-out</span>
+      </label>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:6px;margin-left:48px;line-height:1.6">
+        Turn this on for any machine several people use. This setting stays on <strong>this device only</strong> — it is never synced to SharePoint.
+        With it off, sign-in still always shows the account picker, so the app can never silently sign you in as the previous user.
+      </div>
+    </div>
   </div>
   <div class="card">
     <div style="font-size:14px;font-weight:600;margin-bottom:14px">Notifications &amp; Preferences</div>
@@ -1281,6 +1292,18 @@ function _apiToggleEntity(entity, on) {
   AppState.data.settings.apiEntities = Array.from(list);
   AppState.save();
   showToast(on ? `${entity} writes will mirror to server` : `${entity} routed to SharePoint only`, 'info', 2500);
+}
+
+// Device-local: kept in its own localStorage key, never in AppState.data.settings,
+// so a SharePoint sync can't carry one machine's answer to every other machine.
+function _toggleSharedPC(on) {
+  if (typeof setSharedComputer !== 'function') return;
+  setSharedComputer(on);
+  showToast(
+    on ? 'Shared computer mode ON — a password is required at every sign-in on this device'
+       : 'Shared computer mode OFF — sign-in still shows the account picker',
+    'info', 4000
+  );
 }
 
 function _apiToggleForceSP(on) {

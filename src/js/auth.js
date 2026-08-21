@@ -1,3 +1,17 @@
+// ── Shared-computer mode ─────────────────────────────────────
+// Per-DEVICE, not per-user: it lives in its own localStorage key so a
+// SharePoint sync can never carry one machine's answer to another.
+// ON  → every sign-in requires credentials, and sign-out purges the MSAL
+//       account cache so the next person starts from a clean slate.
+// OFF → sign-in shows the account picker (still never silent).
+function isSharedComputer() {
+  return localStorage.getItem('shic_shared_computer') === '1';
+}
+function setSharedComputer(on) {
+  if (on) localStorage.setItem('shic_shared_computer', '1');
+  else localStorage.removeItem('shic_shared_computer');
+}
+
 async function doM365Login() {
   const clientId = _spClientId || localStorage.getItem('shic_sp_clientid') || '';
   const siteUrl = _spSiteUrl || localStorage.getItem('shic_sp_siteurl') || '';
@@ -13,21 +27,17 @@ async function doM365Login() {
     const msalApp = initM365AuthMsal();
     if (!msalApp) throw new Error('MSAL not initialized — check Client ID');
     if (msalApp.initialize) await msalApp.initialize().catch(()=>{});
-    // Try silent first (returning user)
-    let authResult;
-    const accounts = msalApp.getAllAccounts ? msalApp.getAllAccounts() : [];
-    if (accounts.length > 0) {
-      try {
-        authResult = await msalApp.acquireTokenSilent({ scopes: M365_AUTH_SCOPES, account: accounts[0] });
-        _m365Account = accounts[0];
-      } catch(e) {
-        authResult = await msalApp.loginPopup({ scopes: M365_AUTH_SCOPES, prompt: 'select_account' });
-        _m365Account = authResult.account;
-      }
-    } else {
-      authResult = await msalApp.loginPopup({ scopes: M365_AUTH_SCOPES, prompt: 'select_account' });
-      _m365Account = authResult.account;
-    }
+    // Never sign in silently as whoever used this browser last. On a shared
+    // computer that silently attributed one person's edits to another; the
+    // account picker is the only way the app can know who is actually here.
+    //   shared-computer mode → prompt:'login'  (credentials required every time)
+    //   normal               → prompt:'select_account' (pick from signed-in accounts)
+    const sharedPC = isSharedComputer();
+    const authResult = await msalApp.loginPopup({
+      scopes: M365_AUTH_SCOPES,
+      prompt: sharedPC ? 'login' : 'select_account',
+    });
+    _m365Account = authResult.account;
     const token = authResult.accessToken;
     // ── Resolve SP site ──────────────────────────────────
     // Initialize SP sync MSAL with same credentials
@@ -345,9 +355,36 @@ async function doLogoutAsync(){
   if(typeof _currentUserProfile !== 'undefined') _currentUserProfile = null;
 
   // ── 5. Sign out and show login screen ──────────────────
+  // The popup can be blocked or dismissed, which used to leave the account
+  // in the MSAL cache — the next person on this machine then signed in as
+  // whoever was here before. Always clear the local cache afterwards so a
+  // failed popup can't hand someone else's identity to the next user.
+  const msal = _m365AuthMsal;
+  const acct = _m365Account;
   try{
-    if(_m365AuthMsal && _m365Account){
-      await _m365AuthMsal.logoutPopup({ account: _m365Account }).catch(()=>{});
+    if(msal && acct){
+      await msal.logoutPopup({ account: acct, postLogoutRedirectUri: window.location.href })
+        .catch(e => console.warn('[SHIC] logoutPopup did not complete:', e?.errorCode || e?.message));
+    }
+  }catch(e){}
+  try{
+    if(msal){
+      // Remove every cached account, whichever MSAL version is in play.
+      if(typeof msal.clearCache === 'function') await msal.clearCache().catch(()=>{});
+      const left = msal.getAllAccounts ? msal.getAllAccounts() : [];
+      for(const a of left){
+        if(typeof msal.removeAccount === 'function') await msal.removeAccount(a).catch(()=>{});
+      }
+      if(typeof msal.setActiveAccount === 'function') msal.setActiveAccount(null);
+    }
+  }catch(e){ console.warn('[SHIC] MSAL cache clear failed:', e.message); }
+  // Belt and braces: drop any MSAL keys still sitting in web storage.
+  try{
+    for(const store of [localStorage, sessionStorage]){
+      for(const k of Object.keys(store)){
+        if(/^(msal\.|msal_|server-telemetry-)/i.test(k) || k.indexOf('login.windows.net') >= 0)
+          store.removeItem(k);
+      }
     }
   }catch(e){}
   showAuthOverlay(true);
