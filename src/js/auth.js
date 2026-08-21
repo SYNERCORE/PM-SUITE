@@ -535,8 +535,10 @@ async function suspendUser(uid,name){
 }
 
 async function toggleAdmin(uid,isAdmin){
-  await m365SetUserAdmin(uid,isAdmin);
+  const ok=await m365SetAdmin(uid,isAdmin);
+  if(!ok){renderUserManagement();return;} // m365SetAdmin already toasted why
   showToast('Admin status updated','success');
+  _userMgmtCache=null;_userMgmtHash='';
   renderUserManagement();
 }
 

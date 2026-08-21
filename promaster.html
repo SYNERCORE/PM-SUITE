@@ -4240,8 +4240,10 @@ async function suspendUser(uid,name){
 }
 
 async function toggleAdmin(uid,isAdmin){
-  await m365SetUserAdmin(uid,isAdmin);
+  const ok=await m365SetAdmin(uid,isAdmin);
+  if(!ok){renderUserManagement();return;} // m365SetAdmin already toasted why
   showToast('Admin status updated','success');
+  _userMgmtCache=null;_userMgmtHash='';
   renderUserManagement();
 }
 
@@ -9094,10 +9096,12 @@ async function m365ApproveUser(uid, approve) {
 }
 
 // ── Set admin status ────────────────────────────────────────
+// Returns true when the change was written. Callers own the toast and
+// re-render so this works from both Settings and User Management.
 async function m365SetAdmin(uid, isAdmin) {
   try {
     const token = await getM365AuthToken();
-    if (!token) return;
+    if (!token) { showToast('Not signed in to Microsoft 365', 'error'); return false; }
     const { siteId } = await spResolveSiteAndList(token);
     const { listId } = await _getOrCreateUsersListId(token, siteId);
     const res = await fetch(
@@ -9106,16 +9110,23 @@ async function m365SetAdmin(uid, isAdmin) {
     );
     const data = await res.json();
     const item = (data.value||[]).find(i => i.fields?.UserUID === uid);
-    if (!item) return;
-    await fetch(
+    if (!item) { showToast('User not found in the SharePoint users list', 'error'); return false; }
+    const upd = await fetch(
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${item.id}`,
       { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: { IsAdmin: String(isAdmin) }}) }
     );
-    showToast('Admin status updated', 'success');
-    renderSettings();
-  } catch(e) { showToast('Failed: ' + e.message, 'error'); }
+    if (!upd.ok) {
+      const body = await upd.text().catch(() => '');
+      showToast('Failed to update admin status (' + upd.status + ')', 'error');
+      console.warn('[Users] IsAdmin PATCH rejected:', body.slice(0, 200));
+      return false;
+    }
+    return true;
+  } catch(e) { showToast('Failed: ' + e.message, 'error'); return false; }
 }
+// Legacy alias — older call sites use this name.
+const m365SetUserAdmin = m365SetAdmin;
 
 // ── Audit Log SP CRUD ────────────────────────────────────────
 const SHIC_AUDIT_LIST = 'SHIC_AuditLog';
@@ -9246,9 +9257,12 @@ async function showAuditLog() {
     const { siteId } = await spResolveSiteAndList(token);
     const listId = await _getOrCreateAuditListId(token, siteId);
     if (!listId) { $('#genericModalBody').innerHTML = `<div class="empty-state">Audit log list not available</div>`; return; }
-    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$orderby=fields/Title desc&$top=100`, { headers: { Authorization: 'Bearer ' + token } });
+    // No $orderby — SharePoint rejects sorting on a non-indexed field with a
+    // 400. Pull newest-first by the built-in created date and sort locally.
+    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$orderby=createdDateTime desc&$top=100`, { headers: { Authorization: 'Bearer ' + token } });
     const data = await res.json();
-    const items = data.value||[];
+    const items = (data.value||[]).slice().sort((a,b) =>
+      String(b.fields?.Title||'').localeCompare(String(a.fields?.Title||'')));
     if (!items.length) { $('#genericModalBody').innerHTML = `<div class="empty-state"><i class="fas fa-clipboard-list"></i><p>No audit records yet</p></div>`; return; }
     const rows = items.map(i => {
       const f = i.fields||{};
