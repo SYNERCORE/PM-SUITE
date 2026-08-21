@@ -2411,6 +2411,7 @@ function renderDetailAllocation(){
       <div style="display:flex;gap:5px;flex-wrap:wrap">
         <button class="btn btn-secondary btn-sm" onclick="importUsageLogExcel('${pid}')"><i class="fas fa-file-excel" style="color:#217346"></i> Import</button>
         <button class="btn btn-secondary btn-sm" onclick="exportUsageLogExcel('${pid}')"><i class="fas fa-download"></i> Export</button>
+        <button class="btn btn-secondary btn-sm" onclick="backfillUsageCosts('${pid}')" title="Estimate costs for older log entries that have none, using each allocation's planned rate"><i class="fas fa-calculator"></i> Backfill Costs</button>
         <button class="btn btn-success btn-sm" onclick="showLogUsage('${pid}','Issue')"><i class="fas fa-sign-out-alt"></i> Issue</button>
         <button class="btn btn-warning btn-sm" onclick="showLogUsage('${pid}','Return')"><i class="fas fa-undo"></i> Return</button>
       </div>
@@ -2424,10 +2425,11 @@ function renderDetailAllocation(){
       <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:800px">
         <thead style="position:sticky;top:0;z-index:3;background:var(--bg-hover)">
           <tr style="border-bottom:2px solid var(--border)">
-            <th style="padding:6px 8px">Log ID</th><th style="padding:6px 8px">Date</th><th style="padding:6px 8px">Category</th>
-            <th style="padding:6px 8px">Type</th><th style="padding:6px 8px;min-width:120px">Resource</th>
-            <th style="padding:6px 8px">Category</th>
+            <th style="padding:6px 8px">Log ID</th><th style="padding:6px 8px">Date</th><th style="padding:6px 8px">Type</th>
+            <th style="padding:6px 8px">Category</th><th style="padding:6px 8px;min-width:120px">Resource</th>
+            <th style="padding:6px 8px">Res. Type</th>
             <th style="padding:6px 8px;text-align:center">Qty</th><th style="padding:6px 8px">Unit</th>
+            <th style="padding:6px 8px;text-align:right">Unit Cost</th><th style="padding:6px 8px;text-align:right">Total</th>
             <th style="padding:6px 8px">Issued/Ret.To</th><th style="padding:6px 8px">Approved</th>
             <th style="padding:6px 8px">Ref.</th><th style="padding:6px 8px">Notes</th>
             <th style="padding:6px 8px"></th>
@@ -2501,13 +2503,28 @@ function renderAllocBody(pid){
   const fc=document.getElementById('allocFootCount');if(fc)fc.textContent=`SHOWING ${filtered.length} of ${allocs.length}`;
 }
 
+// Value of one usage log. Logs written before unit costs existed carry no
+// cost, so they fall back to the linked allocation's planned rate rather
+// than reading as zero.
+function _logLineCost(l){
+  if(!l)return 0;
+  const t=parseFloat(l.totalCost);
+  if(t>0)return t;
+  const qty=parseFloat(l.quantity)||0;
+  const uc=parseFloat(l.unitCost)||0;
+  if(uc>0)return qty*uc;
+  const a=l.allocationId?(AppState.data.resourceAllocations||[]).find(x=>x.id===l.allocationId):null;
+  if(a&&a.plannedCost>0&&a.allocatedQty>0)return qty*(a.plannedCost/a.allocatedQty);
+  return 0;
+}
+
 function renderLogBody(){
   const logs=window._adLogs||[];
   const srch=(_aLogSearch||'').toLowerCase();
   const filtered=srch?logs.filter(l=>(l.id+' '+l.resourceName+' '+l.resourceType+' '+(l.issuedTo||'')+' '+(l.reference||'')).toLowerCase().includes(srch)):logs;
   let html='';
   if(!filtered.length){
-    html=`<tr><td colspan="12" style="padding:20px;text-align:center;color:var(--text-muted)">${srch?'No results':'No transactions yet. Use Issue / Return buttons.'}</td></tr>`;
+    html=`<tr><td colspan="15" style="padding:20px;text-align:center;color:var(--text-muted)">${srch?'No results':'No transactions yet. Use Issue / Return buttons.'}</td></tr>`;
   }else{
     filtered.forEach((l,i)=>{
       const c=getAllocCat({resourceName:l.resourceName,resourceType:l.resourceType,role:''});
@@ -2521,6 +2538,8 @@ function renderLogBody(){
 <td style="padding:4px 8px;text-align:center;font-family:var(--font-mono);font-weight:700;font-size:12px;color:${l.transactionType==='Return'?'var(--accent-amber)':'var(--accent-green)'}">
 ${l.transactionType==='Return'?'-':'+'}${l.quantity}</td>
 <td style="padding:4px 8px"><span class="badge badge-blue" style="font-size:9px">${l.unit||'unit'}</span></td>
+<td style="padding:4px 8px;text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);white-space:nowrap">${parseFloat(l.unitCost)>0?fmtCur(l.unitCost)+(l.costEstimated?'<span title="Estimated from the planned rate, not an actual price" style="color:var(--accent-amber);margin-left:3px;font-size:9px">est</span>':''):'—'}</td>
+<td style="padding:4px 8px;text-align:right;font-family:var(--font-mono);font-size:11px;font-weight:700;white-space:nowrap;color:${l.transactionType==='Return'?'var(--accent-amber)':'var(--text-primary)'}">${_logLineCost(l)>0?(l.transactionType==='Return'?'-':'')+fmtCur(_logLineCost(l)):'—'}</td>
 <td style="padding:4px 8px;font-size:11px">${l.issuedTo||'—'}</td>
 <td style="padding:4px 8px;font-size:11px;color:var(--text-secondary)">${l.approvedBy||'—'}</td>
 <td style="padding:4px 8px;font-size:10px;font-family:var(--font-mono);color:var(--text-secondary)">${l.reference||'—'}</td>
@@ -2528,6 +2547,14 @@ ${l.transactionType==='Return'?'-':'+'}${l.quantity}</td>
 <td style="padding:4px 6px;white-space:nowrap"><button class="btn btn-secondary btn-sm btn-icon" onclick="editUsageLog('${l.id}')" title="Edit"><i class="fas fa-pen"></i></button> <button class="btn btn-danger btn-sm btn-icon" onclick="deleteUsageLog('${l.id}')"><i class="fas fa-trash"></i></button></td>
 </tr>`;
     });
+    // Net value of what's on screen: issues out, returns back in
+    const net=filtered.reduce((s,l)=>s+(l.transactionType==='Return'?-_logLineCost(l):_logLineCost(l)),0);
+    if(net!==0){
+      html+=`<tr style="border-top:2px solid var(--border);background:var(--bg-hover)">
+<td colspan="9" style="padding:7px 8px;text-align:right;font-weight:700;font-size:11px">Net issued value${srch?' (filtered)':''}</td>
+<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;font-size:12px;color:var(--accent-green)">${fmtCur(net)}</td>
+<td colspan="5"></td></tr>`;
+    }
   }
   const tb=document.getElementById('logBodyRows');if(tb)tb.innerHTML=html;
 }
@@ -2734,6 +2761,39 @@ function _ulBuildResources(pid){
   return allResources;
 }
 
+// Best available unit cost for a resource, in order of how close it is to
+// what was actually paid: the warehouse item's cost, then the allocation's
+// planned rate, then the resource master. Always a starting point — the
+// field stays editable so site staff can enter the real figure.
+function _ulResolveUnitCost(resource,allocId){
+  if(!resource)return 0;
+  try{
+    if(typeof _whItems==='function'){
+      const w=_whItems().find(x=>x.id===resource.id||(x.itemMasterId&&x.itemMasterId===resource.id));
+      const c=parseFloat(w?.unitCost)||0;
+      if(c>0)return c;
+    }
+  }catch(e){}
+  if(allocId){
+    const a=(AppState.data.resourceAllocations||[]).find(x=>x.id===allocId);
+    if(a&&a.plannedCost>0&&a.allocatedQty>0)return a.plannedCost/a.allocatedQty;
+  }
+  if(resource.source&&Array.isArray(AppState.data[resource.source])){
+    const m=AppState.data[resource.source].find(r=>r.id===resource.id);
+    const c=parseFloat(m?.unitCost??m?.rate??m?.cost)||0;
+    if(c>0)return c;
+  }
+  return 0;
+}
+
+// Live "qty x unit cost" readout under the line's cost fields.
+function _ulUpdateTotal(i){
+  const line=window._ulLines?.[i];if(!line)return;
+  const el=$(`#ulTOT_${i}`);if(!el)return;
+  const t=(parseFloat(line.qty)||0)*(parseFloat(line.unitCost)||0);
+  el.textContent=t>0?fmtCur(t):'—';
+}
+
 function _ulLineHtml(line,i){
   const isVar=line.category!=='Budgeted';
   const allocs=(AppState.data.resourceAllocations||[]).filter(a=>a.projectId===window._ulPid);
@@ -2780,11 +2840,20 @@ function _ulLineHtml(line,i){
     <div class="form-group">
       <label class="form-label">Quantity *</label>
       <input class="form-input" type="number" id="ulQT_${i}" value="${line.qty||''}" min="0.01" step="any" placeholder="0"
-        oninput="_ulLV(${i},'qty',this.value)">
+        oninput="_ulLV(${i},'qty',this.value);_ulUpdateTotal(${i})">
     </div>
     <div class="form-group">
       <label class="form-label">Unit</label>
       <input class="form-input" id="ulUN_${i}" value="${line.unit||'unit'}" oninput="_ulLV(${i},'unit',this.value)">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Unit Cost <span style="font-size:9px;color:var(--text-muted);font-weight:400">— edit if the actual price differs</span></label>
+      <input class="form-input" type="number" id="ulUC_${i}" value="${line.unitCost||''}" min="0" step="any" placeholder="0.00"
+        oninput="_ulLV(${i},'unitCost',this.value);_ulUpdateTotal(${i})">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Line Total</label>
+      <div id="ulTOT_${i}" style="padding:8px 12px;background:var(--bg-hover);border:1px solid var(--border);border-radius:7px;font-family:var(--font-mono);font-weight:700;font-size:13px">—</div>
     </div>
   </div>
   ${isVar?`
@@ -2817,8 +2886,8 @@ function _ulLineHtml(line,i){
 function _ulRenderLines(){
   const c=$('#ulLinesContainer');if(!c)return;
   c.innerHTML=window._ulLines.map((l,i)=>_ulLineHtml(l,i)).join('');
-  // Restore balance for lines that have allocations
-  window._ulLines.forEach((l,i)=>{if(l.allocId)_ulShowBal(i,l.allocId);});
+  // Restore balance for lines that have allocations, and repaint line totals
+  window._ulLines.forEach((l,i)=>{if(l.allocId)_ulShowBal(i,l.allocId);_ulUpdateTotal(i);});
 }
 
 function _ulFilterRes(i,query){
@@ -2848,6 +2917,12 @@ function _ulSelectRes(i,r){
   const pid=window._ulPid;
   const matchAlloc=(AppState.data.resourceAllocations||[]).find(a=>a.projectId===pid&&(a.resourceId===r.id||a.resourceName===r.name));
   if(matchAlloc)window._ulLines[i].allocId=matchAlloc.id;
+  // Seed the cost now that we know the resource — only when the user hasn't
+  // already typed one, so a manual figure is never silently replaced.
+  if(!(parseFloat(window._ulLines[i].unitCost)>0)){
+    const c=_ulResolveUnitCost(r,window._ulLines[i].allocId);
+    if(c>0)window._ulLines[i].unitCost=Math.round(c*100)/100;
+  }
   _ulRenderLines();
   if(matchAlloc)_ulShowBal(i,matchAlloc.id);
 }
@@ -2873,10 +2948,22 @@ function _ulPrefill(i,allocId){
   if(!window._ulLines[i].resource){
     window._ulLines[i].resource={id:a.resourceId,name:a.resourceName,type:a.resourceType,unit:a.unit};
     window._ulLines[i].unit=a.unit||'unit';
+    if(!(parseFloat(window._ulLines[i].unitCost)>0)){
+      const c=_ulResolveUnitCost(window._ulLines[i].resource,allocId);
+      if(c>0)window._ulLines[i].unitCost=Math.round(c*100)/100;
+    }
     _ulRenderLines();
   } else {
     const uEl=$(`#ulUN_${i}`);if(uEl)uEl.value=a.unit||'unit';
     window._ulLines[i].unit=a.unit||'unit';
+    if(!(parseFloat(window._ulLines[i].unitCost)>0)){
+      const c=_ulResolveUnitCost(window._ulLines[i].resource,allocId);
+      if(c>0){
+        window._ulLines[i].unitCost=Math.round(c*100)/100;
+        const cEl=$(`#ulUC_${i}`);if(cEl)cEl.value=window._ulLines[i].unitCost;
+        _ulUpdateTotal(i);
+      }
+    }
   }
   _ulShowBal(i,allocId);
 }
@@ -2897,7 +2984,7 @@ function _ulShowBal(i,allocId){
 }
 
 function _ulAddLine(){
-  window._ulLines.push({resource:null,allocId:'',category:'Budgeted',qty:'',unit:'unit',varCode:'',varAuth:'',varReason:''});
+  window._ulLines.push({resource:null,allocId:'',category:'Budgeted',qty:'',unit:'unit',unitCost:'',varCode:'',varAuth:'',varReason:''});
   _ulRenderLines();
   // Scroll to new line
   const c=$('#ulLinesContainer');if(c)c.lastElementChild?.scrollIntoView({behavior:'smooth',block:'nearest'});
@@ -2915,7 +3002,7 @@ function showLogUsage(pid,txType='Issue',preselectedAllocId=''){
   window._ulPid=pid;
   window._ulTxType=txType;
   window._ulAllResources=_ulBuildResources(pid);
-  window._ulLines=[{resource:null,allocId:preselectedAllocId||'',category:'Budgeted',qty:'',unit:'unit',varCode:'',varAuth:'',varReason:''}];
+  window._ulLines=[{resource:null,allocId:preselectedAllocId||'',category:'Budgeted',qty:'',unit:'unit',unitCost:'',varCode:'',varAuth:'',varReason:''}];
 
   $('#genericModalTitle').textContent=(isReturn?'Log Return (Excess)':'Log Issue / Usage')+' — '+pid;
   $('#genericModalBody').innerHTML=`
@@ -2953,6 +3040,89 @@ function showLogUsage(pid,txType='Issue',preselectedAllocId=''){
   }
 }
 
+// ── Issuance → cost roll-up ──────────────────────────────────
+// One allocation's actual cost = what was issued minus what came back.
+// Logs recorded before unit costs existed have no totalCost, so those fall
+// back to the allocation's planned rate — otherwise old history would
+// silently read as zero.
+function _recalcAllocationActual(allocId){
+  if(!allocId)return;
+  const a=(AppState.data.resourceAllocations||[]).find(x=>x.id===allocId);
+  if(!a)return;
+  const logs=(AppState.data.resourceUsageLogs||[]).filter(l=>l&&!l._deleted&&l.allocationId===allocId);
+  const cpu=(a.plannedCost>0&&a.allocatedQty>0)?(a.plannedCost/a.allocatedQty):0;
+  const lineCost=l=>{
+    const t=parseFloat(l.totalCost);
+    if(t>0)return t;
+    const uc=parseFloat(l.unitCost)||0;
+    if(uc>0)return (parseFloat(l.quantity)||0)*uc;
+    return (parseFloat(l.quantity)||0)*cpu; // legacy log — value at planned rate
+  };
+  const net=logs.filter(l=>l.transactionType==='Issue').reduce((s,l)=>s+lineCost(l),0)
+           -logs.filter(l=>l.transactionType==='Return').reduce((s,l)=>s+lineCost(l),0);
+  a.actualCost=Math.round(net);
+}
+
+// Cost Control rows generated from issuance activity, one per project +
+// resource type. Tagged autoSource so the rows people typed by hand are
+// never read, written, or overwritten here.
+const _ISSUANCE_COST_TAG='issuance';
+function _syncIssuanceCosts(pid){
+  if(!pid)return;
+  if(!AppState.data.costs)AppState.data.costs=[];
+  const logs=(AppState.data.resourceUsageLogs||[]).filter(l=>l&&!l._deleted&&l.projectId===pid);
+  const allocs=(AppState.data.resourceAllocations||[]).filter(a=>a&&!a._deleted&&a.projectId===pid);
+
+  const cpuFor=allocId=>{
+    const a=allocs.find(x=>x.id===allocId);
+    return (a&&a.plannedCost>0&&a.allocatedQty>0)?(a.plannedCost/a.allocatedQty):0;
+  };
+  const lineCost=l=>{
+    const t=parseFloat(l.totalCost);
+    if(t>0)return t;
+    const uc=parseFloat(l.unitCost)||0;
+    if(uc>0)return (parseFloat(l.quantity)||0)*uc;
+    return (parseFloat(l.quantity)||0)*cpuFor(l.allocationId);
+  };
+
+  // Net actual and planned, grouped by resource type
+  const actualByType={},plannedByType={};
+  logs.forEach(l=>{
+    const t=l.resourceType||'Other';
+    const v=lineCost(l);
+    actualByType[t]=(actualByType[t]||0)+(l.transactionType==='Return'?-v:v);
+  });
+  allocs.forEach(a=>{
+    const t=a.resourceType||'Other';
+    plannedByType[t]=(plannedByType[t]||0)+(parseFloat(a.plannedCost)||0);
+  });
+
+  const types=new Set([...Object.keys(actualByType),...Object.keys(plannedByType)]);
+  types.forEach(type=>{
+    const actual=Math.round(actualByType[type]||0);
+    const planned=Math.round(plannedByType[type]||0);
+    const id='CST-AUTO-'+pid+'-'+type.toUpperCase().replace(/[^A-Z0-9]/g,'');
+    const existing=AppState.data.costs.find(c=>c&&c.id===id);
+    if(!actual&&!planned){
+      // Nothing left to report — drop the auto row rather than leave a zero
+      if(existing)AppState.data.costs=AppState.data.costs.filter(c=>c!==existing);
+      return;
+    }
+    if(existing){
+      existing.planned=planned;existing.actual=actual;
+      existing.autoSource=_ISSUANCE_COST_TAG;
+    }else{
+      AppState.data.costs.push({
+        id,projectId:pid,category:type,
+        description:type+' — issued to site',
+        planned,actual,
+        date:new Date().toISOString().split('T')[0],
+        autoSource:_ISSUANCE_COST_TAG,
+      });
+    }
+  });
+}
+
 function saveUsageLog(){
   const date=$('#ulDate')?.value||new Date().toISOString().split('T')[0];
   const issuedTo=$('#ulIssuedTo')?.value||'';
@@ -2968,6 +3138,7 @@ function saveUsageLog(){
   lines.forEach((line,i)=>{
     const qt=$(`#ulQT_${i}`);if(qt)line.qty=qt.value;
     const un=$(`#ulUN_${i}`);if(un)line.unit=un.value;
+    const uc=$(`#ulUC_${i}`);if(uc)line.unitCost=uc.value;
     const vc=$(`#ulVC_${i}`);if(vc)line.varCode=vc.value;
     const va=$(`#ulVA_${i}`);if(va)line.varAuth=va.value;
     const vr=$(`#ulVR_${i}`);if(vr)line.varReason=vr.value;
@@ -3006,16 +3177,12 @@ function saveUsageLog(){
       transactionType:txType,
       date,quantity:qty,
       unit:line.unit||a?.unit||line.resource.unit||'unit',
+      unitCost:parseFloat(line.unitCost)||0,
+      totalCost:Math.round(qty*(parseFloat(line.unitCost)||0)*100)/100,
       issuedTo,approvedBy,reference,notes
     };
     AppState.data.resourceUsageLogs.push(log);
-    if(a&&a.plannedCost>0&&a.allocatedQty>0){
-      const cpu=a.plannedCost/a.allocatedQty;
-      const allLogs=(AppState.data.resourceUsageLogs||[]).filter(l=>l.allocationId===allocId);
-      const net=allLogs.filter(l=>l.transactionType==='Issue').reduce((s,l)=>s+l.quantity,0)
-               -allLogs.filter(l=>l.transactionType==='Return').reduce((s,l)=>s+l.quantity,0);
-      a.actualCost=Math.round(net*cpu);
-    }
+    if(a)_recalcAllocationActual(allocId);
     // Push issuance request to warehouse for every Issue line
     if(txType==='Issue'){
       const resourceId=line.resource.id||'';
@@ -3041,14 +3208,54 @@ function saveUsageLog(){
     }
   });
 
+  _syncIssuanceCosts(pid);
   AppState.save();closeModal('genericModal');renderDetailAllocation();
+  const totalValue=lines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.unitCost)||0),0);
   const varCount=lines.filter(l=>l.category!=='Budgeted').length;
   const reqMsg=txType==='Issue'?` · ${lines.length} WH request${lines.length!==1?'s':''} submitted`:'';
+  if(totalValue>0)showToast(`${txType} value ${fmtCur(totalValue)} posted to Cost Control`,'info',3000);
   showToast(`${lines.length} ${txType} line${lines.length!==1?'s':''} saved`+(varCount?` · ${varCount} variation${varCount!==1?'s':''}`:``)+reqMsg,txType==='Return'?'warning':'success');
 }
 
+// One-time helper for logs recorded before unit costs existed. Values them
+// at the linked allocation's planned rate — an ESTIMATE, not what was paid.
+// Only touches entries that have no cost, so real figures are never replaced.
+function backfillUsageCosts(pid){
+  const logs=(AppState.data.resourceUsageLogs||[]).filter(l=>l&&!l._deleted&&l.projectId===pid);
+  const targets=logs.filter(l=>!(parseFloat(l.totalCost)>0)&&!(parseFloat(l.unitCost)>0));
+  if(!targets.length){showToast('Every transaction already has a cost','info');return;}
+  const priceable=targets.filter(l=>{
+    const a=l.allocationId?(AppState.data.resourceAllocations||[]).find(x=>x.id===l.allocationId):null;
+    return a&&a.plannedCost>0&&a.allocatedQty>0;
+  });
+  if(!priceable.length){
+    showToast(`${targets.length} entries have no cost, but none link to an allocation with a planned rate — enter costs manually`,'warning',6000);
+    return;
+  }
+  if(!confirm(`Estimate costs for ${priceable.length} of ${targets.length} uncosted transaction${targets.length!==1?'s':''}?\n\nThese use each allocation's PLANNED rate, so they are estimates rather than what was actually paid. Entries that already have a cost are left alone.${targets.length>priceable.length?`\n\n${targets.length-priceable.length} entr${targets.length-priceable.length!==1?'ies':'y'} cannot be priced and will stay blank.`:''}`))return;
+  priceable.forEach(l=>{
+    const a=(AppState.data.resourceAllocations||[]).find(x=>x.id===l.allocationId);
+    const cpu=a.plannedCost/a.allocatedQty;
+    l.unitCost=Math.round(cpu*100)/100;
+    l.totalCost=Math.round((parseFloat(l.quantity)||0)*l.unitCost*100)/100;
+    l.costEstimated=true; // flag so these are distinguishable from real figures
+  });
+  [...new Set(priceable.map(l=>l.allocationId))].forEach(aid=>_recalcAllocationActual(aid));
+  _syncIssuanceCosts(pid);
+  AppState.save();
+  renderDetailAllocation();
+  showToast(`Estimated costs for ${priceable.length} transaction${priceable.length!==1?'s':''}`,'success',4000);
+}
+
 function deleteUsageLog(id){
-  if(requestOrDelete('resourceUsageLogs',id)){renderDetailAllocation();}
+  const l=(AppState.data.resourceUsageLogs||[]).find(x=>x.id===id);
+  const pid=l?.projectId,allocId=l?.allocationId;
+  if(requestOrDelete('resourceUsageLogs',id)){
+    // Removing an issuance has to walk the cost back out again
+    if(allocId)_recalcAllocationActual(allocId);
+    if(pid){_syncIssuanceCosts(pid);AppState.save();}
+    renderDetailAllocation();
+  }
 }
 
 function editUsageLog(id){
@@ -3064,6 +3271,7 @@ function editUsageLog(id){
     <div class="form-group"><label class="form-label">Date</label><input class="form-input" type="date" id="elDate" value="${l.date||''}"></div>
     <div class="form-group"><label class="form-label">Quantity</label><input class="form-input" type="number" id="elQty" value="${l.quantity||0}" min="0.01" step="any"></div>
     <div class="form-group"><label class="form-label">Unit</label><input class="form-input" id="elUnit" value="${l.unit||'unit'}"></div>
+    <div class="form-group"><label class="form-label">Unit Cost</label><input class="form-input" type="number" id="elUnitCost" value="${l.unitCost||0}" min="0" step="any"></div>
     <div class="form-group"><label class="form-label">${l.transactionType==='Return'?'Returned By':'Issued To'}</label><input class="form-input" id="elIssuedTo" value="${l.issuedTo||''}"></div>
     <div class="form-group"><label class="form-label">Approved By</label><input class="form-input" id="elApproved" value="${l.approvedBy||''}"></div>
     <div class="form-group"><label class="form-label">Reference / DR No.</label><input class="form-input" id="elRef" value="${l.reference||''}"></div>
@@ -3116,19 +3324,13 @@ function _saveEditUsageLog(id){
     l.variationAuthorizedBy=$('#elVarAuth')?.value?.trim()||'';
     l.variationReason=$('#elVarReason')?.value?.trim()||'';
   }
+  const uc=parseFloat($('#elUnitCost')?.value);
+  if(!isNaN(uc)&&uc>=0)l.unitCost=uc;
+  l.totalCost=Math.round(qty*(parseFloat(l.unitCost)||0)*100)/100;
   l._updatedAt=new Date().toISOString();
   l._updatedBy=_currentUserProfile?.name||_currentUserProfile?.email||'unknown';
-  // Recalculate actual cost on linked allocation
-  if(l.allocationId){
-    const a=(AppState.data.resourceAllocations||[]).find(x=>x.id===l.allocationId);
-    if(a&&a.plannedCost>0&&a.allocatedQty>0){
-      const cpu=a.plannedCost/a.allocatedQty;
-      const allLogs=(AppState.data.resourceUsageLogs||[]).filter(x=>x.allocationId===l.allocationId);
-      const net=allLogs.filter(x=>x.transactionType==='Issue').reduce((s,x)=>s+x.quantity,0)
-               -allLogs.filter(x=>x.transactionType==='Return').reduce((s,x)=>s+x.quantity,0);
-      a.actualCost=Math.round(net*cpu);
-    }
-  }
+  if(l.allocationId)_recalcAllocationActual(l.allocationId);
+  _syncIssuanceCosts(l.projectId);
   AppState.save();closeModal('genericModal');renderDetailAllocation();
   showToast('Log entry updated','success');
 }
@@ -3157,8 +3359,10 @@ function exportAllocCSV(pid){exportAllocExcel(pid);}
 // ── USAGE LOG EXCEL EXPORT ────────────────────────────────
 function exportUsageLogExcel(pid){
   const logs=(AppState.data.resourceUsageLogs||[]).filter(l=>l.projectId===pid);
-  const headers=['LogID','ProjectID','AllocationID','ResourceID','ResourceName','ResourceType','Category','TransactionType','Date','Quantity','Unit','IssuedTo','ApprovedBy','Reference','Notes'];
-  const rows=logs.map(l=>[l.id,l.projectId,l.allocationId,l.resourceId||'',l.resourceName,l.resourceType,l.transactionType,l.date,l.quantity,l.unit||'',l.issuedTo||'',l.approvedBy||'',l.reference||'',l.notes||'']);
+  // Category was in the header list but never in the row data, which shifted
+  // every column after ResourceType by one. Emit it, and carry the costs.
+  const headers=['LogID','ProjectID','AllocationID','ResourceID','ResourceName','ResourceType','Category','TransactionType','Date','Quantity','Unit','UnitCost','TotalCost','IssuedTo','ApprovedBy','Reference','Notes'];
+  const rows=logs.map(l=>[l.id,l.projectId,l.allocationId,l.resourceId||'',l.resourceName,l.resourceType,l.category||'Budgeted',l.transactionType,l.date,l.quantity,l.unit||'',l.unitCost||0,_logLineCost(l),l.issuedTo||'',l.approvedBy||'',l.reference||'',l.notes||'']);
   exportCSV(rows,headers,'usage_log_'+pid+'.csv');
   showToast('Usage log exported as CSV (open in Excel)','success');
 }
@@ -3166,7 +3370,7 @@ function exportUsageLogCSV(pid){exportUsageLogExcel(pid);}
 
 // ── RESOURCE ALLOCATION IMPORT ────────────────────────────
 function importAllocExcel(pid){
-  const template='LogID,ProjectID,AllocationID,ResourceID,ResourceName,ResourceType,TransactionType,Date,Quantity,Unit,IssuedTo,ApprovedBy,Reference,Notes';
+  const template='LogID,ProjectID,AllocationID,ResourceID,ResourceName,ResourceType,Category,TransactionType,Date,Quantity,Unit,UnitCost,IssuedTo,ApprovedBy,Reference,Notes';
   $('#genericModalTitle').textContent='Import Resource Allocations — '+pid;
   $('#genericModalBody').innerHTML=`
   <div style="padding:12px;background:rgba(56,139,253,.08);border-radius:8px;margin-bottom:14px;border-left:3px solid var(--accent-blue)">
@@ -3394,7 +3598,7 @@ function executeAllocImport(){
 
 // ── USAGE LOG IMPORT ──────────────────────────────────────
 function importUsageLogExcel(pid){
-  const template='LogID,ProjectID,AllocationID,ResourceID,ResourceName,ResourceType,TransactionType,Date,Quantity,Unit,IssuedTo,ApprovedBy,Reference,Notes';
+  const template='LogID,ProjectID,AllocationID,ResourceID,ResourceName,ResourceType,Category,TransactionType,Date,Quantity,Unit,UnitCost,IssuedTo,ApprovedBy,Reference,Notes';
   const allocs=(AppState.data.resourceAllocations||[]).filter(a=>a.projectId===pid);
   $('#genericModalTitle').textContent='Import Usage Log — '+pid;
   $('#genericModalBody').innerHTML=`
@@ -3501,15 +3705,26 @@ function executeLogImport(){
       date:String(row.Date||row.date||new Date().toISOString().split('T')[0]).trim(),
       quantity:qty,
       unit:String(row.Unit||row.unit||alloc?.unit||'unit').trim(),
+      category:String(row.Category||row.category||'Budgeted').trim()||'Budgeted',
       issuedTo:String(row.IssuedTo||row.issuedTo||'').trim(),
       approvedBy:String(row.ApprovedBy||row.approvedBy||'').trim(),
       reference:String(row.Reference||row.reference||'').trim(),
       notes:String(row.Notes||row.notes||'').trim(),
     };
+    // Unit cost: take the column if supplied, else fall back to the
+    // allocation's planned rate so imported rows still carry a value.
+    let ucImp=parseFloat(row.UnitCost||row.unitCost||row['Unit Cost']||0)||0;
+    if(!ucImp&&alloc&&alloc.plannedCost>0&&alloc.allocatedQty>0)ucImp=alloc.plannedCost/alloc.allocatedQty;
+    rec.unitCost=Math.round(ucImp*100)/100;
+    rec.totalCost=Math.round(qty*rec.unitCost*100)/100;
     // Skip exact duplicate log IDs
     if(logId&&list.find(l=>l.id===logId)){ skipReasons.push(`Row ${rowIdx+2} (${rName}): LogID "${logId}" already exists`); skipped++; return; }
     list.push(rec);added++;
   });
+  // Roll imported activity into allocation actuals and Cost Control
+  [...new Set(list.filter(l=>l.projectId===pid&&l.allocationId).map(l=>l.allocationId))]
+    .forEach(aid=>_recalcAllocationActual(aid));
+  _syncIssuanceCosts(pid);
   AppState.save();
   closeModal('genericModal');
   window._logImportRows=null;
@@ -3525,8 +3740,8 @@ function downloadTemplate(headers,filename){
     'ID,ProjectID,ResourceID,ResourceName,ResourceType,Unit,Role,AllocatedQty,PlannedCost,ActualCost,Status,StartDate,EndDate,Notes':
       ',PRJ-001,TRADE-PIPE-WELDER,Pipe Welder,Manpower,pax,Pipe Welder,10,185000,0,active,2025-01-01,2025-12-31,',
     // Usage log template
-    'LogID,ProjectID,AllocationID,ResourceID,ResourceName,ResourceType,TransactionType,Date,Quantity,Unit,IssuedTo,ApprovedBy,Reference,Notes':
-      ',PRJ-001,RA-0001,TRADE-PIPE-WELDER,Pipe Welder,Manpower,Issue,'+new Date().toISOString().split('T')[0]+',5,pax,Foreman Juan,PM Cruz,WO-001,',
+    'LogID,ProjectID,AllocationID,ResourceID,ResourceName,ResourceType,Category,TransactionType,Date,Quantity,Unit,UnitCost,IssuedTo,ApprovedBy,Reference,Notes':
+      ',PRJ-001,RA-0001,TRADE-PIPE-WELDER,Pipe Welder,Manpower,Budgeted,Issue,'+new Date().toISOString().split('T')[0]+',5,pax,18500,Foreman Juan,PM Cruz,WO-001,',
     // Manpower template
     'ID,ProjectID,Trade,Planned,Actual,Cost,Shift,OTHrs,Week':
       'MP-001,PRJ-001,Pipe Welder,10,8,185000,Day,0,'+('W'+Math.ceil((new Date()-new Date(new Date().getFullYear(),0,1))/604800000)),

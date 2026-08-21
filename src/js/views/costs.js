@@ -25,11 +25,11 @@ $('#costs').innerHTML=`<div class="section-header" style="margin-bottom:14px">
 </div>
 <div class="card"><div class="table-wrap"><table>
 <thead><tr><th>ID</th><th>Project</th><th>Category</th><th>Description</th><th>Planned</th><th>Actual</th><th>Variance</th><th>Util%</th></tr></thead>
-<tbody>${_pgSlice("costs",costs).map(c=>{const v=c.planned-c.actual,pct=Math.round((c.actual/c.planned)*100);return`<tr>
+<tbody>${_pgSlice("costs",costs).map(c=>{const v=c.planned-c.actual,pct=c.planned>0?Math.round((c.actual/c.planned)*100):0;const auto=c.autoSource==='issuance';return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${c.id}</td>
 <td><span class="badge badge-blue">${c.projectId}</span></td>
 <td><span class="badge badge-purple">${c.category}</span></td>
-<td style="font-size:11px">${c.description}</td>
+<td style="font-size:11px">${c.description}${auto?` <span title="Calculated from site issuances — edit the transaction log, not this row" style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(56,139,253,.15);color:var(--accent-blue);font-weight:700;white-space:nowrap"><i class="fas fa-bolt" style="font-size:8px;margin-right:3px"></i>auto</span>`:''}</td>
 <td style="font-family:var(--font-mono)">${fmtCur(c.planned)}</td>
 <td style="font-family:var(--font-mono)">${fmtCur(c.actual)}</td>
 <td style="font-family:var(--font-mono);color:${v>=0?'var(--accent-green)':'var(--accent-red)'}">${v>=0?'+':''}${fmtCur(Math.abs(v))}</td>
