@@ -53,7 +53,7 @@ $('#dashboard').innerHTML=`
 <div style="text-align:right"><div class="banner-time" id="dashClock">${timeStr}</div><div style="font-size:10px;color:rgba(255,255,255,.6)">Local Time</div></div></div>
 ${_renderRecentStrip()}
 <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">
-  ${[['all','All Time'],['month','This Month'],['quarter','This Quarter'],['year','This Year']].map(([v,l])=>`
+  ${[['year','This Year'],['quarter','This Quarter'],['month','This Month'],['all','All Time']].map(([v,l])=>`
   <button onclick="setDashFilter('${v}')" style="padding:5px 14px;border-radius:20px;border:1px solid ${_dashDateFilter===v?'var(--accent-blue)':'var(--border)'};background:${_dashDateFilter===v?'rgba(56,139,253,.15)':'var(--bg-hover)'};color:${_dashDateFilter===v?'var(--accent-blue)':'var(--text-secondary)'};font-size:11px;font-weight:${_dashDateFilter===v?'700':'400'};cursor:pointer;transition:all .15s">${l}</button>`).join('')}
 </div>
 <div class="grid grid-4" style="margin-bottom:14px">
