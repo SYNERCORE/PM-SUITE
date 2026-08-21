@@ -5,6 +5,20 @@ function renderGantt(){
   AppState.ensureData();
   const{projects,tasks}=AppState.data;
 
+  // Open on a 1-year window. Applied once per session rather than whenever
+  // the dates are blank, so the Auto button can still clear back to the
+  // full span of the data.
+  if(!_ganttRangeApplied){
+    _ganttRangeApplied=true;
+    if(!ganttFrom&&!ganttTo){
+      const n=new Date();
+      const s=new Date(n);s.setMonth(s.getMonth()-4);
+      const e=new Date(n);e.setMonth(e.getMonth()+8);
+      ganttFrom=s.toISOString().split('T')[0];
+      ganttTo=e.toISOString().split('T')[0];
+    }
+  }
+
   // Gather all valid dates for auto range
   const allDates=[...tasks.filter(t=>!t._deleted).flatMap(t=>[t.startDate,t.dueDate||t.endDate]),...projects.flatMap(p=>[p.startDate,p.endDate])].filter(d=>d&&/^\d{4}-\d{2}-\d{2}$/.test(d));
   if(!allDates.length){
@@ -25,7 +39,15 @@ function renderGantt(){
   const today=new Date().toISOString().split('T')[0];
   const todayPct=Math.max(0,Math.min(100,daysBetween(minDate,today)/totalDays*100));
 
-  const filteredProjects=projects.filter(p=>ganttProjFilter==='all'||p.id===ganttProjFilter);
+  // Completed projects are hidden unless asked for — but never hide the one
+  // project the user has explicitly selected, or the chart comes back empty
+  // with no obvious reason why.
+  const filteredProjects=projects.filter(p=>{
+    if(ganttProjFilter!=='all')return p.id===ganttProjFilter;
+    return ganttShowCompleted||String(p.status||'').toLowerCase()!=='completed';
+  });
+  const hiddenCompleted=ganttProjFilter==='all'&&!ganttShowCompleted
+    ? projects.filter(p=>String(p.status||'').toLowerCase()==='completed').length : 0;
 
   // ── CPM Computation ──────────────────────────────────────────
   const cpmMap=new Map();
@@ -374,6 +396,12 @@ function renderGantt(){
           Show Baseline
         </label>
       </div>`:''}
+      <div style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:flex;align-items:center;gap:5px;cursor:pointer" title="Completed projects are hidden by default">
+          <input type="checkbox" ${ganttShowCompleted?'checked':''} onchange="ganttShowCompleted=this.checked;renderGantt()" style="accent-color:var(--accent-green)">
+          Show Completed${hiddenCompleted?` <span style="color:var(--text-muted);font-weight:400">(${hiddenCompleted})</span>`:''}
+        </label>
+      </div>
       <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
         <button class="btn btn-secondary btn-sm" onclick="ganttQuickRange(3)" title="Last 3 months">3M</button>
         <button class="btn btn-secondary btn-sm" onclick="ganttQuickRange(6)" title="Last 6 months">6M</button>

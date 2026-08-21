@@ -826,6 +826,9 @@ let procTab='list', procSearch='', procStatusFilter='all', procProjFilter='all';
 let detailProjectId=null, detailTab='overview';
 let docSearch='', docStatusFilter='all', docProjFilter='all', docCatFilter='all', docGroupBy='status', docCollapsed={};
 let ganttZoom=100, ganttFrom='', ganttTo='', ganttProjFilter='all', ganttStatusFilter='all';
+// Gantt opens on a 1-year window with finished projects hidden — the chart is
+// for work still in front of you. Both are toggleable in the toolbar.
+let ganttShowCompleted=false, _ganttRangeApplied=false;
 
 // ── Shared time filter for KPI / Analytics / Reports ─────────
 // mode: 'year' (whole year) | 'month' (single month within year)
