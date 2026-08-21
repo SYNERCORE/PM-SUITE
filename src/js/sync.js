@@ -700,6 +700,19 @@ setTimeout(() => {
 // Non-blocking (fire-and-forget). Creates the list on first write if absent.
 let _auditListId = null;
 
+// Two writers share the SHIC_AuditLog list — spWriteAuditLog below and
+// _flushAuditQueue further down — and they were built with different column
+// names. Whichever created the list first defined its columns, so the other
+// one's writes were rejected 400 forever. Both now create from this single
+// union of columns and filter their payload to what the list actually has.
+const SHIC_AUDIT_COLUMNS = [
+  ['Action',     false], ['Entity',     false], ['EntityType', false],
+  ['EntityId',   false], ['EntityName', false], ['Module',     false],
+  ['UserName',   false], ['UserEmail',  false],
+  ['Before', true], ['After', true], ['Notes', true], ['Details', true],
+];
+let _auditListCols = null;
+
 async function spWriteAuditLog(action, entityType, entityId, entityName, details) {
   if (!_spConnected || !_spSiteId) return;
   try {
@@ -728,20 +741,31 @@ async function spWriteAuditLog(action, entityType, entityId, entityName, details
         _auditListId = cd.id;
       }
     }
-    // Append audit record
-    await fetch(`https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${_auditListId}/items`, {
+    // Append audit record — only naming columns the list actually has, or
+    // Graph rejects the whole write with a 400.
+    const cols = await _getAuditListCols(token, _spSiteId, _auditListId);
+    const all = {
+      Title: action,
+      EntityType: String(entityType || ''),
+      EntityId: String(entityId || ''),
+      EntityName: String(entityName || '').substring(0, 255),
+      UserName: String(_currentUserProfile?.name || ''),
+      UserEmail: String(_currentUserProfile?.email || ''),
+      Details: typeof details === 'object' ? JSON.stringify(details).substring(0, 2000) : String(details || ''),
+    };
+    const fields = {};
+    for (const [k, v] of Object.entries(all)) {
+      if (k === 'Title' || !cols || cols.has(k)) fields[k] = v;
+    }
+    const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${_auditListId}/items`, {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: {
-        Title: action,
-        EntityType: String(entityType || ''),
-        EntityId: String(entityId || ''),
-        EntityName: String(entityName || '').substring(0, 255),
-        UserName: String(_currentUserProfile?.name || ''),
-        UserEmail: String(_currentUserProfile?.email || ''),
-        Details: typeof details === 'object' ? JSON.stringify(details).substring(0, 2000) : String(details || ''),
-      }})
+      body: JSON.stringify({ fields })
     });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.warn('[SHIC Audit] Write rejected (' + res.status + '):', body.slice(0, 200));
+    }
   } catch(e) {
     console.warn('[SHIC Audit] Write skipped:', e.message);
   }
@@ -4303,19 +4327,15 @@ async function _getOrCreateAuditListId(token, siteId) {
 // The list may have been created by an older build that failed partway
 // through column creation — Graph 400s any write naming a missing column,
 // so we filter every payload down to columns the list really has.
-let _auditListCols = null;
 async function _getAuditListCols(token, siteId, listId) {
   if (_auditListCols) return _auditListCols;
   try {
     const res = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/columns?$select=name`, { headers: { Authorization: 'Bearer ' + token } });
     const data = await res.json();
     _auditListCols = new Set((data.value || []).map(c => c.name));
-    // Try to add any of our columns that are missing (older list versions)
-    const wanted = [
-      ['Action', false], ['Entity', false], ['EntityId', false], ['Module', false],
-      ['UserEmail', false], ['Before', true], ['After', true], ['Notes', true],
-    ];
-    for (const [col, multi] of wanted) {
+    // Add any column this list is missing — covers lists created by an older
+    // build, and lists created by whichever writer got there first.
+    for (const [col, multi] of SHIC_AUDIT_COLUMNS) {
       if (_auditListCols.has(col)) continue;
       try {
         const cr = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/columns`, {
