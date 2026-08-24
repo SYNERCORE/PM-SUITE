@@ -7364,14 +7364,10 @@ async function _spResolveListId(token, listName) {
       });
       if (!cr.ok) throw new Error('Could not auto-create list ' + listName + ': ' + cr.status);
       const created = await cr.json();
-      const colUrl = `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${created.id}/columns`;
-      const mkCol = body => fetch(colUrl, {
-        method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      }).catch(() => {});
-      await mkCol({ name: 'DataBlob', text: { allowMultipleLines: true } });
-      if (cfg.idField) await mkCol({ name: cfg.idField, text: { allowMultipleLines: false } });
       _spListIds[listName] = created.id;
+      // Build the full column set every push writes. Missing any one of them
+      // makes Graph 400 the whole write, so this must match _spPushListData.
+      await _spEnsureWriteColumns(token, created.id, cfg);
       return created.id;
     }
     throw new Error('List not found: ' + listName + ' — please create it in SharePoint');
@@ -7557,6 +7553,54 @@ function _quickHash(s) {
 
 // ── Ensure index columns exist on a SP list (creates missing ones) ──
 // Called once per list on first push. Silently skips columns that already exist.
+// Columns every _spPushListData write names. A list missing any of them makes
+// Graph reject the entire write with a 400, so an auto-created list must have
+// the full set before its first push.
+function _spWriteColumnsFor(cfg) {
+  const cols = [
+    { spCol: 'DataBlob',  spType: 'Note'     },
+    { spCol: 'UpdatedBy', spType: 'Text'     },
+    { spCol: 'UpdatedAt', spType: 'DateTime' },
+  ];
+  if (cfg.idField) cols.push({ spCol: cfg.idField, spType: 'Text' });
+  if (cfg.hasProject) cols.push({ spCol: 'ProjectId', spType: 'Text' });
+  if (cfg.indexCols) cols.push(...cfg.indexCols);
+  return cols;
+}
+
+// Create any of `needed` that the list doesn't already have. Safe to re-run:
+// existing columns are skipped, so this also repairs a partially-built list.
+async function _spCreateMissingColumns(token, listId, needed) {
+  const baseUrl = `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/columns`;
+  let existingNames = new Set();
+  try {
+    const res = await fetch(baseUrl, { headers: { Authorization: 'Bearer ' + token } });
+    if (!res.ok) return;
+    const data = await res.json();
+    (data.value || []).forEach(c => existingNames.add(c.name));
+  } catch (e) { return; }
+
+  for (const col of needed) {
+    if (existingNames.has(col.spCol)) continue;
+    const colDef = { name: col.spCol, enforceUniqueValues: false, hidden: false };
+    if (col.spType === 'DateTime')      colDef.dateTime = { format: 'dateTime' };
+    else if (col.spType === 'Boolean')  colDef.boolean = {};
+    else if (col.spType === 'Note')     colDef.text = { allowMultipleLines: true };
+    else                                colDef.text = { allowMultipleLines: false, maxLength: 255 };
+    try {
+      await fetch(baseUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(colDef),
+      });
+    } catch (e) { /* non-fatal — reported by the write that needs it */ }
+  }
+}
+
+async function _spEnsureWriteColumns(token, listId, cfg) {
+  return _spCreateMissingColumns(token, listId, _spWriteColumnsFor(cfg));
+}
+
 const _spEnsuredCols = new Set(); // tracks which lists have been ensured this session
 async function _spEnsureIndexColumns(token, listName) {
   if (_spEnsuredCols.has(listName)) return;
@@ -7567,40 +7611,17 @@ async function _spEnsureIndexColumns(token, listName) {
   const needed = [];
   if (cfg.hasProject) needed.push({ spCol: 'ProjectId', spType: 'Text' });
   if (cfg.indexCols) needed.push(...cfg.indexCols);
+  // Auto-created lists never went through the setup wizard, so their base write
+  // columns (DataBlob/UpdatedBy/UpdatedAt/idField) are ensured here too. This
+  // repairs a list left incomplete by an earlier build.
+  if (cfg.autoCreate) needed.push(..._spWriteColumnsFor(cfg));
   if (!needed.length) { _spEnsuredCols.add(listName); return; }
 
   const listId = await _spResolveListId(token, listName);
-  const baseUrl = `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/columns`;
-
-  // Fetch existing columns
-  let existingNames = new Set();
-  try {
-    const res = await fetch(baseUrl, { headers: { Authorization: 'Bearer ' + token } });
-    if (res.ok) {
-      const data = await res.json();
-      (data.value || []).forEach(c => existingNames.add(c.name));
-    }
-  } catch(e) { return; } // non-fatal
-
-  // Create any missing columns
-  for (const col of needed) {
-    if (existingNames.has(col.spCol)) continue;
-    const colDef = { name: col.spCol, enforceUniqueValues: false, hidden: false };
-    if (col.spType === 'DateTime') {
-      colDef.dateTime = { format: 'dateTime' };
-    } else if (col.spType === 'Boolean') {
-      colDef.boolean = {};
-    } else {
-      colDef.text = { allowMultipleLines: false, maxLength: 255 };
-    }
-    try {
-      await fetch(baseUrl, {
-        method: 'POST',
-        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify(colDef),
-      });
-    } catch(e) { /* non-fatal — push will still work via DataBlob */ }
-  }
+  // Dedupe — ProjectId/idField can arrive from more than one source above
+  const seen = new Set();
+  const unique = needed.filter(c => seen.has(c.spCol) ? false : (seen.add(c.spCol), true));
+  await _spCreateMissingColumns(token, listId, unique);
   _spEnsuredCols.add(listName);
 }
 
