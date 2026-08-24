@@ -187,7 +187,9 @@ const Store = (function () {
   function _isApiEntity(entity) {
     try {
       if (typeof Api === 'undefined' || !Api.enabled || !Api.enabled()) return false;
-      const s = (typeof AppState !== 'undefined' && AppState.data && AppState.data.settings) || {};
+      // Device-local, so a SharePoint sync can't silently switch routing off.
+      const s = (typeof getDeviceSettings === 'function') ? getDeviceSettings()
+        : ((typeof AppState !== 'undefined' && AppState.data && AppState.data.settings) || {});
       if (s.forceSharepointMode) return false;
       const opts = Array.isArray(s.apiEntities) ? s.apiEntities : [];
       return opts.indexOf(entity) >= 0;

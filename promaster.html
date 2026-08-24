@@ -1541,6 +1541,48 @@ function _getDropdown(key){
   return(custom&&custom.length>0)?custom:[...reg.defaults];
 }
 
+// ── Device-local settings ────────────────────────────────────
+// Which server this machine talks to, and which entities it mirrors, are
+// properties of the DEVICE, not of the shared dataset. They used to live in
+// AppState.data.settings, which six different code paths replace wholesale
+// during a SharePoint sync — so a teammate's push kept silently clearing
+// them and entities appeared to untick themselves. Keeping them in their own
+// localStorage key puts them out of reach of every one of those paths.
+const _DEVICE_SETTINGS_KEY='shic_device_settings';
+let _deviceSettingsCache=null;
+
+function getDeviceSettings(){
+  if(_deviceSettingsCache)return _deviceSettingsCache;
+  let d={};
+  try{ d=JSON.parse(localStorage.getItem(_DEVICE_SETTINGS_KEY)||'{}')||{}; }catch(e){ d={}; }
+  // One-time lift of any values still sitting in the synced settings blob.
+  if(d._migrated!==true){
+    const s=(typeof AppState!=='undefined'&&AppState.data&&AppState.data.settings)||{};
+    if(d.localServerUrl===undefined&&s.localServerUrl!==undefined)d.localServerUrl=s.localServerUrl;
+    if(d.apiEntities===undefined&&Array.isArray(s.apiEntities))d.apiEntities=s.apiEntities.slice();
+    if(d.forceSharepointMode===undefined&&s.forceSharepointMode!==undefined)d.forceSharepointMode=!!s.forceSharepointMode;
+    d._migrated=true;
+    _deviceSettingsCache=d;
+    saveDeviceSettings(d);
+    return d;
+  }
+  _deviceSettingsCache=d;
+  return d;
+}
+
+function saveDeviceSettings(d){
+  _deviceSettingsCache=d||{};
+  try{ localStorage.setItem(_DEVICE_SETTINGS_KEY,JSON.stringify(_deviceSettingsCache)); }
+  catch(e){ console.warn('[SHIC] Could not persist device settings:',e.message); }
+}
+
+function setDeviceSetting(key,val){
+  const d=getDeviceSettings();
+  d[key]=val;
+  saveDeviceSettings(d);
+  return d;
+}
+
 const _DROPDOWN_BACKUP_KEY='shic_dropdowns_backup';
 
 function _setDropdown(key,values){
@@ -2221,7 +2263,9 @@ const Store = (function () {
   function _isApiEntity(entity) {
     try {
       if (typeof Api === 'undefined' || !Api.enabled || !Api.enabled()) return false;
-      const s = (typeof AppState !== 'undefined' && AppState.data && AppState.data.settings) || {};
+      // Device-local, so a SharePoint sync can't silently switch routing off.
+      const s = (typeof getDeviceSettings === 'function') ? getDeviceSettings()
+        : ((typeof AppState !== 'undefined' && AppState.data && AppState.data.settings) || {});
       if (s.forceSharepointMode) return false;
       const opts = Array.isArray(s.apiEntities) ? s.apiEntities : [];
       return opts.indexOf(entity) >= 0;
@@ -24472,6 +24516,9 @@ AppState.ensureData();
     }
   },100);
 const settings=AppState.data.settings||{companyName:'SHIC',currency:'PHP',timezone:'Asia/Manila'};
+// Server URL and entity routing are per-device and live outside the synced
+// settings blob, so a SharePoint sync can never clear them.
+const _dev=typeof getDeviceSettings==='function'?getDeviceSettings():{};
 const connected=!!_odAccount;
 const autoSync=_odAutoSync;
 const lastSync=_odLastSync;
@@ -24722,7 +24769,7 @@ ${renderSpPanel()}
     <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end">
       <div class="form-group" style="margin:0">
         <label class="form-label" style="font-size:11px">Server URL <span style="color:var(--text-muted);font-weight:400">(e.g. https://procmaster.local)</span></label>
-        <input class="form-input" id="localSrvUrl" placeholder="https://procmaster.local" value="${(settings.localServerUrl||'').replace(/"/g,'&quot;')}">
+        <input class="form-input" id="localSrvUrl" placeholder="https://procmaster.local" value="${(_dev.localServerUrl||'').replace(/"/g,'&quot;')}">
       </div>
       <button class="btn btn-primary" onclick="_localSrvSave()"><i class="fas fa-save"></i> Save</button>
     </div>
@@ -24732,7 +24779,7 @@ ${renderSpPanel()}
     <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
       <div style="font-size:12px;font-weight:600;margin-bottom:8px">Entity Routing</div>
       <label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 0">
-        <input type="checkbox" id="apiEnt_warehouseItems" ${((settings.apiEntities||[]).includes('warehouseItems'))?'checked':''} onchange="_apiToggleEntity('warehouseItems',this.checked)">
+        <input type="checkbox" id="apiEnt_warehouseItems" ${((_dev.apiEntities||[]).includes('warehouseItems'))?'checked':''} onchange="_apiToggleEntity('warehouseItems',this.checked)">
         <span><strong>Warehouse Items</strong> <span style="font-size:10px;color:var(--text-muted)">— reads stay local; writes mirror to server</span></span>
         <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="_apiMigrateEntity('warehouseItems')" title="Push every local warehouse item to the server (safe to re-run)"><i class="fas fa-cloud-upload-alt"></i> Migrate now</button>
         <button class="btn btn-secondary btn-sm" onclick="_apiHydrateEntity('warehouseItems')" title="Pull server copy — replaces local data for this entity"><i class="fas fa-cloud-download-alt"></i> Pull</button>
@@ -24741,7 +24788,7 @@ ${renderSpPanel()}
 
       ${[['projects','Projects'],['tasks','Tasks'],['resources','Resources'],['procurement','Procurement'],['costs','Costs'],['qaqc','QA/QC'],['risks','Risks'],['actions','Action Items'],['documents','Documents'],['stockTransactions','Stock Transactions'],['resourceAllocations','Resource Allocations'],['resourceUsageLogs','Usage Logs (Issue/Return)'],['manpower','Manpower'],['procurementLogs','Procurement Logs'],['issuanceRequests','Issuance Requests']].map(([ent,label]) => `
       <label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 0;border-top:1px dashed var(--border);margin-top:6px">
-        <input type="checkbox" id="apiEnt_${ent}" ${((settings.apiEntities||[]).includes(ent))?'checked':''} onchange="_apiToggleEntity('${ent}',this.checked)">
+        <input type="checkbox" id="apiEnt_${ent}" ${((_dev.apiEntities||[]).includes(ent))?'checked':''} onchange="_apiToggleEntity('${ent}',this.checked)">
         <span><strong>${label}</strong> <span style="font-size:10px;color:var(--text-muted)">— reads stay local; writes mirror to server</span></span>
         <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="_apiMigrateEntity('${ent}')" title="Push every local ${label} row to the server (safe to re-run)"><i class="fas fa-cloud-upload-alt"></i> Migrate now</button>
         <button class="btn btn-secondary btn-sm" onclick="_apiHydrateEntity('${ent}')" title="Pull server copy — replaces local data for this entity"><i class="fas fa-cloud-download-alt"></i> Pull</button>
@@ -24749,7 +24796,7 @@ ${renderSpPanel()}
       <div id="apiEntStatus_${ent}" style="font-size:11px;color:var(--text-muted);margin-left:26px;min-height:14px"></div>`).join('')}
 
       <label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:10px 0 4px;border-top:1px dashed var(--border);margin-top:10px">
-        <input type="checkbox" id="apiForceSP" ${settings.forceSharepointMode?'checked':''} onchange="_apiToggleForceSP(this.checked)">
+        <input type="checkbox" id="apiForceSP" ${_dev.forceSharepointMode?'checked':''} onchange="_apiToggleForceSP(this.checked)">
         <span><strong>Force SharePoint Mode</strong> <span style="font-size:10px;color:var(--accent-red)">— emergency rollback, disables all server routing</span></span>
       </label>
     </div>
@@ -25672,9 +25719,7 @@ function _openRecentItem(r) {
 // entities over to the local server via Store's backend flag.
 function _localSrvSave() {
   const raw = (document.getElementById('localSrvUrl')?.value || '').trim().replace(/\/+$/, '');
-  AppState.data.settings = AppState.data.settings || {};
-  AppState.data.settings.localServerUrl = raw;
-  AppState.save();
+  setDeviceSetting('localServerUrl', raw);
   if (raw && typeof Api !== 'undefined' && Api.configure) {
     Api.configure({
       baseUrl: raw,
@@ -25743,11 +25788,9 @@ function _localSrvUpdateDot(state, msg) {
 
 // Per-entity opt-in — writes are mirrored to server for entities in this list.
 function _apiToggleEntity(entity, on) {
-  AppState.data.settings = AppState.data.settings || {};
-  const list = new Set(AppState.data.settings.apiEntities || []);
+  const list = new Set(getDeviceSettings().apiEntities || []);
   if (on) list.add(entity); else list.delete(entity);
-  AppState.data.settings.apiEntities = Array.from(list);
-  AppState.save();
+  setDeviceSetting('apiEntities', Array.from(list));
   showToast(on ? `${entity} writes will mirror to server` : `${entity} routed to SharePoint only`, 'info', 2500);
 }
 
@@ -25764,9 +25807,7 @@ function _toggleSharedPC(on) {
 }
 
 function _apiToggleForceSP(on) {
-  AppState.data.settings = AppState.data.settings || {};
-  AppState.data.settings.forceSharepointMode = !!on;
-  AppState.save();
+  setDeviceSetting('forceSharepointMode', !!on);
   showToast(on ? 'Force SharePoint Mode ON — server routing disabled' : 'Server routing re-enabled', on ? 'warning' : 'info', 3500);
 }
 
@@ -25806,7 +25847,7 @@ async function _apiHydrateEntity(entity) {
 // Auto-configure Api on app boot from persisted setting.
 (function _localSrvBoot() {
   try {
-    const url = AppState?.data?.settings?.localServerUrl;
+    const url = getDeviceSettings().localServerUrl;
     if (url && typeof Api !== 'undefined' && Api.configure) {
       Api.configure({
         baseUrl: url,

@@ -952,6 +952,48 @@ function _getDropdown(key){
   return(custom&&custom.length>0)?custom:[...reg.defaults];
 }
 
+// ── Device-local settings ────────────────────────────────────
+// Which server this machine talks to, and which entities it mirrors, are
+// properties of the DEVICE, not of the shared dataset. They used to live in
+// AppState.data.settings, which six different code paths replace wholesale
+// during a SharePoint sync — so a teammate's push kept silently clearing
+// them and entities appeared to untick themselves. Keeping them in their own
+// localStorage key puts them out of reach of every one of those paths.
+const _DEVICE_SETTINGS_KEY='shic_device_settings';
+let _deviceSettingsCache=null;
+
+function getDeviceSettings(){
+  if(_deviceSettingsCache)return _deviceSettingsCache;
+  let d={};
+  try{ d=JSON.parse(localStorage.getItem(_DEVICE_SETTINGS_KEY)||'{}')||{}; }catch(e){ d={}; }
+  // One-time lift of any values still sitting in the synced settings blob.
+  if(d._migrated!==true){
+    const s=(typeof AppState!=='undefined'&&AppState.data&&AppState.data.settings)||{};
+    if(d.localServerUrl===undefined&&s.localServerUrl!==undefined)d.localServerUrl=s.localServerUrl;
+    if(d.apiEntities===undefined&&Array.isArray(s.apiEntities))d.apiEntities=s.apiEntities.slice();
+    if(d.forceSharepointMode===undefined&&s.forceSharepointMode!==undefined)d.forceSharepointMode=!!s.forceSharepointMode;
+    d._migrated=true;
+    _deviceSettingsCache=d;
+    saveDeviceSettings(d);
+    return d;
+  }
+  _deviceSettingsCache=d;
+  return d;
+}
+
+function saveDeviceSettings(d){
+  _deviceSettingsCache=d||{};
+  try{ localStorage.setItem(_DEVICE_SETTINGS_KEY,JSON.stringify(_deviceSettingsCache)); }
+  catch(e){ console.warn('[SHIC] Could not persist device settings:',e.message); }
+}
+
+function setDeviceSetting(key,val){
+  const d=getDeviceSettings();
+  d[key]=val;
+  saveDeviceSettings(d);
+  return d;
+}
+
 const _DROPDOWN_BACKUP_KEY='shic_dropdowns_backup';
 
 function _setDropdown(key,values){
