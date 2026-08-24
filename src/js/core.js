@@ -694,6 +694,13 @@ const SHIC_LIST_CONFIG = {
       { field: 'status', spCol: 'Status', spType: 'Text' },
     ],
   },
+  'SHIC_WhLocations': {
+    dataKey: 'warehouseLocations', idField: 'LocId', name: 'Warehouse Locations', hasProject: false,
+    autoCreate: true, // small new list — created via Graph on first sync, no manual SP setup
+    indexCols: [
+      { field: 'type', spCol: 'LocType', spType: 'Text' },
+    ],
+  },
   // Workflows & system
   'SHIC_IdChangeRequests': {
     dataKey: 'idChangeRequests', idField: 'ReqId', name: 'ID Change Requests', hasProject: false,
@@ -1049,7 +1056,7 @@ function getDefaultData(){
   return{
     projects:[],tasks:[],resources:[],equipment:[],tools:[],vehicles:[],
     consumables:[],materials:[],manpower:[],procurement:[],procurementLogs:[],
-    warehouseItems:[],stockTransactions:[],issuanceRequests:[],workflowDefs:[],userPerms:[],
+    warehouseItems:[],stockTransactions:[],issuanceRequests:[],warehouseLocations:[],workflowDefs:[],userPerms:[],
     resourceAllocations:[],resourceUsageLogs:[],costs:[],qaqc:[],risks:[],
     actions:[],documents:[],progress:[],kpiData:[],calendar:[],
     assetHistory:[],assetUtilization:[],thirdParty:[],projectTeam:[],activities:[],notifications:[],

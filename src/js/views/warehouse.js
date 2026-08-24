@@ -34,6 +34,54 @@ function _whShowUndoToast(msg, undoFn, seconds=30){
 function _whItems(){return(AppState.data.warehouseItems||[]).filter(i=>!i._deleted);}
 function _whTx(){return(AppState.data.stockTransactions||[]).filter(t=>!t._deleted);}
 function _whReq(){return(AppState.data.issuanceRequests||[]).filter(r=>!r._deleted);}
+
+// ── MULTI-WAREHOUSE LOCATIONS ────────────────────────────────
+// Every warehouse item is a STOCK RECORD belonging to one location.
+// Records missing warehouseId are treated as Main Warehouse (LOC-MAIN)
+// so the 1,000+ pre-existing items keep working without a backfill.
+const _WH_MAIN_LOC='LOC-MAIN';
+function _whLocs(){return(AppState.data.warehouseLocations||[]).filter(l=>!l._deleted);}
+function _whActiveLocs(){return _whLocs().filter(l=>l.active!==false);}
+function _whLoc(id){return _whLocs().find(l=>l.id===id)||null;}
+function _whLocName(id){const l=_whLoc(id||_WH_MAIN_LOC);return l?l.name:(id===_WH_MAIN_LOC||!id?'Main Warehouse':id);}
+function _whItemLocId(item){return(item&&item.warehouseId)||_WH_MAIN_LOC;}
+
+// All stock records that represent the SAME item across locations.
+// refId may be a WH record id, an Item Master id, or an item code.
+function _whStockRecords(refId){
+  if(!refId)return[];
+  const items=_whItems();
+  const seed=items.find(i=>i.id===refId);
+  const masterId=seed?.itemMasterId||(items.some(i=>i.itemMasterId===refId)?refId:null);
+  const code=seed?.code||null;
+  return items.filter(i=>
+    i.id===refId||
+    (masterId&&i.itemMasterId===masterId)||
+    (code&&i.code&&i.code===code)
+  );
+}
+
+// Aggregate live quantities across every location for one item identity.
+// Cross-module callers (Project Readiness, allocation pickers) use this so
+// a single warehouse never hides stock sitting at another location.
+function _whCalcQtyAll(refId){
+  const recs=_whStockRecords(refId);
+  const agg={qtyOnHand:0,qtyReserved:0,qtyAvailable:0,netIssued:0,records:[]};
+  recs.forEach(r=>{
+    const q=_whCalcQty(r.id);
+    agg.qtyOnHand+=q.qtyOnHand;agg.qtyReserved+=q.qtyReserved;
+    agg.qtyAvailable+=q.qtyAvailable;agg.netIssued+=q.netIssued;
+    agg.records.push({item:r,q,locId:_whItemLocId(r)});
+  });
+  return agg;
+}
+
+// "Main 400 · Site A 120" — compact per-location note for detail strings
+function _whLocBreakdown(agg,field){
+  field=field||'qtyAvailable';
+  const parts=(agg.records||[]).filter(r=>r.q[field]>0).map(r=>`${_whLocName(r.locId)} ${r.q[field]}`);
+  return parts.length>1?parts.join(' · '):'';
+}
 // In-memory cache of form templates loaded from SP (shared across all users)
 let _whFormsCache=null;
 let _whFormsCacheTime=0; // timestamp of last SP load
@@ -257,10 +305,16 @@ function _whShowCostTrend(itemId){
 function _whActualIssueCost(projectId, resourceId){
   if(!projectId||!resourceId)return 0;
   const whItem=_whItems().find(w=>w.id===resourceId||w.itemMasterId===resourceId);
-  const itemId=whItem?whItem.id:resourceId;
+  // Sum across every stock record of this item — issues can come from any location
+  const recs=_whStockRecords(resourceId);
+  const ids=new Set(recs.map(r=>r.id));
+  ids.add(resourceId);
   return _whTx()
-    .filter(t=>t.type==='issue'&&t.projectId===projectId&&t.itemId===itemId)
-    .reduce((s,t)=>s+(t.qty*(t.unitCost||whItem?.unitCost||0)),0);
+    .filter(t=>t.type==='issue'&&t.projectId===projectId&&ids.has(t.itemId))
+    .reduce((s,t)=>{
+      const rec=recs.find(r=>r.id===t.itemId)||whItem;
+      return s+(t.qty*(t.unitCost||rec?.unitCost||0));
+    },0);
 }
 
 // Recompute live qty fields for an item from its transactions
@@ -271,6 +325,8 @@ function _whCalcQty(itemId){
     if(t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser')return s-t.qty;
     if(t.type==='return')return s+t.qty;
     if(t.type==='adjust')return s+t.qty;
+    if(t.type==='transfer-in')return s+t.qty;
+    if(t.type==='transfer-out')return s-t.qty;
     return s;
   },0);
   const qtyReserved=(AppState.data.resourceAllocations||[]).filter(a=>!a._deleted&&a.resourceId===itemId&&(a.resourceType==='Material'||a.resourceType==='Consumable')).reduce((s,a)=>s+(a.allocatedQty||0),0);
@@ -297,6 +353,9 @@ function _whNextId(prefix,arr){
 
 let _whTab='items', _whItemSearch='', _whItemCat='all', _whTxItemFilter='all', _whReqStatus='all', _whItemPage=0;
 let _whItemPageSize=25, _whItemSortCol='name', _whItemSortAsc=true;
+let _whItemLocFilter='all', _whTxLocFilter='all';
+let _whRcvLoc=_WH_MAIN_LOC, _whIssLoc=_WH_MAIN_LOC, _whPickLoc=_WH_MAIN_LOC;
+let _whTrFrom=_WH_MAIN_LOC, _whTrTo='', _whTrLines=[];
 let _whSelected=new Set();
 function _whToggleSel(id){_whSelected.has(id)?_whSelected.delete(id):_whSelected.add(id);_whRenderBulkBar();}
 function _whToggleAll(checked){document.querySelectorAll('input[data-wh-id]').forEach(cb=>{checked?_whSelected.add(cb.dataset.whId):_whSelected.delete(cb.dataset.whId);cb.checked=checked;});_whRenderBulkBar();}
@@ -327,12 +386,14 @@ function renderWarehouse(){
   const todayTx=tx.filter(t=>t.date&&t.date.slice(0,10)===new Date().toISOString().slice(0,10)).length;
 
   const tabs=[
-    {id:'items',   label:'Items',             icon:'fa-boxes',          count:totalItems},
-    {id:'receive', label:'Receive Stock',      icon:'fa-truck-loading',  count:null},
-    {id:'issue',   label:'Issue / Return',     icon:'fa-dolly',          count:null},
-    {id:'requests',label:'Issuance Requests',  icon:'fa-clipboard-list', count:pendingReqs||null},
-    {id:'ledger',  label:'Transaction Ledger', icon:'fa-list-alt',       count:null},
-    {id:'forms',   label:'Form Setup',         icon:'fa-id-card',        count:null},
+    {id:'items',    label:'Items',             icon:'fa-boxes',          count:totalItems},
+    {id:'receive',  label:'Receive Stock',      icon:'fa-truck-loading',  count:null},
+    {id:'issue',    label:'Issue / Return',     icon:'fa-dolly',          count:null},
+    {id:'transfer', label:'Transfer',           icon:'fa-exchange-alt',   count:null},
+    {id:'requests', label:'Issuance Requests',  icon:'fa-clipboard-list', count:pendingReqs||null},
+    {id:'ledger',   label:'Transaction Ledger', icon:'fa-list-alt',       count:null},
+    {id:'locations',label:'Locations',          icon:'fa-map-marker-alt', count:_whActiveLocs().length>1?_whActiveLocs().length:null},
+    {id:'forms',    label:'Form Setup',         icon:'fa-id-card',        count:null},
   ];
 
   $('#warehouse').innerHTML=`
@@ -388,8 +449,10 @@ function _whRenderTab(){
   }
   else if(_whTab==='receive') el.innerHTML=_whReceiveHTML();
   else if(_whTab==='issue')   el.innerHTML=_whIssueHTML();
+  else if(_whTab==='transfer')el.innerHTML=_whTransferHTML();
   else if(_whTab==='requests')el.innerHTML=_whRequestsHTML();
   else if(_whTab==='ledger')  el.innerHTML=_whLedgerHTML();
+  else if(_whTab==='locations')el.innerHTML=_whLocationsHTML();
   else if(_whTab==='forms')   el.innerHTML=_whFormsHTML();
 }
 
@@ -403,6 +466,7 @@ function _whSortHeader(col,label){
 function _whItemsHTML(){
   const cats=['all',...new Set(_whItems().map(i=>i.category||'Uncategorized'))];
   let items=_whItems();
+  if(_whItemLocFilter!=='all')items=items.filter(i=>_whItemLocId(i)===_whItemLocFilter);
   if(_whItemCat!=='all')items=items.filter(i=>(i.category||'Uncategorized')===_whItemCat);
   if(_whItemSearch){
     const q=_whItemSearch.toLowerCase();
@@ -435,9 +499,9 @@ function _whItemsHTML(){
     return`<tr>
       <td style="width:32px;text-align:center"><input type="checkbox" data-wh-id="${item.id}" ${_whSelected.has(item.id)?'checked':''} onchange="_whToggleSel('${item.id}')" style="cursor:pointer"></td>
       <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">${item.code||item.id}</td>
-      <td><div style="font-weight:600">${esc(item.name)}</div>
+      <td><div style="font-weight:600;cursor:pointer;color:var(--accent-blue)" onclick="_whShowItemDetail('${item.id}')" title="View item details across all locations">${esc(item.name)}</div>
         <div style="font-size:10px;color:var(--text-secondary)">${esc(item.category||'—')}</div>
-        ${item.itemMasterId?`<div style="font-size:9px;color:var(--accent-blue)"><i class="fas fa-link"></i> ${item.itemMasterId}</div>`:''}
+        <div style="font-size:9px;color:var(--text-muted)"><i class="fas fa-warehouse" style="font-size:8px"></i> ${esc(_whLocName(_whItemLocId(item)))}${item.itemMasterId?` · <span style="color:var(--accent-blue)"><i class="fas fa-link"></i> ${item.itemMasterId}</span>`:''}</div>
       </td>
       <td style="white-space:nowrap">
         ${(item.rack||item.row)?`
@@ -501,6 +565,10 @@ function _whItemsHTML(){
   <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
     <input class="form-control" style="flex:1;min-width:200px" placeholder="Search name, code, barcode, category, location…" value="${_whItemSearch}"
       oninput="(window._whSearchDebounced||(window._whSearchDebounced=debounce(v=>{_whItemSearch=v;_whItemPage=0;_whRenderTab();},250)))(this.value)">
+    <select class="form-control" style="width:170px" onchange="_whItemLocFilter=this.value;_whItemPage=0;_whRenderTab()" title="Filter by location">
+      <option value="all">All Locations</option>
+      ${_whActiveLocs().map(l=>`<option value="${l.id}" ${_whItemLocFilter===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}
+    </select>
     <select class="form-control" style="width:160px" onchange="_whItemCat=this.value;_whItemPage=0;_whRenderTab()">
       ${cats.map(c=>`<option value="${c}" ${_whItemCat===c?'selected':''}>${c==='all'?'All Categories':c}</option>`).join('')}
     </select>
@@ -562,6 +630,13 @@ function _whImportItems(){
             <li>Paste the CSV content in the box below (or select a file).</li>
             <li>Items will be added as new warehouse records with opening stock posted as a "receive" transaction.</li>
           </ol>
+        </div>
+        <!-- Target location -->
+        <div class="form-group" style="margin-bottom:12px">
+          <label class="form-label"><i class="fas fa-warehouse" style="margin-right:5px;color:var(--accent-blue)"></i>Import into location</label>
+          <select class="form-control" id="wh-import-loc">
+            ${_whActiveLocs().map(l=>`<option value="${l.id}" ${(_whItemLocFilter!=='all'?_whItemLocFilter:_WH_MAIN_LOC)===l.id?'selected':''}>${esc(l.name)}${l.type==='Site'?' (Site)':''}</option>`).join('')}
+          </select>
         </div>
         <!-- Import mode -->
         <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
@@ -705,17 +780,20 @@ function _whImportExecute(){
   const qtyIdx=idx('openingqty','openingstock','onhand','on hand','qty','quantity','initialqty','beginningqty');
 
   const mode=(document.querySelector('input[name="wh-import-mode"]:checked')||{}).value||'skip';
+  const importLoc=$('#wh-import-loc')?.value||_WH_MAIN_LOC;
 
   if(!AppState.data.warehouseItems)AppState.data.warehouseItems=[];
   if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
 
-  // Replace mode: soft-delete all existing items first
+  // Replace mode: soft-delete existing items AT THE TARGET LOCATION only
   if(mode==='replace'){
-    if(!confirm(`Replace ALL warehouse items with this CSV?\n\nThis will remove all ${_whItems().length} existing items and reimport from the file. Transaction history is preserved.\n\nProceed?`))return;
-    AppState.data.warehouseItems.forEach(i=>i._deleted=true);
+    const atLoc=_whItems().filter(i=>_whItemLocId(i)===importLoc);
+    if(!confirm(`Replace all warehouse items at ${_whLocName(importLoc)} with this CSV?\n\nThis will remove ${atLoc.length} existing items at that location and reimport from the file. Other locations are untouched. Transaction history is preserved.\n\nProceed?`))return;
+    AppState.data.warehouseItems.forEach(i=>{if(!i._deleted&&_whItemLocId(i)===importLoc)i._deleted=true;});
   }
 
-  const existingByCode=new Map(_whItems().map(i=>[i.code||i.id,i]));
+  // Codes are unique PER LOCATION — match only within the target location
+  const existingByCode=new Map(_whItems().filter(i=>_whItemLocId(i)===importLoc).map(i=>[i.code||i.id,i]));
   const now=new Date().toISOString();
   const today=now.slice(0,10);
   let added=0,updated=0,skipped=0;
@@ -769,7 +847,7 @@ function _whImportExecute(){
     // New item
     const id=_whNextId('WH-',AppState.data.warehouseItems);
     AppState.data.warehouseItems.push({
-      id,name,
+      id,warehouseId:importLoc,name,
       code:code||id,
       category:catIdx>=0?row[catIdx]||'General':'General',
       unit:unitIdx>=0?row[unitIdx]||'ea':'ea',
@@ -853,7 +931,7 @@ function _whRcvRenderAttachments(){
 const _whFmt=v=>Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
 
 function _whRcvLinesHTML(){
-  const items=_whItems();
+  const items=_whItems().filter(i=>_whItemLocId(i)===_whRcvLoc);
   const itemOpts=items.map(i=>`<option value="${i.id}">${i.name} (${i.code||i.id})</option>`).join('');
   if(!_whRcvLines.length)_whRcvLines=[{itemId:'',qty:'',unitCost:'',lineTotal:''}];
   const rows=_whRcvLines.map((ln,idx)=>{
@@ -1033,11 +1111,18 @@ function _whDispatchScan(key,code){
 }
 
 function _whApplyScan(lineIdx,code){
-  // Match against item barcode field, then code field, then name
+  // Match against item barcode field, then code field, then name —
+  // preferring the location selected on the Receive form
+  const atLoc=_whItems().filter(i=>_whItemLocId(i)===_whRcvLoc);
   const items=_whItems();
-  const found=items.find(i=>i.barcode===code)||items.find(i=>i.code===code)||items.find(i=>i.name===code);
+  const found=atLoc.find(i=>i.barcode===code)||atLoc.find(i=>i.code===code)||atLoc.find(i=>i.name===code);
   if(!found){
-    showToast(`No item found for barcode "${code}"`, 'warning', 5000);
+    const elsewhere=items.find(i=>i.barcode===code||i.code===code||i.name===code);
+    if(elsewhere){
+      showToast(`"${elsewhere.name}" is enrolled at ${_whLocName(_whItemLocId(elsewhere))}, not ${_whLocName(_whRcvLoc)} — switch location or enroll it here`,'warning',6000);
+    }else{
+      showToast(`No item found for barcode "${code}"`, 'warning', 5000);
+    }
     return;
   }
   _whRcvLines[lineIdx].itemId=found.id;
@@ -1050,9 +1135,9 @@ function _whApplyScan(lineIdx,code){
 function _whScanForIssue(lineIdx){
   const key='iss:'+lineIdx;
   _whScanCallbacks[key]=code=>{
-    const items=_whItems();
+    const items=_whItems().filter(i=>_whItemLocId(i)===_whIssLoc);
     const found=items.find(i=>i.barcode===code)||items.find(i=>i.code===code)||items.find(i=>i.name===code);
-    if(!found){showToast(`No item found for barcode "${code}"`,'warning',5000);return;}
+    if(!found){showToast(`No item found for barcode "${code}" at ${_whLocName(_whIssLoc)}`,'warning',5000);return;}
     _whIssLines[lineIdx].itemId=found.id;
     _whRefreshIss();
     showToast(`Found: ${found.name}`,'success');
@@ -1087,7 +1172,7 @@ function _whRefreshRcv(){
 }
 
 function _whIssLinesHTML(){
-  const items=_whItems();
+  const items=_whItems().filter(i=>_whItemLocId(i)===_whIssLoc);
   if(!_whIssLines.length)_whIssLines=[{itemId:'',qty:''}];
   const rows=_whIssLines.map((ln,idx)=>{
     const q=ln.itemId?_whCalcQty(ln.itemId):null;
@@ -1168,6 +1253,13 @@ function _whReceiveHTML(){
         <button class="btn btn-secondary btn-sm" onclick="_whImportDeliveries()" title="Import historical delivery records from CSV"><i class="fas fa-file-import"></i> Import History</button>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div class="form-group" style="margin:0;grid-column:1/-1">
+          <label class="form-label"><i class="fas fa-warehouse" style="margin-right:5px;color:var(--accent-blue)"></i>Receive Into *</label>
+          <select class="form-control" id="wh-rcv-loc" onchange="_whRcvLoc=this.value;_whRcvLines=[{itemId:'',qty:'',unitCost:''}];_whRefreshRcv()">
+            ${_whActiveLocs().map(l=>`<option value="${l.id}" ${_whRcvLoc===l.id?'selected':''}>${esc(l.name)}${l.type==='Site'?' (Site)':''}</option>`).join('')}
+          </select>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:3px">Only items enrolled at this location appear below. <a href="#" onclick="event.preventDefault();_whPickLoc=_whRcvLoc;_whPickFromMaster()" style="color:var(--accent-blue)">Enroll an item here…</a></div>
+        </div>
         <div class="form-group" style="margin:0">
           <label class="form-label">Date Received *</label>
           <input class="form-control" type="date" id="wh-rcv-date" value="${new Date().toISOString().slice(0,10)}">
@@ -1237,7 +1329,7 @@ function _whReceiveHTML(){
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
               <div style="min-width:0">
                 <div style="font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item?.name||t.itemId}</div>
-                <div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${t.date||''} · ${t.vendor||'—'}</div>
+                <div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${t.date||''} · ${t.vendor||'—'} · ${esc(_whLocName(t.warehouseId||_whItemLocId(item)))}</div>
                 <div style="font-size:10px;color:var(--text-secondary)">${t.ref||''}</div>
               </div>
               <div style="text-align:right;flex-shrink:0">
@@ -1268,6 +1360,12 @@ function _whIssueHTML(){
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div class="form-group" style="margin:0;grid-column:1/-1">
+          <label class="form-label"><i class="fas fa-warehouse" style="margin-right:5px;color:var(--accent-amber)"></i>From Location *</label>
+          <select class="form-control" id="wh-iss-loc" onchange="_whIssLoc=this.value;_whIssLines=[{itemId:'',qty:''}];_whRefreshIss()">
+            ${_whActiveLocs().map(l=>`<option value="${l.id}" ${_whIssLoc===l.id?'selected':''}>${esc(l.name)}${l.type==='Site'?' (Site)':''}</option>`).join('')}
+          </select>
+        </div>
         <div class="form-group" style="margin:0">
           <label class="form-label">Transaction Type *</label>
           <select class="form-control" id="wh-iss-type">
@@ -1365,6 +1463,457 @@ function _whIssueHTML(){
 }
 
 function _whFillIssueInfo(){}
+
+// ── TAB: TRANSFER (between locations) ────────────────────────
+function _whTransferHTML(){
+  _whTrLines=[{itemId:'',qty:''}];
+  const locs=_whActiveLocs();
+  if(!_whTrTo||_whTrTo===_whTrFrom){const alt=locs.find(l=>l.id!==_whTrFrom);_whTrTo=alt?alt.id:'';}
+  const recent=_whTx().filter(t=>t.type==='transfer-out').sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,15);
+  if(locs.length<2){
+    return`<div class="card" style="padding:30px;text-align:center">
+      <i class="fas fa-exchange-alt" style="font-size:28px;color:var(--text-muted);margin-bottom:10px;display:block"></i>
+      <div style="font-weight:700;margin-bottom:6px">Transfers need at least two locations</div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px">Add a second warehouse or site first, then move stock between them here.</div>
+      <button class="btn btn-primary btn-sm" onclick="_whTab='locations';_whRenderTab();setTimeout(()=>_whShowAddLoc(),100)"><i class="fas fa-plus"></i> Add Location</button>
+    </div>`;
+  }
+  return`
+  <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:14px;align-items:start">
+    <div class="card" style="padding:18px 20px;min-width:0">
+      <div class="section-header" style="margin-bottom:14px">
+        <div>
+          <div style="font-size:13px;font-weight:700"><i class="fas fa-exchange-alt" style="color:var(--accent-blue);margin-right:8px"></i>Transfer Stock</div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Move stock between locations — both ledgers stay in sync, total on-hand is unchanged</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">From *</label>
+          <select class="form-control" id="wh-tr-from" onchange="_whTrFrom=this.value;_whTrLines=[{itemId:'',qty:''}];_whRenderTab()">
+            ${locs.map(l=>`<option value="${l.id}" ${_whTrFrom===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">To *</label>
+          <select class="form-control" id="wh-tr-to" onchange="_whTrTo=this.value">
+            ${locs.filter(l=>l.id!==_whTrFrom).map(l=>`<option value="${l.id}" ${_whTrTo===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Date *</label>
+          <input class="form-control" type="date" id="wh-tr-date" value="${new Date().toISOString().slice(0,10)}">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Transferred By</label>
+          <input class="form-control" id="wh-tr-by" placeholder="Name" value="${AppState.currentUser?.displayName||''}">
+        </div>
+        <div class="form-group" style="margin:0;grid-column:1/-1">
+          <label class="form-label">Notes / Reference</label>
+          <input class="form-control" id="wh-tr-notes" placeholder="Delivery receipt, truck, reason…">
+        </div>
+      </div>
+      <div style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-secondary)"><i class="fas fa-list" style="margin-right:6px"></i>Line Items</div>
+          <button class="btn btn-secondary btn-sm" onclick="_whTrLines.push({itemId:'',qty:''});_whRefreshTr()"><i class="fas fa-plus"></i> Add Item</button>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse;table-layout:fixed">
+            <thead>
+              <tr style="background:var(--bg-tertiary)">
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left">Item (at source)</th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:center;width:80px">Available</th>
+                <th style="padding:7px 8px;font-size:11px;font-weight:600;color:var(--text-secondary);text-align:left;width:80px">Qty</th>
+                <th style="width:32px"></th>
+              </tr>
+            </thead>
+            <tbody id="wh-tr-lines">${_whTrLinesHTML()}</tbody>
+          </table>
+        </div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:5px"><i class="fas fa-info-circle"></i> If the item is not yet enrolled at the destination, a stock record is created there automatically.</div>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="_whSaveTransfer()"><i class="fas fa-exchange-alt"></i> Post Transfer</button>
+    </div>
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">
+        <i class="fas fa-history" style="margin-right:6px"></i>Recent Transfers
+      </div>
+      ${recent.length?`<div style="display:flex;flex-direction:column;gap:7px">
+        ${recent.map(t=>{
+          const item=_whItems().find(i=>i.id===t.itemId);
+          return`<div class="card" style="padding:10px 14px;border-left:3px solid var(--accent-blue)">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+              <div style="min-width:0">
+                <div style="font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item?.name||t.itemId}</div>
+                <div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${t.date||''} · ${esc(_whLocName(t.warehouseId))} → ${esc(_whLocName(t.toLocationId))}</div>
+              </div>
+              <div style="font-family:var(--font-mono);color:var(--accent-blue);font-size:13px;font-weight:700;flex-shrink:0">${t.qty} ${item?.unit||''}</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`:`<div class="empty-state" style="padding:30px"><i class="fas fa-exchange-alt"></i><p>No transfers yet</p></div>`}
+    </div>
+  </div>`;
+}
+
+function _whTrLinesHTML(){
+  const items=_whItems().filter(i=>_whItemLocId(i)===_whTrFrom);
+  if(!_whTrLines.length)_whTrLines=[{itemId:'',qty:''}];
+  return _whTrLines.map((ln,idx)=>{
+    const q=ln.itemId?_whCalcQty(ln.itemId):null;
+    const item=ln.itemId?items.find(i=>i.id===ln.itemId):null;
+    const avail=q?q.qtyOnHand:null;
+    const itemOpts=items.map(i=>`<option value="${i.id}"${i.id===ln.itemId?' selected':''}>${i.name} (${i.code||i.id})</option>`).join('');
+    return`<tr>
+      <td style="padding:5px 4px">
+        <select class="form-control" style="font-size:12px;width:100%" onchange="_whTrLines[${idx}].itemId=this.value;_whRefreshTr()">
+          <option value="">— Select Item —</option>${itemOpts}
+        </select>
+      </td>
+      <td style="padding:5px 4px;font-size:11px;text-align:center">
+        ${q?`<span style="color:${avail>0?'var(--accent-green)':'var(--accent-red)'};font-weight:700">${avail}</span><br><span style="color:var(--text-secondary);font-size:10px">${item?.unit||''}</span>`:'—'}
+      </td>
+      <td style="padding:5px 4px">
+        <input class="form-control" type="number" min="0.01" step="0.01" style="font-size:12px;width:100%" placeholder="0" value="${ln.qty||''}"
+          oninput="_whTrLines[${idx}].qty=this.value">
+      </td>
+      <td style="padding:5px 4px;text-align:center">
+        ${_whTrLines.length>1?`<button class="btn btn-secondary btn-sm" style="padding:2px 6px;color:var(--accent-red)" onclick="_whTrLines.splice(${idx},1);_whRefreshTr()"><i class="fas fa-times"></i></button>`:''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function _whRefreshTr(){
+  const el=$('#wh-tr-lines');
+  if(el)el.innerHTML=_whTrLinesHTML();
+}
+
+// Find (or create) the destination stock record for a transfer.
+// Matching is by item identity: itemMasterId first, then code.
+function _whFindOrCreateDestRecord(src,toLocId){
+  const match=_whItems().find(i=>
+    _whItemLocId(i)===toLocId&&i.id!==src.id&&(
+      (src.itemMasterId&&i.itemMasterId===src.itemMasterId)||
+      (src.code&&i.code&&i.code===src.code)
+    ));
+  if(match)return match;
+  const now=new Date().toISOString();
+  const rec={
+    id:_whNextId('WH-',AppState.data.warehouseItems),
+    warehouseId:toLocId,
+    itemMasterId:src.itemMasterId||null,itemMasterType:src.itemMasterType||null,
+    name:src.name,code:src.code||'',barcode:src.barcode||'',
+    category:src.category||'General',unit:src.unit||'',
+    unitCost:src.unitCost||0,
+    minStock:0,reorderPoint:0,
+    rack:'',row:'',location:'',description:src.description||'',
+    qtyOnHand:0,qtyReserved:0,qtyAvailable:0,netIssued:0,
+    createdAt:now,updatedAt:now,
+  };
+  if(typeof _markNewlyCreated==='function')_markNewlyCreated(rec);
+  AppState.data.warehouseItems.push(rec);
+  return rec;
+}
+
+function _whSaveTransfer(){
+  if(typeof hasModulePermission==='function'&&!hasModulePermission('warehouse','edit')){showToast('You have view-only access to Warehouse','warning');return;}
+  const from=_whTrFrom;
+  const to=$('#wh-tr-to')?.value||_whTrTo;
+  if(!to||to===from){showToast('Pick two different locations','error');return;}
+  const date=$('#wh-tr-date')?.value||new Date().toISOString().slice(0,10);
+  const by=$('#wh-tr-by')?.value.trim();
+  const notes=$('#wh-tr-notes')?.value.trim();
+  const valid=_whTrLines.filter(ln=>ln.itemId&&parseFloat(ln.qty)>0);
+  if(!valid.length){showToast('Add at least one item with qty > 0','error');return;}
+  // Stock check at source
+  for(const ln of valid){
+    const q=_whCalcQty(ln.itemId);
+    const qty=parseFloat(ln.qty);
+    if(qty>q.qtyOnHand){
+      const item=_whItems().find(i=>i.id===ln.itemId);
+      showToast(`"${item?.name||ln.itemId}": only ${q.qtyOnHand} on hand at ${_whLocName(from)} — cannot transfer ${qty}`,'error',5000);
+      return;
+    }
+  }
+  if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
+  const postedAt=new Date().toISOString();
+  const transferRef='TRF-'+Date.now().toString(36).toUpperCase();
+  valid.forEach(ln=>{
+    const src=_whItems().find(i=>i.id===ln.itemId);
+    const qty=parseFloat(ln.qty);
+    const wac=_whCalcWAC(src.id)||src.unitCost||0;
+    const dst=_whFindOrCreateDestRecord(src,to);
+    AppState.data.stockTransactions.push({
+      id:_whNextId('TX-',AppState.data.stockTransactions),
+      itemId:src.id,type:'transfer-out',qty,date,notes,by,postedAt,transferRef,
+      warehouseId:from,toLocationId:to,unitCost:wac||undefined,
+    });
+    AppState.data.stockTransactions.push({
+      id:_whNextId('TX-',AppState.data.stockTransactions),
+      itemId:dst.id,type:'transfer-in',qty,date,notes,by,postedAt,transferRef,
+      warehouseId:to,fromLocationId:from,unitCost:wac||undefined,
+    });
+    if(wac>0&&!(dst.unitCost>0))dst.unitCost=wac;
+    _whSyncQty(src.id);_whSyncQty(dst.id);
+  });
+  AppState.save();
+  auditLog('CREATE','Warehouse','StockTransfer',transferRef,null,{from,to,items:valid.length,date,by},'Stock Transfer');
+  if(typeof fireWebhook==='function')fireWebhook('stock_transferred',{from,to,date,by,itemCount:valid.length});
+  _whTrLines=[{itemId:'',qty:''}];
+  _whRenderTab();
+  _whShowUndoToast(`${valid.length} item${valid.length>1?'s':''} transferred ${_whLocName(from)} → ${_whLocName(to)}`,()=>{
+    (AppState.data.stockTransactions||[]).filter(t=>t.transferRef===transferRef).forEach(t=>{t._deleted=true;_whSyncQty(t.itemId);});
+    AppState.save();showToast('Transfer undone','info');_whRenderTab();
+  });
+}
+
+// ── TAB: LOCATIONS ───────────────────────────────────────────
+function _whLocationsHTML(){
+  const locs=_whLocs();
+  const rows=locs.map(l=>{
+    const items=_whItems().filter(i=>_whItemLocId(i)===l.id);
+    const value=items.reduce((s,i)=>{const q=_whCalcQty(i.id);return s+(q.qtyOnHand*(i.unitCost||0));},0);
+    const stocked=items.filter(i=>_whCalcQty(i.id).qtyOnHand>0).length;
+    const inactive=l.active===false;
+    return`<tr style="${inactive?'opacity:.5':''}">
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">${esc(l.code||l.id)}</td>
+      <td><div style="font-weight:600">${esc(l.name)}</div>
+        <div style="font-size:10px;color:var(--text-secondary)">${esc(l.address||'—')}</div></td>
+      <td><span class="badge ${l.type==='Site'?'badge-amber':'badge-blue'}" style="font-size:10px">${l.type==='Site'?'Site':'Warehouse'}</span></td>
+      <td style="text-align:right;font-family:var(--font-mono)">${items.length}<div style="font-size:10px;color:var(--text-secondary)">${stocked} stocked</div></td>
+      <td style="text-align:right;font-family:var(--font-mono);color:var(--accent-green)">₱${fmtNum(value)}</td>
+      <td>${inactive?'<span style="font-size:10px;color:var(--accent-red)">Inactive</span>':'<span style="font-size:10px;color:var(--accent-green)">Active</span>'}</td>
+      <td>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-secondary btn-sm" style="padding:3px 7px" onclick="_whShowAddLoc('${l.id}')" title="Edit"><i class="fas fa-edit"></i></button>
+          ${l.id!==_WH_MAIN_LOC?`<button class="btn btn-secondary btn-sm" style="padding:3px 7px" onclick="_whToggleLocActive('${l.id}')" title="${inactive?'Reactivate':'Deactivate'}"><i class="fas fa-power-off" style="color:${inactive?'var(--accent-green)':'var(--accent-red)'}"></i></button>`:''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+  return`
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <div style="font-size:13px;font-weight:700;color:var(--text-secondary)">Warehouses &amp; Sites — <span style="color:var(--text-primary)">${locs.length}</span></div>
+    <button class="btn btn-primary btn-sm" onclick="_whShowAddLoc()"><i class="fas fa-plus"></i> Add Location</button>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>CODE</th><th>NAME</th><th>TYPE</th><th style="text-align:right">ITEMS</th><th style="text-align:right">STOCK VALUE</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>
+  <div style="font-size:11px;color:var(--text-muted);margin-top:8px"><i class="fas fa-info-circle"></i> A <strong>Site</strong> works exactly like a warehouse — it can hold stock, receive transfers, and issue to projects. Items pre-dating multi-warehouse belong to Main Warehouse.</div>`;
+}
+
+function _whShowAddLoc(editId){
+  const existing=editId?_whLocs().find(l=>l.id===editId):null;
+  const html=`
+  <div class="modal-overlay open" data-dynamic="1" id="whLocModal">
+    <div class="modal" style="max-width:440px">
+      <div class="modal-header">
+        <div class="modal-title">${existing?'Edit Location':'Add Location'}</div>
+        <button class="modal-close" onclick="closeModal('whLocModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="grid-column:1/-1">
+            <label class="form-label">Name *</label>
+            <input class="form-control" id="wh-loc-name" placeholder="e.g. Site A — PGPC Plant, Batangas Yard" value="${esc(existing?.name||'')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Short Code *</label>
+            <input class="form-control" id="wh-loc-code" placeholder="e.g. SITEA" value="${esc(existing?.code||'')}" oninput="this.value=this.value.toUpperCase()" ${existing?.id===_WH_MAIN_LOC?'disabled':''}>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Type *</label>
+            <select class="form-control" id="wh-loc-type" ${existing?.id===_WH_MAIN_LOC?'disabled':''}>
+              <option ${existing?.type!=='Site'?'selected':''}>Warehouse</option>
+              <option ${existing?.type==='Site'?'selected':''}>Site</option>
+            </select>
+          </div>
+          <div class="form-group" style="grid-column:1/-1">
+            <label class="form-label">Address / Notes</label>
+            <input class="form-control" id="wh-loc-addr" placeholder="Address or description" value="${esc(existing?.address||'')}">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('whLocModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="_whSaveLoc('${editId||''}')"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+
+function _whSaveLoc(editId){
+  if(typeof hasModulePermission==='function'&&!hasModulePermission('warehouse','manage')){showToast('Only Warehouse Managers can manage locations','warning');return;}
+  const name=$('#wh-loc-name')?.value.trim();
+  const code=($('#wh-loc-code')?.value.trim()||'').toUpperCase();
+  if(!name){showToast('Location name required','error');return;}
+  if(!editId&&!code){showToast('Short code required','error');return;}
+  if(!AppState.data.warehouseLocations)AppState.data.warehouseLocations=[];
+  const now=new Date().toISOString();
+  if(editId){
+    const loc=AppState.data.warehouseLocations.find(l=>l.id===editId);
+    if(loc){
+      loc.name=name;loc.address=$('#wh-loc-addr')?.value.trim()||'';
+      if(loc.id!==_WH_MAIN_LOC){if(code)loc.code=code;loc.type=$('#wh-loc-type')?.value||'Warehouse';}
+      loc.updatedAt=now;
+    }
+  }else{
+    if(_whLocs().some(l=>l.code===code)){showToast(`Code "${code}" already used`,'error');return;}
+    const newLoc={
+      id:'LOC-'+code,code,name,
+      type:$('#wh-loc-type')?.value||'Warehouse',
+      address:$('#wh-loc-addr')?.value.trim()||'',
+      active:true,createdAt:now,
+    };
+    if(typeof _markNewlyCreated==='function')_markNewlyCreated(newLoc);
+    AppState.data.warehouseLocations.push(newLoc);
+  }
+  AppState.save();
+  auditLog(editId?'UPDATE':'CREATE','Warehouse','WarehouseLocation',editId||('LOC-'+code),null,{name,code},'Location saved');
+  closeModal('whLocModal');
+  showToast(editId?'Location updated':'Location added','success');
+  _whRenderTab();
+}
+
+function _whToggleLocActive(id){
+  const loc=(AppState.data.warehouseLocations||[]).find(l=>l.id===id);
+  if(!loc||id===_WH_MAIN_LOC)return;
+  if(loc.active!==false){
+    const stocked=_whItems().filter(i=>_whItemLocId(i)===id&&_whCalcQty(i.id).qtyOnHand>0);
+    if(stocked.length&&!confirm(`${loc.name} still holds stock on ${stocked.length} item(s).\n\nDeactivating hides it from Receive/Issue/Transfer pickers but keeps its records and history. Transfer the stock out first if you want it emptied.\n\nDeactivate anyway?`))return;
+    loc.active=false;
+  }else{
+    loc.active=true;
+  }
+  AppState.save();showToast(loc.active?'Location reactivated':'Location deactivated','success');_whRenderTab();
+}
+
+// ── ITEM DETAIL — one item code across every location ────────
+function _whShowItemDetail(whId){
+  const seed=_whItems().find(i=>i.id===whId);
+  if(!seed)return;
+  const agg=_whCalcQtyAll(whId);
+  const recIds=new Set(agg.records.map(r=>r.item.id));
+  const masterId=seed.itemMasterId||agg.records.map(r=>r.item.itemMasterId).find(Boolean)||null;
+  const totalValue=agg.records.reduce((s,r)=>s+(r.q.qtyOnHand*(r.item.unitCost||0)),0);
+
+  // Stock by location — list every active location, even where qty is 0
+  const locRows=_whActiveLocs().map(l=>{
+    const rec=agg.records.find(r=>r.locId===l.id);
+    const q=rec?rec.q:null;
+    return`<tr style="${!rec?'opacity:.45':''}">
+      <td><div style="font-weight:600;font-size:12px">${esc(l.name)}</div><div style="font-size:10px;color:var(--text-secondary)">${l.type==='Site'?'Site':'Warehouse'}${rec&&(rec.item.rack||rec.item.row)?` · Rack ${rec.item.rack||'—'} / Row ${rec.item.row||'—'}`:''}</div></td>
+      <td style="text-align:right;font-family:var(--font-mono);font-weight:700;color:${q&&q.qtyOnHand>0?'var(--accent-green)':'var(--text-muted)'}">${q?q.qtyOnHand:'—'}</td>
+      <td style="text-align:right;font-family:var(--font-mono);color:var(--accent-amber)">${q?q.qtyReserved:'—'}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-weight:700;color:${q&&q.qtyAvailable>0?'var(--accent-green)':'var(--accent-red)'}">${q?q.qtyAvailable:'—'}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--accent-green)">${q?'₱'+fmtNum(q.qtyOnHand*(rec.item.unitCost||0)):'—'}</td>
+      <td>${rec?`<span style="font-size:10px;color:var(--text-secondary)">${rec.item.id}</span>`:'<span style="font-size:10px;color:var(--text-muted)">not enrolled</span>'}</td>
+    </tr>`;
+  }).join('');
+
+  // Transaction history across all locations (latest 50)
+  const txAll=_whTx().filter(t=>recIds.has(t.itemId)).sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.postedAt||0)-new Date(a.postedAt||0));
+  const typeColor={receive:'var(--accent-green)',issue:'var(--accent-amber)','issue-shop':'var(--accent-amber)','issue-enduser':'var(--accent-amber)',return:'var(--accent-blue)',adjust:'#39d3f2','transfer-in':'var(--accent-blue)','transfer-out':'var(--accent-blue)'};
+  const txRows=txAll.slice(0,50).map(t=>{
+    const rec=agg.records.find(r=>r.item.id===t.itemId);
+    const col=typeColor[t.type]||'#aaa';
+    const isOut=t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser'||t.type==='transfer-out';
+    const locLabel=t.type==='transfer-out'?`${esc(_whLocName(_whItemLocId(rec?.item)))} → ${esc(_whLocName(t.toLocationId))}`
+      :t.type==='transfer-in'?`${esc(_whLocName(t.fromLocationId))} → ${esc(_whLocName(_whItemLocId(rec?.item)))}`
+      :esc(_whLocName(t.warehouseId||_whItemLocId(rec?.item)));
+    return`<tr>
+      <td style="font-size:10px;font-family:var(--font-mono);color:var(--text-secondary)">${(t.date||'').slice(0,10)}</td>
+      <td><span class="badge" style="background:${col}22;color:${col};border:1px solid ${col}44;font-size:9px;text-transform:uppercase">${t.type}</span></td>
+      <td style="font-size:10px">${locLabel}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-weight:700;color:${col}">${isOut?'−':'+'}${Math.abs(t.qty)}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:10px">${t.unitCost?'₱'+_whFmt(t.unitCost):'—'}</td>
+      <td style="font-size:10px">${t.projectId||'—'}</td>
+      <td style="font-size:10px;color:var(--text-secondary)">${esc(t.vendor||t.issuedBy||t.by||'—')}</td>
+      <td style="font-size:10px;color:var(--text-secondary)">${esc(t.ref||t.notes||'—')}</td>
+    </tr>`;
+  }).join('');
+
+  // Purchase history — POs linked via Item Master + all receive transactions
+  const pos=masterId?(AppState.data.procurement||[]).filter(p=>!p._deleted&&p.itemMasterId===masterId):[];
+  const poRows=pos.sort((a,b)=>new Date(b.poDate||b.prDate||0)-new Date(a.poDate||a.prDate||0)).map(p=>`<tr>
+      <td style="font-size:10px;font-family:var(--font-mono)">${p.id}</td>
+      <td style="font-size:10px">${esc(p.poNumber||'—')}</td>
+      <td style="font-size:11px">${esc(p.vendor||'—')}</td>
+      <td style="font-size:10px;font-family:var(--font-mono)">${(p.poDate||p.prDate||'').slice(0,10)||'—'}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--accent-green)">${p.amount?'₱'+fmtNum(p.amount):'—'}</td>
+      <td><span class="badge" style="font-size:9px">${esc(p.status||'—')}</span></td>
+      <td style="font-size:10px">${p.projectId||'—'}</td>
+    </tr>`).join('');
+  const receipts=txAll.filter(t=>t.type==='receive').slice(0,20);
+  const rcvRows=receipts.map(t=>`<tr>
+      <td style="font-size:10px;font-family:var(--font-mono)">${(t.date||'').slice(0,10)}</td>
+      <td style="font-size:11px">${esc(t.vendor||'—')}</td>
+      <td style="font-size:10px">${esc(_whLocName(t.warehouseId||_whItemLocId(agg.records.find(r=>r.item.id===t.itemId)?.item)))}</td>
+      <td style="text-align:right;font-family:var(--font-mono);color:var(--accent-green);font-weight:700">+${t.qty}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:10px">${t.unitCost?'₱'+_whFmt(t.unitCost):'—'}</td>
+      <td style="font-size:10px;color:var(--text-secondary)">${esc(t.ref||'—')}</td>
+    </tr>`).join('');
+
+  const html=`
+  <div class="modal-overlay open" data-dynamic="1" id="whItemDetailModal">
+    <div class="modal" style="max-width:860px">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fas fa-box-open" style="color:var(--accent-blue);margin-right:8px"></i>${esc(seed.name)}
+          <span style="font-size:11px;color:var(--text-secondary);font-weight:400;margin-left:8px">${esc(seed.code||seed.id)} · ${esc(seed.category||'—')} · ${esc(seed.unit||'ea')}${masterId?` · <i class="fas fa-link" style="color:var(--accent-blue)"></i> ${masterId}`:''}</span>
+        </div>
+        <button class="modal-close" onclick="closeModal('whItemDetailModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body" style="max-height:72vh;overflow-y:auto">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+          ${[
+            ['Total On Hand',agg.qtyOnHand,'var(--accent-green)'],
+            ['Reserved',agg.qtyReserved,'var(--accent-amber)'],
+            ['Available',agg.qtyAvailable,agg.qtyAvailable>0?'var(--accent-green)':'var(--accent-red)'],
+            ['Stock Value','₱'+fmtNum(totalValue),'var(--accent-blue)'],
+          ].map(([l,v,c])=>`<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:10px 12px;text-align:center">
+            <div style="font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px">${l}</div>
+            <div style="font-size:18px;font-weight:700;color:${c};font-family:var(--font-mono)">${v}</div>
+          </div>`).join('')}
+        </div>
+
+        <div style="font-size:12px;font-weight:700;margin-bottom:6px"><i class="fas fa-map-marker-alt" style="color:var(--accent-blue);margin-right:6px"></i>Stock by Location</div>
+        <div class="table-wrap" style="margin-bottom:16px"><table>
+          <thead><tr><th>LOCATION</th><th style="text-align:right">ON HAND</th><th style="text-align:right">RESERVED</th><th style="text-align:right">AVAILABLE</th><th style="text-align:right">VALUE</th><th>RECORD</th></tr></thead>
+          <tbody>${locRows}</tbody>
+        </table></div>
+
+        <div style="font-size:12px;font-weight:700;margin-bottom:6px"><i class="fas fa-shopping-cart" style="color:var(--accent-green);margin-right:6px"></i>Purchase History</div>
+        ${poRows?`<div class="table-wrap" style="margin-bottom:10px"><table>
+          <thead><tr><th>PR/PO</th><th>PO #</th><th>VENDOR</th><th>DATE</th><th style="text-align:right">AMOUNT</th><th>STATUS</th><th>PROJECT</th></tr></thead>
+          <tbody>${poRows}</tbody>
+        </table></div>`:''}
+        ${rcvRows?`<div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px">Goods received (latest 20)</div>
+        <div class="table-wrap" style="margin-bottom:16px"><table>
+          <thead><tr><th>DATE</th><th>SUPPLIER</th><th>INTO</th><th style="text-align:right">QTY</th><th style="text-align:right">UNIT COST</th><th>REF</th></tr></thead>
+          <tbody>${rcvRows}</tbody>
+        </table></div>`:''}
+        ${!poRows&&!rcvRows?`<div class="empty-state" style="padding:16px;margin-bottom:16px"><p style="font-size:11px">No purchase records yet</p></div>`:''}
+
+        <div style="font-size:12px;font-weight:700;margin-bottom:6px"><i class="fas fa-list-alt" style="color:var(--accent-amber);margin-right:6px"></i>Transaction History <span style="font-size:10px;color:var(--text-secondary);font-weight:400">(all locations, latest 50 of ${txAll.length})</span></div>
+        ${txRows?`<div class="table-wrap"><table>
+          <thead><tr><th>DATE</th><th>TYPE</th><th>LOCATION</th><th style="text-align:right">QTY</th><th style="text-align:right">COST</th><th>PROJECT</th><th>BY / VENDOR</th><th>REF / NOTES</th></tr></thead>
+          <tbody>${txRows}</tbody>
+        </table></div>`:`<div class="empty-state" style="padding:16px"><p style="font-size:11px">No transactions yet</p></div>`}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" onclick="closeModal('whItemDetailModal');_whShowReceive('${seed.id}')"><i class="fas fa-truck-loading" style="color:var(--accent-green)"></i> Receive</button>
+        <button class="btn btn-secondary btn-sm" onclick="closeModal('whItemDetailModal');_whShowIssueItem('${seed.id}')"><i class="fas fa-dolly" style="color:var(--accent-amber)"></i> Issue</button>
+        <button class="btn btn-secondary btn-sm" onclick="closeModal('whItemDetailModal');_whTab='transfer';_whRenderTab()"><i class="fas fa-exchange-alt" style="color:var(--accent-blue)"></i> Transfer</button>
+        <button class="btn btn-secondary" onclick="closeModal('whItemDetailModal')">Close</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend',html);
+}
 
 // ── TAB: ISSUANCE REQUESTS ───────────────────────────────────
 function _whRequestsHTML(){
@@ -1667,21 +2216,27 @@ function _whPrintItemsReport(){
 function _whLedgerHTML(){
   const all=_whTx().sort((a,b)=>new Date(b.date)-new Date(a.date));
   const items=_whItems();
-  const typeColor={receive:'var(--accent-green)',issue:'var(--accent-amber)',return:'var(--accent-blue)',adjust:'#39d3f2'};
+  const typeColor={receive:'var(--accent-green)',issue:'var(--accent-amber)','issue-shop':'var(--accent-amber)','issue-enduser':'var(--accent-amber)',return:'var(--accent-blue)',adjust:'#39d3f2','transfer-in':'var(--accent-blue)','transfer-out':'var(--accent-blue)'};
 
+  const txLocOf=t=>t.warehouseId||_whItemLocId(items.find(i=>i.id===t.itemId));
   let filterItem=_whTxItemFilter;
   let shown=filterItem==='all'?all:all.filter(t=>t.itemId===filterItem);
+  if(_whTxLocFilter!=='all')shown=shown.filter(t=>txLocOf(t)===_whTxLocFilter);
 
   const rows=shown.slice(0,100).map(t=>{
     const item=items.find(i=>i.id===t.itemId);
     const col=typeColor[t.type]||'#aaa';
-    const isIss=t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser';
+    const isIss=t.type==='issue'||t.type==='issue-shop'||t.type==='issue-enduser'||t.type==='transfer-out';
     const sign=isIss?'−':'+';
-    const canPrint=isIss||t.type==='return'||t.type==='adjust';
+    const canPrint=(t.type!=='receive'&&t.type!=='transfer-in'&&t.type!=='transfer-out');
+    const locLabel=t.type==='transfer-out'?`${esc(_whLocName(txLocOf(t)))} → ${esc(_whLocName(t.toLocationId))}`
+      :t.type==='transfer-in'?`${esc(_whLocName(t.fromLocationId))} → ${esc(_whLocName(txLocOf(t)))}`
+      :esc(_whLocName(txLocOf(t)));
     return`<tr>
       <td style="font-size:10px;color:var(--text-secondary);font-family:var(--font-mono)">${(t.date||'').slice(0,10)}</td>
       <td><span class="badge" style="background:${col}22;color:${col};border:1px solid ${col}44;font-size:10px;text-transform:uppercase">${t.type}</span></td>
       <td style="font-size:12px;font-weight:600">${item?.name||t.itemId}</td>
+      <td style="font-size:10px">${locLabel}</td>
       <td style="text-align:right;font-family:var(--font-mono);font-weight:700;color:${col}">${sign}${Math.abs(t.qty)} ${item?.unit||''}</td>
       <td style="font-size:11px">${t.projectId||'—'}</td>
       <td style="font-size:11px">${t.vendor||t.issuedBy||t.by||'—'}</td>
@@ -1702,13 +2257,17 @@ function _whLedgerHTML(){
       <option value="all">All Items</option>
       ${items.map(i=>`<option value="${i.id}" ${filterItem===i.id?'selected':''}>${i.name}</option>`).join('')}
     </select>
+    <select class="form-control" style="width:170px" onchange="_whTxLocFilter=this.value;_whRenderTab()" title="Filter by location">
+      <option value="all">All Locations</option>
+      ${_whActiveLocs().map(l=>`<option value="${l.id}" ${_whTxLocFilter===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}
+    </select>
     <button class="btn btn-secondary btn-sm" onclick="_whExportLedger()"><i class="fas fa-download"></i> Export Ledger</button>
     <button class="btn btn-secondary btn-sm" onclick="_whPrintLedger()"><i class="fas fa-print"></i> Print</button>
   </div>
   <div class="table-wrap">
   <table>
-    <thead><tr><th>DATE</th><th>TYPE</th><th>ITEM</th><th style="text-align:right">QTY</th><th>PROJECT</th><th>VENDOR / BY</th><th>REFERENCE</th><th>NOTES</th><th></th></tr></thead>
-    <tbody>${rows||`<tr><td colspan="9"><div class="empty-state"><i class="fas fa-list-alt"></i><p>No transactions yet</p></div></td></tr>`}</tbody>
+    <thead><tr><th>DATE</th><th>TYPE</th><th>ITEM</th><th>LOCATION</th><th style="text-align:right">QTY</th><th>PROJECT</th><th>VENDOR / BY</th><th>REFERENCE</th><th>NOTES</th><th></th></tr></thead>
+    <tbody>${rows||`<tr><td colspan="10"><div class="empty-state"><i class="fas fa-list-alt"></i><p>No transactions yet</p></div></td></tr>`}</tbody>
   </table>
   </div>
   ${shown.length>100?`<div style="text-align:center;padding:10px;color:var(--text-secondary);font-size:12px">Showing 100 of ${shown.length} records</div>`:''}`;
@@ -1954,6 +2513,7 @@ async function _whSaveReceive(){
     AppState.data.stockTransactions.push({
       id:_whNextId('TX-',AppState.data.stockTransactions),
       itemId:ln.itemId,type:'receive',qty,date,ref,vendor,notes,by,postedAt,batchRef,
+      warehouseId:_whRcvLoc,
       unitCost:cost||undefined,
       attachments:attachments.length?attachments:undefined,
     });
@@ -2031,6 +2591,7 @@ function _whSaveIssue(){
       itemId:ln.itemId,type,bu,
       qty:type==='adjust'&&String(ln.qty).startsWith('-')?-Math.abs(qty):qty,
       unitCost:isIssueType?_whCalcWAC(ln.itemId):undefined,
+      warehouseId:_whIssLoc,
       projectId:projId||null,date,issuedBy:by,by,notes,postedAt,
     });
     _whSyncQty(ln.itemId);
@@ -2344,8 +2905,12 @@ function _whStartPR(reqId){
 function _whPickFromMaster(){
   const mats=(AppState.data.materials||[]).filter(m=>!m._deleted);
   const cons=(AppState.data.consumables||[]).filter(c=>!c._deleted);
-  const enrolled=new Set((AppState.data.warehouseItems||[]).filter(w=>!w._deleted).map(w=>w.itemMasterId).filter(Boolean));
+  if(!_whLoc(_whPickLoc)||_whLoc(_whPickLoc).active===false)_whPickLoc=_WH_MAIN_LOC;
+  // Enrolled = already has a stock record AT THE SELECTED LOCATION.
+  // The same item can be enrolled at several locations.
+  const enrolled=new Set((AppState.data.warehouseItems||[]).filter(w=>!w._deleted&&_whItemLocId(w)===_whPickLoc).map(w=>w.itemMasterId).filter(Boolean));
   const all=[...mats.map(m=>({...m,_type:'materials'})),...cons.map(c=>({...c,_type:'consumables'}))];
+  const old=document.getElementById('whMasterPickModal');if(old)old.remove();
   const html=`
   <div class="modal-overlay open" data-dynamic="1" id="whMasterPickModal">
     <div class="modal" style="max-width:540px">
@@ -2354,6 +2919,12 @@ function _whPickFromMaster(){
         <button class="modal-close" onclick="closeModal('whMasterPickModal')"><i class="fas fa-times"></i></button>
       </div>
       <div class="modal-body">
+        <div class="form-group" style="margin-bottom:10px">
+          <label class="form-label">Enroll into location</label>
+          <select class="form-control" onchange="_whPickLoc=this.value;_whPickFromMaster()">
+            ${_whActiveLocs().map(l=>`<option value="${l.id}" ${_whPickLoc===l.id?'selected':''}>${esc(l.name)}${l.type==='Site'?' (Site)':''}</option>`).join('')}
+          </select>
+        </div>
         <input class="form-control" placeholder="Search items…" oninput="
           const q=this.value.toLowerCase();
           document.querySelectorAll('#whMasterList .im-row').forEach(r=>{r.style.display=r.dataset.name.includes(q)?'':'none';});
@@ -2361,12 +2932,12 @@ function _whPickFromMaster(){
         <div id="whMasterList" style="max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
           ${all.length?all.map(item=>{
             const inWh=enrolled.has(item.id);
-            return`<div class="im-row" data-name="${(item.name||'').toLowerCase()}" style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;${inWh?'opacity:.5':'cursor:pointer'}" ${!inWh?`onclick="_whEnrollFromPicker('${item.id}','${item._type}')"`:'title="Already in Warehouse"'}>
+            return`<div class="im-row" data-name="${(item.name||'').toLowerCase()}" style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;${inWh?'opacity:.5':'cursor:pointer'}" ${!inWh?`onclick="_whEnrollFromPicker('${item.id}','${item._type}')"`:'title="Already enrolled at this location"'}>
               <div style="flex:1">
                 <div style="font-weight:600;font-size:12px">${esc(item.name)}</div>
                 <div style="font-size:10px;color:var(--text-secondary)">${esc(item.id)} · ${esc(item.category||'—')} · ${esc(item.unit||'—')} · Std Cost: ₱${fmtNum(item.unitCost||0)}</div>
               </div>
-              ${inWh?'<span style="font-size:10px;color:var(--accent-green)"><i class="fas fa-check"></i> In Warehouse</span>':'<span style="font-size:10px;color:var(--accent-blue)"><i class="fas fa-plus"></i> Enroll</span>'}
+              ${inWh?'<span style="font-size:10px;color:var(--accent-green)"><i class="fas fa-check"></i> Enrolled here</span>':'<span style="font-size:10px;color:var(--accent-blue)"><i class="fas fa-plus"></i> Enroll</span>'}
             </div>`;
           }).join(''):`<div class="empty-state" style="padding:24px"><i class="fas fa-book-open"></i><p>No items in Item Master yet.<br>Add materials or consumables in Asset Masterlist first.</p></div>`}
         </div>
@@ -2384,9 +2955,11 @@ function _whEnrollFromPicker(itemId, itemType){
   const item=(arr||[]).find(i=>i.id===itemId);
   if(!item)return;
   if(!AppState.data.warehouseItems)AppState.data.warehouseItems=[];
-  if(AppState.data.warehouseItems.some(w=>!w._deleted&&w.itemMasterId===itemId)){showToast('Already enrolled','warning');return;}
+  // Guard is per-location: the same item may be enrolled at several locations
+  if(AppState.data.warehouseItems.some(w=>!w._deleted&&w.itemMasterId===itemId&&_whItemLocId(w)===_whPickLoc)){showToast('Already enrolled at '+_whLocName(_whPickLoc),'warning');return;}
   const wh={
-    id:'WH-'+String((AppState.data.warehouseItems.length+1)).padStart(4,'0'),
+    id:_whNextId('WH-',AppState.data.warehouseItems),
+    warehouseId:_whPickLoc,
     itemMasterId:itemId,itemMasterType:itemType,
     name:item.name,code:item.id,
     category:item.category||'General',unit:item.unit||'',
@@ -2399,7 +2972,7 @@ function _whEnrollFromPicker(itemId, itemType){
   AppState.data.warehouseItems.push(wh);
   AppState.save();
   closeModal('whMasterPickModal');
-  showToast(`"${item.name}" enrolled — now add opening stock via Receive tab`,'success',4000);
+  showToast(`"${item.name}" enrolled at ${_whLocName(_whPickLoc)} — add opening stock via Receive tab`,'success',4000);
   _whRenderTab();
 }
 
@@ -2427,6 +3000,13 @@ function _whShowAddItem(editId){
           <i class="fas fa-link" style="color:var(--accent-green);margin-right:6px"></i>Linked to Item Master: <strong>${linkedMaster.name}</strong> (${existing.itemMasterId})
         </div>`:''}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="grid-column:1/-1">
+            <label class="form-label">Location *</label>
+            <select class="form-control" id="wh-add-wloc" ${existing&&_whTx().some(t=>t.itemId===existing.id)?'disabled title="This record has transaction history — use Transfer to move stock between locations"':''}>
+              ${_whActiveLocs().map(l=>`<option value="${l.id}" ${(existing?_whItemLocId(existing):_whItemLocFilter!=='all'?_whItemLocFilter:_WH_MAIN_LOC)===l.id?'selected':''}>${esc(l.name)}${l.type==='Site'?' (Site)':''}</option>`).join('')}
+            </select>
+            ${existing&&_whTx().some(t=>t.itemId===existing.id)?'<div style="font-size:10px;color:var(--text-muted);margin-top:3px"><i class="fas fa-lock"></i> Locked — this record has stock history. Move stock with the Transfer tab.</div>':''}
+          </div>
           <div class="form-group" style="grid-column:1/-1">
             <label class="form-label">Item Name *</label>
             <input class="form-control" id="wh-add-name" placeholder="e.g. Portland Cement Type I" value="${existing?.name||''}">
@@ -2500,7 +3080,9 @@ function _whSaveItem(editId){
   if(editId){
     const idx=AppState.data.warehouseItems.findIndex(i=>i.id===editId);
     if(idx!==-1){
+      const locSel=$('#wh-add-wloc');
       Object.assign(AppState.data.warehouseItems[idx],{
+        ...(locSel&&!locSel.disabled?{warehouseId:locSel.value}:{}),
         name,code:$('#wh-add-code')?.value.trim(),
         barcode:$('#wh-add-barcode')?.value.trim(),
         category:$('#wh-add-cat')?.value,unit:$('#wh-add-unit')?.value.trim(),
@@ -2517,7 +3099,8 @@ function _whSaveItem(editId){
   } else {
     const id=_whNextId('WH-',AppState.data.warehouseItems);
     AppState.data.warehouseItems.push({
-      id,name,code:$('#wh-add-code')?.value.trim(),
+      id,warehouseId:$('#wh-add-wloc')?.value||_WH_MAIN_LOC,
+      name,code:$('#wh-add-code')?.value.trim(),
       barcode:$('#wh-add-barcode')?.value.trim(),
       category:$('#wh-add-cat')?.value,unit:$('#wh-add-unit')?.value.trim(),
       unitCost:parseFloat($('#wh-add-cost')?.value||0),
@@ -2691,8 +3274,18 @@ function _whSaveRequest(){
 }
 
 // ── QUICK ACTIONS ────────────────────────────────────────────
-function _whShowReceive(itemId){_whTab='receive';_whRenderTab();setTimeout(()=>{const el=$('#wh-rcv-item');if(el){el.value=itemId;}},50);}
-function _whShowIssueItem(itemId){_whTab='issue';_whRenderTab();setTimeout(()=>{const el=$('#wh-iss-item');if(el){el.value=itemId;_whFillIssueInfo();}},50);}
+function _whShowReceive(itemId){
+  const item=_whItems().find(i=>i.id===itemId);
+  if(item)_whRcvLoc=_whItemLocId(item);
+  _whTab='receive';_whRenderTab();
+  setTimeout(()=>{if(item){_whRcvLines=[{itemId,qty:'',unitCost:item.unitCost||''}];_whRefreshRcv();}},50);
+}
+function _whShowIssueItem(itemId){
+  const item=_whItems().find(i=>i.id===itemId);
+  if(item)_whIssLoc=_whItemLocId(item);
+  _whTab='issue';_whRenderTab();
+  setTimeout(()=>{if(item){_whIssLines=[{itemId,qty:''}];_whRefreshIss();}},50);
+}
 
 // ── EXPORT HELPERS ───────────────────────────────────────────
 function _whDownloadTemplate(){
@@ -2704,12 +3297,12 @@ function _whDownloadTemplate(){
   );
 }
 function _whExportItems(){
-  const rows=_whItems().map(i=>{const q=_whCalcQty(i.id);return[i.id,i.code||'',i.name,i.category||'',i.unit||'',i.rack||'',i.row||'',q.qtyOnHand,q.qtyReserved,q.qtyAvailable,i.unitCost||0,q.qtyOnHand*(i.unitCost||0),i.minStock||0,i.location||'',i.description||''];});
-  exportCSV(rows,['ID','Code','Name','Category','Unit','Rack','Row','OnHand','Reserved','Available','UnitCost','TotalValue','MinStock','Location','Description'],'warehouse_items.csv');
+  const rows=_whItems().map(i=>{const q=_whCalcQty(i.id);return[i.id,i.code||'',i.name,_whLocName(_whItemLocId(i)),i.category||'',i.unit||'',i.rack||'',i.row||'',q.qtyOnHand,q.qtyReserved,q.qtyAvailable,i.unitCost||0,q.qtyOnHand*(i.unitCost||0),i.minStock||0,i.location||'',i.description||''];});
+  exportCSV(rows,['ID','Code','Name','Warehouse','Category','Unit','Rack','Row','OnHand','Reserved','Available','UnitCost','TotalValue','MinStock','Location','Description'],'warehouse_items.csv');
 }
 function _whExportLedger(){
-  const rows=_whTx().map(t=>{const item=_whItems().find(i=>i.id===t.itemId);return[t.id,t.date||'',t.type,item?.name||t.itemId,t.qty,t.projectId||'',t.vendor||t.issuedBy||'',t.ref||'',t.notes||''];});
-  exportCSV(rows,['TxID','Date','Type','Item','Qty','Project','Vendor/By','Reference','Notes'],'warehouse_ledger.csv');
+  const rows=_whTx().map(t=>{const item=_whItems().find(i=>i.id===t.itemId);return[t.id,t.date||'',t.type,item?.name||t.itemId,_whLocName(t.warehouseId||_whItemLocId(item)),t.qty,t.projectId||'',t.vendor||t.issuedBy||'',t.ref||'',t.notes||''];});
+  exportCSV(rows,['TxID','Date','Type','Item','Location','Qty','Project','Vendor/By','Reference','Notes'],'warehouse_ledger.csv');
 }
 
 // ── DATA INITIALISER ─────────────────────────────────────────
@@ -2717,4 +3310,10 @@ function _ensureWarehouseData(){
   if(!AppState.data.warehouseItems)AppState.data.warehouseItems=[];
   if(!AppState.data.stockTransactions)AppState.data.stockTransactions=[];
   if(!AppState.data.issuanceRequests)AppState.data.issuanceRequests=[];
+  if(!Array.isArray(AppState.data.warehouseLocations))AppState.data.warehouseLocations=[];
+  // Seed the default location every legacy record implicitly belongs to
+  if(!AppState.data.warehouseLocations.some(l=>l.id===_WH_MAIN_LOC)){
+    AppState.data.warehouseLocations.unshift({id:_WH_MAIN_LOC,code:'MAIN',name:'Main Warehouse',type:'Warehouse',address:'',active:true,createdAt:new Date().toISOString()});
+    AppState.save();
+  }
 }

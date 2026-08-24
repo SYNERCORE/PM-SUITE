@@ -203,7 +203,7 @@ function _captureSyncedSnapshot() {
     'resourceAllocations','resourceUsageLogs','dailyMeetingLogs','procurement','procurementLogs',
     'materials','manpower','equipment','tools','vehicles','consumables','thirdParty',
     'assetHistory','assetUtilization','idChangeRequests','notifications','projectIdHistory',
-    'warehouseItems','stockTransactions','issuanceRequests'
+    'warehouseItems','stockTransactions','issuanceRequests','warehouseLocations'
   ];
   arrays.forEach(k => {
     const list = AppState.data[k] || [];
@@ -2396,7 +2396,29 @@ async function _spResolveListId(token, listName) {
   if (!res.ok) throw new Error('Could not list SharePoint lists: ' + res.status);
   const data = await res.json();
   const found = (data.value || []).find(l => l.displayName === listName || l.name === listName);
-  if (!found) throw new Error('List not found: ' + listName + ' — please create it in SharePoint');
+  if (!found) {
+    // Lists marked autoCreate provision themselves on first sync — a generic
+    // list with the DataBlob column every sub-list write depends on.
+    const cfg = (typeof SHIC_LIST_CONFIG !== 'undefined') ? SHIC_LIST_CONFIG[listName] : null;
+    if (cfg && cfg.autoCreate) {
+      const cr = await fetch(`https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists`, {
+        method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: listName, list: { template: 'genericList' } })
+      });
+      if (!cr.ok) throw new Error('Could not auto-create list ' + listName + ': ' + cr.status);
+      const created = await cr.json();
+      const colUrl = `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${created.id}/columns`;
+      const mkCol = body => fetch(colUrl, {
+        method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).catch(() => {});
+      await mkCol({ name: 'DataBlob', text: { allowMultipleLines: true } });
+      if (cfg.idField) await mkCol({ name: cfg.idField, text: { allowMultipleLines: false } });
+      _spListIds[listName] = created.id;
+      return created.id;
+    }
+    throw new Error('List not found: ' + listName + ' — please create it in SharePoint');
+  }
   _spListIds[listName] = found.id;
   return found.id;
 }

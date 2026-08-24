@@ -931,15 +931,21 @@ function _projectReadiness(pid){
   const whItems=AppState.data.warehouseItems||[];
   allocs.filter(a=>a.resourceType==='Material'||a.resourceType==='Consumable').forEach(a=>{
     const needed=a.allocatedQty||0;
-    // Try warehouse first, fall back to old masterlist arrays
-    // Match by warehouse item's own id OR by itemMasterId (enrolled from Item Master)
-    const whItem=whItems.find(w=>!w._deleted&&(w.id===a.resourceId||w.itemMasterId===a.resourceId));
+    // Try warehouse first, fall back to old masterlist arrays.
+    // Aggregate across EVERY location — stock at another warehouse or site
+    // must not read as "not in warehouse".
+    const whRecs=(typeof _whStockRecords==='function')?_whStockRecords(a.resourceId)
+      :whItems.filter(w=>!w._deleted&&(w.id===a.resourceId||w.itemMasterId===a.resourceId));
+    const whItem=whRecs[0]||null;
     let unit,qtyAvail,qtyOnHand,st,detail;
     if(whItem){
-      const q=(typeof _whCalcQty==='function')?_whCalcQty(whItem.id):{qtyOnHand:whItem.qtyOnHand||0,qtyAvailable:whItem.qtyAvailable||0};
-      qtyOnHand=q.qtyOnHand; qtyAvail=q.qtyAvailable; unit=a.unit||whItem.unit||'';
-      if(qtyAvail>=needed){st='go';detail=`Available: ${qtyAvail} ${unit} · Needed: ${needed} ${unit} ✓`;}
-      else if(qtyAvail>0){st='warn';detail=`Available: ${qtyAvail} ${unit} · Needed: ${needed} ${unit} — SHORT by ${needed-qtyAvail} ${unit}`;}
+      const agg=(typeof _whCalcQtyAll==='function')?_whCalcQtyAll(a.resourceId)
+        :((typeof _whCalcQty==='function')?_whCalcQty(whItem.id):{qtyOnHand:whItem.qtyOnHand||0,qtyAvailable:whItem.qtyAvailable||0});
+      qtyOnHand=agg.qtyOnHand; qtyAvail=agg.qtyAvailable; unit=a.unit||whItem.unit||'';
+      const brk=(typeof _whLocBreakdown==='function')?_whLocBreakdown(agg):'';
+      const brkNote=brk?` (${brk})`:'';
+      if(qtyAvail>=needed){st='go';detail=`Available: ${qtyAvail} ${unit}${brkNote} · Needed: ${needed} ${unit} ✓`;}
+      else if(qtyAvail>0){st='warn';detail=`Available: ${qtyAvail} ${unit}${brkNote} · Needed: ${needed} ${unit} — SHORT by ${needed-qtyAvail} ${unit}`;}
       else{st='fail';detail=`Available: 0 ${unit} · Needed: ${needed} ${unit} — NOT IN WAREHOUSE`;}
     } else {
       // fallback to old masterlist
@@ -2629,16 +2635,14 @@ function renderAllocTabContent(){
       return r.name+(rates.length?' <span style="color:var(--accent-green);font-size:10px">· '+rates.join(' · ')+'</span>':'<span style="color:var(--text-muted);font-size:10px"> · No rates set</span>');
     }
     if(idx===5){
-      // Consumable: check if enrolled in warehouse for live qty
-      const whLink=(AppState.data.warehouseItems||[]).find(w=>!w._deleted&&w.itemMasterId===r.id);
-      const liveQty=whLink&&typeof _whCalcQty==='function'?_whCalcQty(whLink.id):null;
+      // Consumable: live qty summed across every warehouse/site location
+      const liveQty=(typeof _whCalcQtyAll==='function')?(a=>a.records.length?a:null)(_whCalcQtyAll(r.id)):null;
       const qtyLabel=liveQty?`Avail: ${liveQty.qtyAvailable} ${r.unit} (WH)`:`Stock: ${r.qtyOnHand} ${r.unit}`;
       const low=liveQty?liveQty.qtyAvailable<=0:(r.qtyOnHand<=r.minStock);
       return`${r.name} [${r.category}] · ${qtyLabel}${low?' ⚠':''} · Min: ${r.minStock}`;
     }
     if(idx===6){
-      const whLink=(AppState.data.warehouseItems||[]).find(w=>!w._deleted&&w.itemMasterId===r.id);
-      const liveQty=whLink&&typeof _whCalcQty==='function'?_whCalcQty(whLink.id):null;
+      const liveQty=(typeof _whCalcQtyAll==='function')?(a=>a.records.length?a:null)(_whCalcQtyAll(r.id)):null;
       const qtyLabel=liveQty?`Avail: ${liveQty.qtyAvailable} ${r.unit} (WH)`:`Qty: ${r.qty} ${r.unit}`;
       return`${r.name} [${r.unit}] · ${qtyLabel} · Status: ${r.status}`;
     }
@@ -2668,8 +2672,8 @@ function renderAllocTabContent(){
     <i class="fas ${icons[idx]}" style="color:${colors[idx]};width:14px;text-align:center;flex-shrink:0"></i>
     <div style="flex:1;min-width:0">
       <div style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${formatRow(r)}</div>
-      ${idx===5?(()=>{const wh=(AppState.data.warehouseItems||[]).find(w=>!w._deleted&&w.itemMasterId===r.id);const lq=wh&&typeof _whCalcQty==='function'?_whCalcQty(wh.id):null;const low=lq?lq.qtyAvailable<=0:(r.qtyOnHand<=r.minStock);return`<div style="font-size:10px;color:${low?'var(--accent-red)':'var(--text-muted)'}">Supplier: ${r.supplier||'—'}${wh?` · WH Avail: ${lq?.qtyAvailable} ${r.unit}`:''}${low?' · ⚠ Low/None':''}</div>`;})():''}
-      ${idx===6?(()=>{const wh=(AppState.data.warehouseItems||[]).find(w=>!w._deleted&&w.itemMasterId===r.id);const lq=wh&&typeof _whCalcQty==='function'?_whCalcQty(wh.id):null;return`<div style="font-size:10px;color:${r.status==='pending'?'var(--accent-amber)':r.status==='delivered'?'var(--accent-green)':'var(--text-muted)'}">Supplier: ${r.supplier||'—'}${wh?` · WH Avail: ${lq?.qtyAvailable} ${r.unit}`:''}· ${r.status}</div>`;})():''}
+      ${idx===5?(()=>{const lq=(typeof _whCalcQtyAll==='function')?(a=>a.records.length?a:null)(_whCalcQtyAll(r.id)):null;const low=lq?lq.qtyAvailable<=0:(r.qtyOnHand<=r.minStock);return`<div style="font-size:10px;color:${low?'var(--accent-red)':'var(--text-muted)'}">Supplier: ${r.supplier||'—'}${lq?` · WH Avail: ${lq.qtyAvailable} ${r.unit}`:''}${low?' · ⚠ Low/None':''}</div>`;})():''}
+      ${idx===6?(()=>{const lq=(typeof _whCalcQtyAll==='function')?(a=>a.records.length?a:null)(_whCalcQtyAll(r.id)):null;return`<div style="font-size:10px;color:${r.status==='pending'?'var(--accent-amber)':r.status==='delivered'?'var(--accent-green)':'var(--text-muted)'}">Supplier: ${r.supplier||'—'}${lq?` · WH Avail: ${lq.qtyAvailable} ${r.unit}`:''}· ${r.status}</div>`;})():''}
     </div>
   </div>`).join('')}
   </div>`;
@@ -2769,7 +2773,9 @@ function _ulResolveUnitCost(resource,allocId){
   if(!resource)return 0;
   try{
     if(typeof _whItems==='function'){
-      const w=_whItems().find(x=>x.id===resource.id||(x.itemMasterId&&x.itemMasterId===resource.id));
+      // Prefer whichever location's stock record actually carries a cost
+      const matches=_whItems().filter(x=>x.id===resource.id||(x.itemMasterId&&x.itemMasterId===resource.id));
+      const w=matches.find(x=>parseFloat(x.unitCost)>0)||matches[0];
       const c=parseFloat(w?.unitCost)||0;
       if(c>0)return c;
     }
@@ -3186,7 +3192,10 @@ function saveUsageLog(){
     // Push issuance request to warehouse for every Issue line
     if(txType==='Issue'){
       const resourceId=line.resource.id||'';
-      const whItem=(typeof _whItems==='function')?_whItems().find(w=>w.id===resourceId||(w.itemMasterId&&w.itemMasterId===resourceId)):null;
+      // Prefer the location that actually has stock to release from
+      const whCands=(typeof _whStockRecords==='function')?_whStockRecords(resourceId)
+        :((typeof _whItems==='function')?_whItems().filter(w=>w.id===resourceId||(w.itemMasterId&&w.itemMasterId===resourceId)):[]);
+      const whItem=whCands.find(w=>typeof _whCalcQty==='function'&&_whCalcQty(w.id).qtyAvailable>0)||whCands[0]||null;
       AppState.data.issuanceRequests.push({
         id:_whNextId('REQ-',AppState.data.issuanceRequests),
         itemId:whItem?whItem.id:null,

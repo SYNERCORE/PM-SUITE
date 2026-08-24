@@ -724,9 +724,13 @@ function _imEnrollInWarehouse(itemId, itemType){
   const item=(arr||[]).find(i=>i.id===itemId);
   if(!item){showToast('Item not found','error');return;}
   if(!AppState.data.warehouseItems)AppState.data.warehouseItems=[];
-  if(AppState.data.warehouseItems.some(w=>!w._deleted&&w.itemMasterId===itemId)){showToast('Already enrolled in Warehouse','warning');return;}
+  // Quick-enroll targets Main Warehouse; guard per location so the same item
+  // can also be enrolled at other locations via the Warehouse picker.
+  const mainLoc=(typeof _WH_MAIN_LOC!=='undefined')?_WH_MAIN_LOC:'LOC-MAIN';
+  if(AppState.data.warehouseItems.some(w=>!w._deleted&&w.itemMasterId===itemId&&((w.warehouseId||mainLoc)===mainLoc))){showToast('Already enrolled at Main Warehouse','warning');return;}
   const wh={
-    id:'WH-'+String((AppState.data.warehouseItems.length+1)).padStart(4,'0'),
+    id:(typeof _whNextId==='function')?_whNextId('WH-',AppState.data.warehouseItems):'WH-'+String((AppState.data.warehouseItems.length+1)).padStart(4,'0'),
+    warehouseId:mainLoc,
     itemMasterId:itemId,
     itemMasterType:itemType,
     name:item.name,
