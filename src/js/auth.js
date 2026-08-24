@@ -255,7 +255,12 @@ function showAuthForm(form){
     const t=document.getElementById('setupTenantId');
     if(c)c.value=localStorage.getItem('shic_sp_clientid')||_spClientId||'';
     if(s)s.value=localStorage.getItem('shic_sp_siteurl')||_spSiteUrl||'';
-    if(t){const tv=localStorage.getItem('shic_sp_tenantid')||'';t.value=(tv&&tv!=='common')?tv:'';}
+    // Fresh machine (no saved value) → prefill the SHIC default so setup is one
+    // click. An explicit 'common' (deliberate multi-tenant) shows blank.
+    if(t){const tv=localStorage.getItem('shic_sp_tenantid');
+      t.value = (tv===null||tv==='')
+        ? (typeof SHIC_DEFAULT_TENANT_ID!=='undefined'?SHIC_DEFAULT_TENANT_ID:'')
+        : (tv==='common'?'':tv);}
   }
 }
 

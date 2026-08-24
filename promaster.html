@@ -1100,6 +1100,13 @@ let _m365Account = null;     // MSAL account after M365 login
 let _m365AuthMsal = null;    // Dedicated MSAL app for auth (separate from SP sync)
 let _m365LoggedIn = false;   // True when M365 auth completed
 const M365_AUTH_SCOPES = ['User.Read', 'https://graph.microsoft.com/Sites.ReadWrite.All'];
+// Default Azure AD tenant sign-in is pinned to. Without this, a machine with
+// no saved tenant routes each user to their OWN tenant — accounts from a
+// second domain (e.g. sy3.com.ph guests) then hit "Need admin approval"
+// because admin consent for this app lives only in the primary tenant.
+// A value saved in shic_sp_tenantid overrides this; an explicit 'common'
+// (set via SharePoint settings) still means multi-tenant.
+const SHIC_DEFAULT_TENANT_ID = 'af8a67e9-ce16-4181-9d5d-edc5a7c5456d';
 const SHIC_USERS_LIST = 'SHIC_Users'; // SharePoint list for user profiles
 const SHIC_FORMS_LIST = 'SHIC_FormTemplates'; // SharePoint list for withdrawal form templates
 
@@ -4019,7 +4026,12 @@ function showAuthForm(form){
     const t=document.getElementById('setupTenantId');
     if(c)c.value=localStorage.getItem('shic_sp_clientid')||_spClientId||'';
     if(s)s.value=localStorage.getItem('shic_sp_siteurl')||_spSiteUrl||'';
-    if(t){const tv=localStorage.getItem('shic_sp_tenantid')||'';t.value=(tv&&tv!=='common')?tv:'';}
+    // Fresh machine (no saved value) → prefill the SHIC default so setup is one
+    // click. An explicit 'common' (deliberate multi-tenant) shows blank.
+    if(t){const tv=localStorage.getItem('shic_sp_tenantid');
+      t.value = (tv===null||tv==='')
+        ? (typeof SHIC_DEFAULT_TENANT_ID!=='undefined'?SHIC_DEFAULT_TENANT_ID:'')
+        : (tv==='common'?'':tv);}
   }
 }
 
@@ -6521,7 +6533,10 @@ let _spConnected = false;
 let _spAutoSync = localStorage.getItem('shic_sp_autosync') === 'true';
 let _spLastSync = localStorage.getItem('shic_sp_lastsync') || null;
 let _spClientId = localStorage.getItem('shic_sp_clientid') || '';
-let _spTenantId = localStorage.getItem('shic_sp_tenantid') || 'common';
+// Absent/empty → SHIC default tenant (see SHIC_DEFAULT_TENANT_ID in core.js).
+// An explicitly stored 'common' or a real tenant GUID is kept as-is.
+let _spTenantId = localStorage.getItem('shic_sp_tenantid')
+  || (typeof SHIC_DEFAULT_TENANT_ID !== 'undefined' ? SHIC_DEFAULT_TENANT_ID : 'common');
 let _spSiteUrl  = localStorage.getItem('shic_sp_siteurl') || '';
 let _spListName = localStorage.getItem('shic_sp_listname') || 'SHIC_AppData';
 let _spItemId   = localStorage.getItem('shic_sp_itemid') || '';

@@ -506,6 +506,13 @@ let _m365Account = null;     // MSAL account after M365 login
 let _m365AuthMsal = null;    // Dedicated MSAL app for auth (separate from SP sync)
 let _m365LoggedIn = false;   // True when M365 auth completed
 const M365_AUTH_SCOPES = ['User.Read', 'https://graph.microsoft.com/Sites.ReadWrite.All'];
+// Default Azure AD tenant sign-in is pinned to. Without this, a machine with
+// no saved tenant routes each user to their OWN tenant — accounts from a
+// second domain (e.g. sy3.com.ph guests) then hit "Need admin approval"
+// because admin consent for this app lives only in the primary tenant.
+// A value saved in shic_sp_tenantid overrides this; an explicit 'common'
+// (set via SharePoint settings) still means multi-tenant.
+const SHIC_DEFAULT_TENANT_ID = 'af8a67e9-ce16-4181-9d5d-edc5a7c5456d';
 const SHIC_USERS_LIST = 'SHIC_Users'; // SharePoint list for user profiles
 const SHIC_FORMS_LIST = 'SHIC_FormTemplates'; // SharePoint list for withdrawal form templates
 

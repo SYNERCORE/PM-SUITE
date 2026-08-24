@@ -1550,7 +1550,10 @@ let _spConnected = false;
 let _spAutoSync = localStorage.getItem('shic_sp_autosync') === 'true';
 let _spLastSync = localStorage.getItem('shic_sp_lastsync') || null;
 let _spClientId = localStorage.getItem('shic_sp_clientid') || '';
-let _spTenantId = localStorage.getItem('shic_sp_tenantid') || 'common';
+// Absent/empty → SHIC default tenant (see SHIC_DEFAULT_TENANT_ID in core.js).
+// An explicitly stored 'common' or a real tenant GUID is kept as-is.
+let _spTenantId = localStorage.getItem('shic_sp_tenantid')
+  || (typeof SHIC_DEFAULT_TENANT_ID !== 'undefined' ? SHIC_DEFAULT_TENANT_ID : 'common');
 let _spSiteUrl  = localStorage.getItem('shic_sp_siteurl') || '';
 let _spListName = localStorage.getItem('shic_sp_listname') || 'SHIC_AppData';
 let _spItemId   = localStorage.getItem('shic_sp_itemid') || '';
