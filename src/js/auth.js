@@ -165,11 +165,18 @@ async function doM365Login() {
 function setupAndLogin() {
   const clientId = (document.getElementById('setupClientId')?.value || '').trim();
   const siteUrl = (document.getElementById('setupSiteUrl')?.value || '').trim();
+  const tenantId = (document.getElementById('setupTenantId')?.value || '').trim();
   if (!clientId) { showToast('Client ID is required', 'error'); return; }
   if (!siteUrl) { showToast('SharePoint Site URL is required', 'error'); return; }
   _spClientId = clientId; _spSiteUrl = siteUrl;
   localStorage.setItem('shic_sp_clientid', clientId);
   localStorage.setItem('shic_sp_siteurl', siteUrl);
+  // Tenant ID pins sign-in to one tenant so guest accounts from another domain
+  // don't get routed to their home tenant and hit "Need admin approval".
+  if (tenantId) {
+    if (typeof _spTenantId !== 'undefined') _spTenantId = tenantId;
+    localStorage.setItem('shic_sp_tenantid', tenantId);
+  }
   _spSiteId = ''; _spListId = ''; _spItemId = ''; _usersListId = null;
   localStorage.removeItem('shic_sp_siteid'); localStorage.removeItem('shic_sp_listid'); localStorage.removeItem('shic_sp_itemid');
   _spMsalApp = null; _m365AuthMsal = null;
@@ -245,8 +252,10 @@ function showAuthForm(form){
   if(form==='setup'){
     const c=document.getElementById('setupClientId');
     const s=document.getElementById('setupSiteUrl');
+    const t=document.getElementById('setupTenantId');
     if(c)c.value=localStorage.getItem('shic_sp_clientid')||_spClientId||'';
     if(s)s.value=localStorage.getItem('shic_sp_siteurl')||_spSiteUrl||'';
+    if(t){const tv=localStorage.getItem('shic_sp_tenantid')||'';t.value=(tv&&tv!=='common')?tv:'';}
   }
 }
 

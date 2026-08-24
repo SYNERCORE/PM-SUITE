@@ -428,9 +428,14 @@ kbd {
           <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Azure App Client ID *</label>
           <input id="setupClientId" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:12px;font-family:monospace;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#0078d4'" onblur="this.style.borderColor='#30363d'">
         </div>
-        <div style="margin-bottom:14px">
+        <div style="margin-bottom:12px">
           <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">SharePoint Site URL *</label>
           <input id="setupSiteUrl" type="text" placeholder="https://company.sharepoint.com/sites/yoursite" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:12px;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#0078d4'" onblur="this.style.borderColor='#30363d'">
+        </div>
+        <div style="margin-bottom:14px">
+          <label style="font-size:11px;font-weight:600;color:#8b949e;display:block;margin-bottom:5px">Tenant ID <span style="font-weight:400;color:#6e7681">(required for multi-domain teams)</span></label>
+          <input id="setupTenantId" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:12px;font-family:monospace;outline:none;box-sizing:border-box" onfocus="this.style.borderColor='#0078d4'" onblur="this.style.borderColor='#30363d'">
+          <div style="font-size:10px;color:#6e7681;margin-top:5px;line-height:1.5">Pin sign-in to your organization's tenant so accounts from another domain (e.g. sy3.com.ph guests) don't hit "Need admin approval." Leave blank only for a single-tenant setup.</div>
         </div>
         <button onclick="setupAndLogin()" style="width:100%;padding:10px;background:#0078d4;border:none;border-radius:7px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:10px">
           <i class="fab fa-microsoft" style="margin-right:7px"></i>Save & Sign in with Microsoft
@@ -3924,11 +3929,18 @@ async function doM365Login() {
 function setupAndLogin() {
   const clientId = (document.getElementById('setupClientId')?.value || '').trim();
   const siteUrl = (document.getElementById('setupSiteUrl')?.value || '').trim();
+  const tenantId = (document.getElementById('setupTenantId')?.value || '').trim();
   if (!clientId) { showToast('Client ID is required', 'error'); return; }
   if (!siteUrl) { showToast('SharePoint Site URL is required', 'error'); return; }
   _spClientId = clientId; _spSiteUrl = siteUrl;
   localStorage.setItem('shic_sp_clientid', clientId);
   localStorage.setItem('shic_sp_siteurl', siteUrl);
+  // Tenant ID pins sign-in to one tenant so guest accounts from another domain
+  // don't get routed to their home tenant and hit "Need admin approval".
+  if (tenantId) {
+    if (typeof _spTenantId !== 'undefined') _spTenantId = tenantId;
+    localStorage.setItem('shic_sp_tenantid', tenantId);
+  }
   _spSiteId = ''; _spListId = ''; _spItemId = ''; _usersListId = null;
   localStorage.removeItem('shic_sp_siteid'); localStorage.removeItem('shic_sp_listid'); localStorage.removeItem('shic_sp_itemid');
   _spMsalApp = null; _m365AuthMsal = null;
@@ -4004,8 +4016,10 @@ function showAuthForm(form){
   if(form==='setup'){
     const c=document.getElementById('setupClientId');
     const s=document.getElementById('setupSiteUrl');
+    const t=document.getElementById('setupTenantId');
     if(c)c.value=localStorage.getItem('shic_sp_clientid')||_spClientId||'';
     if(s)s.value=localStorage.getItem('shic_sp_siteurl')||_spSiteUrl||'';
+    if(t){const tv=localStorage.getItem('shic_sp_tenantid')||'';t.value=(tv&&tv!=='common')?tv:'';}
   }
 }
 
