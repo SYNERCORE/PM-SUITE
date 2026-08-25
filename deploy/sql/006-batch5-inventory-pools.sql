@@ -123,4 +123,21 @@ CREATE INDEX IF NOT EXISTS materials_updated_idx ON materials(updated_at DESC);
 CREATE INDEX IF NOT EXISTS materials_deleted_idx ON materials(deleted);
 CREATE INDEX IF NOT EXISTS materials_data_gin    ON materials USING GIN (data);
 
+-- ── updated_at triggers ──
+-- set_updated_at() is defined in 001. Matches the pattern used by every
+-- earlier batch so direct SQL updates bump updated_at too (the API routes
+-- already set it explicitly on every upsert).
+DO $$
+DECLARE tbl TEXT;
+BEGIN
+  FOREACH tbl IN ARRAY ARRAY[
+    'equipment','tools','vehicles','consumables','materials'
+  ] LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS trg_%1$s_updated_at ON %1$s', tbl);
+    EXECUTE format('CREATE TRIGGER trg_%1$s_updated_at BEFORE UPDATE ON %1$s FOR EACH ROW EXECUTE FUNCTION set_updated_at()', tbl);
+  END LOOP;
+END $$;
+
+INSERT INTO schema_version (version) VALUES (6) ON CONFLICT DO NOTHING;
+
 COMMIT;
