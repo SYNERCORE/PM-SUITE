@@ -498,6 +498,7 @@ const _COLLISION_CHECKED_ARRAYS = [
   { key: 'warehouseItems', prefix: 'WH', refs: [] },
   { key: 'stockTransactions', prefix: 'TX', refs: ['itemId'] },
   { key: 'issuanceRequests', prefix: 'REQ', refs: ['itemId'] },
+  { key: 'warehouseLocations', prefix: 'LOC', refs: [] },
 ];
 
 // After pulling latest, check if any of OUR newly-created local records

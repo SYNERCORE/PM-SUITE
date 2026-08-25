@@ -112,6 +112,13 @@ await app.register(makeEntityRoutes({ table: 'manpower',    entityName: 'manpowe
 await app.register(makeEntityRoutes({ table: 'procurement_logs', entityName: 'procurementLogs', extraCols: [{ column: 'proc_id', dataKey: 'procId' }], filters: [{ query: 'procId', column: 'proc_id' }] }), { prefix: '/api/procurement-logs' });
 await app.register(makeEntityRoutes({ table: 'issuance_requests', entityName: 'issuanceRequests', hasProjectId: true, extraCols: [{ column: 'item_id', dataKey: 'itemId' }], filters: [{ query: 'status', column: 'req_status' }] }), { prefix: '/api/issuance-requests' });
 
+// ── Batch 5 — Item Master inventory pools ──
+await app.register(makeEntityRoutes({ table: 'equipment',   entityName: 'equipment',   hasProjectId: true, filters: [{ query: 'status', column: 'eq_status' }, { query: 'category', column: 'category' }] }), { prefix: '/api/equipment' });
+await app.register(makeEntityRoutes({ table: 'tools',       entityName: 'tools',       hasProjectId: true, filters: [{ query: 'status', column: 'tool_status' }, { query: 'category', column: 'category' }] }), { prefix: '/api/tools' });
+await app.register(makeEntityRoutes({ table: 'vehicles',    entityName: 'vehicles',    hasProjectId: true, filters: [{ query: 'status', column: 'veh_status' }, { query: 'category', column: 'category' }] }), { prefix: '/api/vehicles' });
+await app.register(makeEntityRoutes({ table: 'consumables', entityName: 'consumables', filters: [{ query: 'category', column: 'category' }] }), { prefix: '/api/consumables' });
+await app.register(makeEntityRoutes({ table: 'materials',   entityName: 'materials',   hasProjectId: true, filters: [{ query: 'status', column: 'mat_status' }, { query: 'category', column: 'category' }] }), { prefix: '/api/materials' });
+
 // ── Start ─────────────────────────────────────────────────
 const port = Number(process.env.PORT || 3000);
 try {

@@ -285,7 +285,7 @@ ${renderSpPanel()}
       </label>
       <div id="apiEntStatus_warehouseItems" style="font-size:11px;color:var(--text-muted);margin-left:26px;min-height:14px"></div>
 
-      ${[['projects','Projects'],['tasks','Tasks'],['resources','Resources'],['procurement','Procurement'],['costs','Costs'],['qaqc','QA/QC'],['risks','Risks'],['actions','Action Items'],['documents','Documents'],['stockTransactions','Stock Transactions'],['resourceAllocations','Resource Allocations'],['resourceUsageLogs','Usage Logs (Issue/Return)'],['manpower','Manpower'],['procurementLogs','Procurement Logs'],['issuanceRequests','Issuance Requests']].map(([ent,label]) => `
+      ${[['projects','Projects'],['tasks','Tasks'],['resources','Resources'],['procurement','Procurement'],['costs','Costs'],['qaqc','QA/QC'],['risks','Risks'],['actions','Action Items'],['documents','Documents'],['stockTransactions','Stock Transactions'],['resourceAllocations','Resource Allocations'],['resourceUsageLogs','Usage Logs (Issue/Return)'],['manpower','Manpower'],['procurementLogs','Procurement Logs'],['issuanceRequests','Issuance Requests'],['equipment','Equipment'],['tools','Tools'],['vehicles','Vehicles'],['consumables','Consumables'],['materials','Materials']].map(([ent,label]) => `
       <label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 0;border-top:1px dashed var(--border);margin-top:6px">
         <input type="checkbox" id="apiEnt_${ent}" ${((_dev.apiEntities||[]).includes(ent))?'checked':''} onchange="_apiToggleEntity('${ent}',this.checked)">
         <span><strong>${label}</strong> <span style="font-size:10px;color:var(--text-muted)">— reads stay local; writes mirror to server</span></span>
