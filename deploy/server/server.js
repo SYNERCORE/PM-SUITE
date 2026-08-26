@@ -119,6 +119,20 @@ await app.register(makeEntityRoutes({ table: 'vehicles',    entityName: 'vehicle
 await app.register(makeEntityRoutes({ table: 'consumables', entityName: 'consumables', filters: [{ query: 'category', column: 'category' }] }), { prefix: '/api/consumables' });
 await app.register(makeEntityRoutes({ table: 'materials',   entityName: 'materials',   hasProjectId: true, filters: [{ query: 'status', column: 'mat_status' }, { query: 'category', column: 'category' }] }), { prefix: '/api/materials' });
 
+// ── Batch 6 — reference masters, project sub-records, and logs ──
+await app.register(makeEntityRoutes({ table: 'warehouse_locations', entityName: 'warehouseLocations', filters: [{ query: 'type', column: 'loc_type' }] }), { prefix: '/api/warehouse-locations' });
+await app.register(makeEntityRoutes({ table: 'progress',           entityName: 'progress',           hasProjectId: true }), { prefix: '/api/progress' });
+await app.register(makeEntityRoutes({ table: 'kpi_data',           entityName: 'kpiData',            hasProjectId: true }), { prefix: '/api/kpi-data' });
+await app.register(makeEntityRoutes({ table: 'calendar',           entityName: 'calendar',           hasProjectId: true, filters: [{ query: 'type', column: 'event_type' }] }), { prefix: '/api/calendar' });
+await app.register(makeEntityRoutes({ table: 'asset_history',      entityName: 'assetHistory',       extraCols: [{ column: 'asset_id', dataKey: 'assetId' }], filters: [{ query: 'assetId', column: 'asset_id' }] }), { prefix: '/api/asset-history' });
+await app.register(makeEntityRoutes({ table: 'asset_utilization',  entityName: 'assetUtilization',   extraCols: [{ column: 'asset_id', dataKey: 'assetId' }], filters: [{ query: 'assetId', column: 'asset_id' }] }), { prefix: '/api/asset-utilization' });
+await app.register(makeEntityRoutes({ table: 'third_party',        entityName: 'thirdParty',         filters: [{ query: 'status', column: 'tp_status' }, { query: 'category', column: 'category' }] }), { prefix: '/api/third-party' });
+await app.register(makeEntityRoutes({ table: 'project_team',       entityName: 'projectTeam',        hasProjectId: true }), { prefix: '/api/project-team' });
+await app.register(makeEntityRoutes({ table: 'trades',             entityName: 'trades' }), { prefix: '/api/trades' });
+await app.register(makeEntityRoutes({ table: 'business_units',     entityName: 'businessUnits' }), { prefix: '/api/business-units' });
+await app.register(makeEntityRoutes({ table: 'daily_meeting_logs', entityName: 'dailyMeetingLogs',   hasProjectId: true, filters: [{ query: 'status', column: 'log_status' }] }), { prefix: '/api/daily-meeting-logs' });
+await app.register(makeEntityRoutes({ table: 'library_docs',       entityName: 'libraryDocs',        filters: [{ query: 'status', column: 'doc_status' }, { query: 'category', column: 'category' }] }), { prefix: '/api/library-docs' });
+
 // ── Start ─────────────────────────────────────────────────
 const port = Number(process.env.PORT || 3000);
 try {
