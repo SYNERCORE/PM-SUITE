@@ -18,7 +18,15 @@ $DbName      = 'proc_master'
 $DbUser      = 'postgres'          # superuser avoids permission surprises
 $PasswordFile= 'C:\ProcMaster\backup\.pgpass.txt'  # single line: the postgres password
 $BackupDir   = 'C:\ProcMaster\backup\dumps'
-$MirrorDir   = ''                  # optional: 'C:\Users\svc\OneDrive - SY3\ProMasterBackups'
+# Offsite mirror — a OneDrive-synced folder gets the dumps into SharePoint
+# for free. IMPORTANT: this task runs as SYSTEM, which has no OneDrive of its
+# own; point this at a folder inside a REAL user's synced OneDrive (a user who
+# stays signed in on the server), e.g. the admin account below. SYSTEM can
+# write there fine, and OneDrive syncs it while that user is logged in.
+# The script skips the mirror automatically if this folder's PARENT does not
+# exist, so a wrong path never breaks the backup — adjust it to the actual
+# OneDrive path on your server. Set to '' to disable the mirror entirely.
+$MirrorDir   = 'C:\Users\Administrator\OneDrive - SY3 Energy Maintenance Services Corporation\ProMasterBackups'
 $RetainDays  = 90
 $LogFile     = 'C:\ProcMaster\backup\backup.log'
 

@@ -1,271 +1,256 @@
-# ProMaster Local Server — Deployment Package
+# ProMaster Local Server — Deployment & Operations
 
-For the SY3 IT team. This package sets up a local (LAN) database and API
-server that ProMaster will talk to alongside SharePoint. The app keeps
-working through internet outages because the local server is on your own
-network.
+For the SY3 IT team. This is the runbook for the **live** ProMaster local
+server: a LAN-only PostgreSQL + Fastify API that the app talks to alongside
+SharePoint. The app keeps working through internet outages because the
+server is on your own network and the browser keeps a local copy.
 
-## Architecture in one picture
+This document reflects the **actual Windows deployment** (`procmaster.synercore.ph`).
+It is Windows-first because that is what is running; Linux equivalents are
+noted only where useful.
+
+## Architecture
 
 ```
    ┌────────────────────┐          ┌────────────────────┐
-   │  ProMaster (HTML)  │          │  ProMaster (HTML)  │
-   │  on user's laptop  │  ······  │  on user's laptop  │
+   │  ProMaster (HTML)  │  ······  │  ProMaster (HTML)  │   users' laptops
    └──────────┬─────────┘          └──────────┬─────────┘
               │ HTTPS on LAN                  │
               ▼                               ▼
-        ┌────────────────────────────────────────────┐
-        │  procmaster.local  (this deployment)       │
-        │  ┌──────────────────────────────────────┐  │
-        │  │ Caddy 2 (443 → 3000, auto-HTTPS)     │  │
-        │  └──────────────────────────────────────┘  │
-        │  ┌──────────────────────────────────────┐  │
-        │  │ Node 20 + Fastify API (port 3000)    │  │
-        │  └──────────────────────────────────────┘  │
-        │  ┌──────────────────────────────────────┐  │
-        │  │ PostgreSQL 16                        │  │
-        │  └──────────────────────────────────────┘  │
-        └──────────────┬─────────────────────────────┘
-                       │ nightly pg_dump
-                       ▼
-              ┌────────────────────┐
-              │  Azure Blob backup │
-              │  (or external HDD) │
-              └────────────────────┘
+   ┌───────────────────────────────────────────────────────┐
+   │  procmaster.synercore.ph  (this server)               │
+   │   Caddy 2         443 → 3000, internal-CA HTTPS        │
+   │   Fastify API     port 3000  (Windows service:         │
+   │                                ProMasterAPI via NSSM)  │
+   │   PostgreSQL 16   database: proc_master                │
+   └──────────────┬────────────────────────────────────────┘
+                  │ nightly pg_dump (custom format, 90-day)
+                  ▼   → C:\ProcMaster\backup\dumps
+                      → optional OneDrive mirror → SharePoint
 
-   Cloud path (unchanged): app also syncs to SharePoint for
-   external access and disaster recovery.
+   Cloud path (unchanged): the app also mirrors every entity to
+   SharePoint for external access and disaster recovery.
 ```
 
-## What IT needs to do — checklist
+## On-disk layout (this server)
 
-- [ ] **1.** Provision a machine (specs below)
-- [ ] **2.** Install OS + Node.js + PostgreSQL + Caddy
-- [ ] **3.** Import the initial schema (`sql/001-init-schema.sql`)
-- [ ] **4.** Configure `.env` for the API server
-- [ ] **5.** Register the API as a service (systemd or Windows Service)
-- [ ] **6.** Configure Caddy with the internal hostname and cert
-- [ ] **7.** Open port 443 on the LAN firewall — nothing else
-- [ ] **8.** Schedule the nightly backup
-- [ ] **9.** Smoke-test from a user machine
-- [ ] **10.** Hand the URL and one test credential back to the ProMaster team
+Three directories, kept separate on purpose:
 
-Each of these has a section below.
+| Path | What it is |
+|------|-----------|
+| `C:\ProcMaster-Src` | The git clone. **Never served from.** Pull updates here. |
+| `C:\ProcMaster` | The flat API runtime — `server.js`, `routes\`, `auth.js`, `db.js`, `Caddyfile`, `backup\`. This is what the service runs. |
+| `C:\ProcMaster-Web` | The web root Caddy serves — holds `promaster.html`. |
+
+Database: **`proc_master`** (database and app role), superuser `postgres`.
+Migrations run as `postgres` (the app role intentionally lacks DDL rights).
 
 ---
 
-## 1. Machine specs
+## Part A — First-time install (already done; here for rebuilds)
 
-Minimum: **4-core CPU · 16 GB RAM · 500 GB SSD · Gigabit NIC · UPS**.
+### 1. Stack
 
-Either physical box in the server room or a VM on your existing
-hypervisor is fine. If you have to pick between the two, prefer
-a dedicated VM — snapshots make disaster recovery trivial.
-
-**OS choice:**
-- **Recommended:** Ubuntu Server 24.04 LTS. Cleaner service model
-  (systemd), zero-touch security updates, `apt` package manager.
-- **Alternative:** Windows Server 2022 if that's what your IT team
-  runs. All commands in this guide have a Windows equivalent.
-
-## 2. Install the stack
-
-### Ubuntu 24.04 LTS
-
-```bash
-# Base
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl ufw fail2ban unattended-upgrades
-
-# Node.js 20 LTS
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-
-# PostgreSQL 16
-sudo apt install -y postgresql-16 postgresql-contrib
-
-# Caddy 2 (reverse proxy with automatic HTTPS)
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update && sudo apt install -y caddy
-
-# Verify
-node --version    # v20.x
-psql --version    # psql (PostgreSQL) 16.x
-caddy version     # v2.x
-```
-
-### Windows Server 2022
+Already installed: **Node 20 LTS**, **PostgreSQL 16**, **Caddy 2**, **NSSM**.
+To rebuild on a fresh box:
 
 ```powershell
-# Install Node 20 LTS
 winget install OpenJS.NodeJS.LTS
-
-# Install PostgreSQL 16 (interactive installer — set superuser password)
-winget install PostgreSQL.PostgreSQL.16
-
-# Install Caddy
+winget install PostgreSQL.PostgreSQL.16      # interactive — set the postgres password
 winget install CaddyServer.Caddy
-
-# Install NSSM (for running Node as a Windows Service)
 winget install NSSM.NSSM
 ```
 
-## 3. Create the database and schema
+### 2. Database + schema
 
-```bash
-# Ubuntu
-sudo -u postgres createuser --pwprompt procmaster       # set a strong password
-sudo -u postgres createdb --owner=procmaster procmaster
-sudo -u postgres psql -d procmaster -f sql/001-init-schema.sql
-```
+Create the database and role, then apply **every** migration in order.
+All are idempotent and safe to re-run.
 
 ```powershell
-# Windows — from the PostgreSQL bin folder
-createuser -U postgres --pwprompt procmaster
-createdb -U postgres --owner=procmaster procmaster
-psql -U postgres -d procmaster -f sql\001-init-schema.sql
+cd 'C:\Program Files\PostgreSQL\16\bin'
+createdb  -U postgres proc_master
+# apply migrations 001 → 008 in order
+$src = 'C:\ProcMaster-Src\deploy\sql'
+Get-ChildItem $src -Filter '0*.sql' | Sort-Object Name | ForEach-Object {
+  Write-Host "Applying $($_.Name)"; psql -U postgres -d proc_master -f $_.FullName
+}
 ```
 
-Save the password you set — it goes into `server/.env` next.
+The migrations, and the schema_version each registers:
 
-## 4. Install the API server
+| File | Adds | Version |
+|------|------|---------|
+| `001-init-schema.sql` | users, projects, tasks, resources, warehouse_items… + `set_updated_at()` | 1 |
+| `002-phase2-entities.sql` | Phase 2 entity tables | 2 |
+| `003-safe-generated-columns.sql` | rebuilds generated columns as IMMUTABLE | 3 |
+| `004-phase3-entities.sql` | qaqc, risks, actions, documents, stock_transactions | 4 |
+| `005-batch4-cost-chain.sql` | resource_allocations, resource_usage_logs, manpower, procurement_logs, issuance_requests | 5 |
+| `006-batch5-inventory-pools.sql` | equipment, tools, vehicles, consumables, materials | 6 |
+| `007-batch5-triggers-and-version.sql` | completion patch for an incomplete 006 (triggers + v6) | — |
+| `008-batch6-reference-and-logs.sql` | warehouse_locations, progress, kpi_data, calendar, asset_history, asset_utilization, third_party, project_team, trades, business_units, daily_meeting_logs, library_docs | 7 |
 
-```bash
-# Ubuntu — install to /opt/procmaster
-sudo mkdir -p /opt/procmaster
-sudo cp -r server/* /opt/procmaster/
-cd /opt/procmaster
-sudo cp .env.example .env
-sudo nano .env                    # set DATABASE_URL and TENANT_ID
-sudo npm ci --omit=dev
-sudo useradd -r -s /usr/sbin/nologin procmaster
-sudo chown -R procmaster:procmaster /opt/procmaster
-```
+After applying, confirm: `psql -U postgres -d proc_master -c "SELECT version FROM schema_version ORDER BY version;"` → **1–7**.
+
+### 3. API runtime + service
+
+The runtime is the **flat** `C:\ProcMaster` (not the repo). Copy the server
+files there, install deps, and register the service:
 
 ```powershell
-# Windows — install to C:\procmaster
-New-Item -ItemType Directory C:\procmaster -Force | Out-Null
-Copy-Item -Recurse server\* C:\procmaster\
-cd C:\procmaster
-Copy-Item .env.example .env
-notepad .env                       # set DATABASE_URL and TENANT_ID
+# from the repo
+Copy-Item -Recurse 'C:\ProcMaster-Src\deploy\server\*' 'C:\ProcMaster\' -Force
+cd C:\ProcMaster
 npm ci --omit=dev
-```
+# .env — DATABASE_URL (proc_master), PORT=3000, Azure AD app/tenant for token check
+notepad .env
 
-**Test it starts:** `node server.js` should print
-`ProMaster API listening on 3000`. Ctrl-C to stop, then register
-as a service in step 5.
-
-## 5. Register as a service
-
-### Ubuntu (systemd)
-
-```bash
-sudo cp config/procmaster-api.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now procmaster-api
-sudo systemctl status procmaster-api
-```
-
-### Windows (NSSM)
-
-```powershell
-# From C:\procmaster
-& "C:\Program Files\nssm\nssm.exe" install ProMasterAPI `
-  "C:\Program Files\nodejs\node.exe" `
-  "C:\procmaster\server.js"
-& "C:\Program Files\nssm\nssm.exe" set ProMasterAPI AppDirectory C:\procmaster
-& "C:\Program Files\nssm\nssm.exe" set ProMasterAPI AppStdout C:\procmaster\logs\api.log
-& "C:\Program Files\nssm\nssm.exe" set ProMasterAPI AppStderr C:\procmaster\logs\err.log
+# register as a Windows service
+& "C:\Program Files\nssm\nssm.exe" install ProMasterAPI "C:\Program Files\nodejs\node.exe" "C:\ProcMaster\server.js"
+& "C:\Program Files\nssm\nssm.exe" set ProMasterAPI AppDirectory C:\ProcMaster
+& "C:\Program Files\nssm\nssm.exe" set ProMasterAPI AppStdout C:\ProcMaster\logs\api.log
+& "C:\Program Files\nssm\nssm.exe" set ProMasterAPI AppStderr C:\ProcMaster\logs\err.log
 Start-Service ProMasterAPI
 ```
 
-## 6. Caddy reverse proxy
+### 4. Caddy + web root
 
-Set the hostname on your LAN DNS (or `/etc/hosts` on each client) so
-`procmaster.local` resolves to this server's IP.
-
-For internal-only HTTPS Caddy uses its own root CA — install it on
-each client machine (Caddy prints where to find it on first boot).
-For a real cert, if this box is reachable from the internet, drop
-in a real domain name and Caddy will get one from Let's Encrypt
-automatically.
-
-```bash
-# Ubuntu
-sudo cp config/Caddyfile /etc/caddy/Caddyfile
-sudo systemctl reload caddy
-```
+Caddy serves `C:\ProcMaster-Web` and reverse-proxies `/api` to port 3000.
+Set LAN DNS so `procmaster.synercore.ph` resolves to this server's IP.
 
 ```powershell
-# Windows
-Copy-Item config\Caddyfile 'C:\Program Files\Caddy\Caddyfile'
+Copy-Item 'C:\ProcMaster-Src\promaster.html' 'C:\ProcMaster-Web\promaster.html' -Force
+Copy-Item 'C:\ProcMaster\Caddyfile' 'C:\Program Files\Caddy\Caddyfile' -Force  # if not already in place
 Restart-Service caddy
 ```
 
-## 7. Firewall
+### 5. HTTPS trust — REQUIRED for offline to work
 
-Only port 443 should be reachable from the LAN. Everything else stays
-closed. Do **not** expose port 5432 (Postgres) or 3000 (Node) to the
-network — Caddy is the only door.
+Caddy uses its **own internal root CA** for `procmaster.synercore.ph`. Until
+that root is trusted on a client PC, the browser shows **"Not secure"** and —
+critically — **the service worker (`sw.js`) will not register, so the offline
+PWA is broken**. On unstable internet the offline copy is the whole point, so
+this step is not optional.
 
-```bash
-# Ubuntu — ufw
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-sudo ufw allow from 192.168.0.0/16 to any port 443    # adjust CIDR to your LAN
-sudo ufw allow OpenSSH                                # keep SSH open
-sudo ufw enable
-```
+On the **server**, locate Caddy's root certificate (path when Caddy runs as a
+SYSTEM service):
 
 ```powershell
-# Windows Server
+dir C:\Windows\System32\config\systemprofile\AppData\Roaming\Caddy\pki\authorities\local\root.crt
+```
+
+Copy `root.crt` to each client PC and, as administrator on each:
+
+```powershell
+certutil -addstore -f Root root.crt      # Trusted Root Certification Authorities
+```
+
+Fully close and reopen the browser afterward. For many machines, push
+`root.crt` to the Trusted Root store via **Group Policy** instead of per-PC.
+
+### 6. Firewall
+
+Only **443** should be reachable on the LAN. Do **not** expose 5432 (Postgres)
+or 3000 (Node) — Caddy is the only door.
+
+```powershell
 New-NetFirewallRule -DisplayName "ProMaster HTTPS" -Direction Inbound `
   -Protocol TCP -LocalPort 443 -RemoteAddress LocalSubnet -Action Allow
 ```
 
-## 8. Nightly backup
+### 7. Nightly backup
 
-Encrypted `pg_dump` to a mounted external drive or Azure Blob.
+`backup\backup-nightly.ps1` runs `pg_dump` in custom format, keeps **90 days**,
+and optionally mirrors to a OneDrive-synced folder (→ SharePoint offsite).
 
-- Linux: `scripts/backup.sh` + cron entry inside the script header
-- Windows: `scripts\backup.ps1` + Task Scheduler entry
-
-Both keep 30 daily rotations by default. Test the restore path once
-before you consider this done — a backup you've never restored isn't
-a backup.
-
-## 9. Smoke test
-
-From any user's machine on the LAN:
-
-```
-https://procmaster.local/health
+```powershell
+# one-time: password file the script reads (single line: the postgres password)
+Set-Content 'C:\ProcMaster\backup\.pgpass.txt' '<postgres-password>' -NoNewline
+# test
+powershell -ExecutionPolicy Bypass -File C:\ProcMaster\backup\backup-nightly.ps1
+# schedule nightly at 01:30
+schtasks /Create /TN "ProMaster Nightly Backup" /SC DAILY /ST 01:30 /RU SYSTEM `
+  /TR "powershell -NoProfile -ExecutionPolicy Bypass -File C:\ProcMaster\backup\backup-nightly.ps1"
 ```
 
-Expected response:
-```json
-{ "status": "ok", "db": "connected", "version": "0.1.0" }
+Confirm a `proc_master-*.dump` appears in `C:\ProcMaster\backup\dumps`. The
+optional OneDrive mirror (`$MirrorDir` in the script) writes into a real user's
+synced OneDrive — SYSTEM has none of its own, so point it at an account that
+stays signed in on the server. **Test a restore once** (see `backup\RESTORE.md`)
+— a backup you have never restored is not a backup.
+
+### 8. Smoke test
+
+From any LAN machine:
+
+```
+https://procmaster.synercore.ph/health   →   { "status": "ok", "db": "connected", ... }
 ```
 
-If that works, you're done. Hand the URL to the ProMaster team and
-they'll point the app at it via the Settings → Local Server pane.
+Then in the app: **Settings → SharePoint settings** already defaults the
+**Tenant ID** to the SHIC tenant, so SY3 and SHIC accounts both sign in
+without an "admin approval" prompt. Point the app at the server via the
+**Settings → Local Server** pane and tick the entities to route locally.
 
-## 10. Hardening checklist (post-install)
+---
 
-- [ ] Automatic security updates enabled (unattended-upgrades / Windows Update)
-- [ ] Postgres `listen_addresses = 'localhost'` in `postgresql.conf` (default; don't change)
-- [ ] `.env` file mode 600, owned by the service user
-- [ ] Backup drive mounted read/write only during the backup window
-- [ ] Log rotation configured (`journalctl --vacuum-time=90d` or logrotate)
-- [ ] UPS attached, tested
-- [ ] Machine documented in your CMDB with hostname, IP, purpose, owner
-- [ ] SSH key-only auth (Linux); RDP restricted to admin group (Windows)
+## Part B — Deploying a new release (the routine you'll run most)
+
+Every ProMaster update lands as a commit on `main`. To roll it out:
+
+```powershell
+cd C:\ProcMaster-Src
+git pull                                  # note the new commit hash
+
+# 1. Frontend — always
+Copy-Item 'C:\ProcMaster-Src\promaster.html' 'C:\ProcMaster-Web\promaster.html' -Force
+
+# 2. Database — ONLY if the release added a new deploy\sql\0NN file
+psql -U postgres -d proc_master -f deploy\sql\0NN-*.sql   # idempotent
+
+# 3. API — ONLY if deploy\server\* changed
+Copy-Item -Recurse 'C:\ProcMaster-Src\deploy\server\*' 'C:\ProcMaster\' -Force
+cd C:\ProcMaster; npm ci --omit=dev
+Restart-Service ProMasterAPI
+```
+
+Most releases are **frontend-only** (step 1, then users hard-reload). SQL and
+service restarts are needed only when a migration or the API code changed —
+the release notes will say which. New SQL files print their own
+schema_version + trigger check at the end, so the psql output is your
+verification.
+
+**Migrating data to the server:** after the schema exists, a user opens
+**Settings → Local Server**, ticks the entities, and clicks **Migrate now**
+per entity. It upserts by id (safe to re-run), paces at ~120 ms/record to stay
+under the rate limit, and reports `migrated/failed`. All 33 business entities
+across batches 1–6 are server-backed; deliberately left on
+localStorage/SharePoint: notifications, activities, idChangeRequests,
+projectIdHistory, deletionRequests, userPerms, workflowDefs.
+
+---
+
+## Part C — Operations
+
+- **Service status / restart:** `Get-Service ProMasterAPI` · `Restart-Service ProMasterAPI`
+- **API logs:** `C:\ProcMaster\logs\err.log` and `api.log`
+- **DB console:** `psql -U postgres -d proc_master`
+- **Schema version:** `psql -U postgres -d proc_master -c "SELECT * FROM schema_version ORDER BY version;"`
+- **Emergency rollback of routing:** in the app, **Settings → Force SharePoint Mode** disables all local-server routing instantly (reads/writes go to SharePoint only). Use if the server is down mid-day; untick when it's back.
+
+### Hardening checklist
+
+- [ ] Windows Update / automatic security updates enabled
+- [ ] Postgres `listen_addresses = 'localhost'` (default — keep it)
+- [ ] `.env` and `.pgpass.txt` readable only by admins/the service account
+- [ ] Nightly backup scheduled **and** one restore tested (`backup\RESTORE.md`)
+- [ ] OneDrive mirror confirmed syncing (or an external-drive/network-share copy in place)
+- [ ] UPS attached and tested
+- [ ] Caddy internal root CA trusted on all client PCs (offline PWA works)
+- [ ] Server documented in the CMDB — hostname, IP, purpose, owner
+- [ ] RDP restricted to the admin group
 
 ## Support
 
-Questions to the ProMaster development team. Server-side incidents
-during business hours: check `journalctl -u procmaster-api -n 100`
-(Linux) or `C:\procmaster\logs\err.log` (Windows) before escalating.
+Questions to the ProMaster development team. Before escalating a server
+incident, check `C:\ProcMaster\logs\err.log` and
+`psql -U postgres -d proc_master -c "SELECT 1"`.
