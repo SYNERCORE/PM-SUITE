@@ -31,6 +31,43 @@ const app = Fastify({
   trustProxy: true,
 });
 
+// ── Keep the API alive through transient outbound network errors ──────
+// The Azure AD JWKS fetch (auth.js) is an outbound TLS request. On this
+// LAN server the internet to Microsoft can blip mid-request; the reset
+// socket emits an 'error' event ASYNCHRONOUSLY, outside the try/catch
+// around verifyAzureToken. Node's default for an unhandled 'error' event
+// is to throw and kill the process — which took the whole API down and
+// 500'd every in-flight write. Here we log such errors and, for known
+// transient network codes, stay up (the next request re-tries, and once
+// the JWKS is cached in memory most requests never touch the network at
+// all). Anything genuinely unexpected we log and exit(1) so NSSM restarts
+// from a clean state rather than limping on in an unknown one.
+const TRANSIENT_NET = new Set([
+  'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'ECONNREFUSED',
+  'EPIPE', 'ECONNABORTED', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',
+]);
+function isTransientNet(err) {
+  const code = err && (err.code || (err.cause && err.cause.code));
+  return TRANSIENT_NET.has(code);
+}
+process.on('uncaughtException', (err) => {
+  if (isTransientNet(err)) {
+    app.log.warn({ code: err.code || err.cause?.code, msg: err.message },
+      'transient outbound network error — API staying up');
+    return;
+  }
+  app.log.error({ err }, 'uncaughtException — exiting for a clean restart');
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  if (isTransientNet(err)) {
+    app.log.warn({ code: err?.code || err?.cause?.code, msg: err?.message },
+      'transient outbound network rejection — ignored');
+    return;
+  }
+  app.log.error({ err }, 'unhandledRejection');
+});
+
 await app.register(helmet, { contentSecurityPolicy: false });
 await app.register(cors, {
   origin: (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),

@@ -12,7 +12,18 @@ let _jwks = null;
 function jwks() {
   if (!_jwks) {
     _jwks = createRemoteJWKSet(
-      new URL(`https://login.microsoftonline.com/${tenantId()}/discovery/v2.0/keys`)
+      new URL(`https://login.microsoftonline.com/${tenantId()}/discovery/v2.0/keys`),
+      {
+        // This LAN server's internet to Microsoft can blip. Keep the signing
+        // keys warm for 6h and don't refetch more than once every 30s, so
+        // steady-state token checks are served from memory and almost never
+        // touch the network. Bound each fetch so a stalled connection can't
+        // hang a request. Transient fetch failures still surface as a caught
+        // rejection (→ 401), never a process crash (see server.js guards).
+        cacheMaxAge: 6 * 60 * 60 * 1000, // 6 hours
+        cooldownDuration: 30 * 1000,     // 30 seconds
+        timeoutDuration: 8 * 1000,       // 8 seconds
+      }
     );
   }
   return _jwks;
