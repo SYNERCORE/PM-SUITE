@@ -593,8 +593,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.9.0';
-const APP_BUILD='20260707b';
+const APP_VERSION='2.10.0';
+const APP_BUILD='20260905a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -609,11 +609,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='SLA auto-escalation, role-based workflow approvers, project archiving';
+const APP_RELEASE_NOTE='Tasks: record Actual Start/End dates alongside the plan, with finish-variance';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.10.0',date:'2026-09-05',type:'minor',notes:[
+    'Tasks: new Actual Start and Actual End date fields — record when a task really began and finished, separate from the planned schedule (they stay editable even when planned dates are CPM-computed)',
+    'Tasks: finish-variance shown live in the form and in the task table (e.g. +5d late / -2d early / on time)',
+  ]},
   {version:'2.9.0',date:'2026-07-07',type:'major',notes:[
     'SLA auto-escalation: overdue workflow steps trigger notifications + webhook',
     'Role-based approver steps: define approver roles in Settings, assign to workflow steps',
@@ -16522,7 +16526,7 @@ $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><tabl
 <td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${esc(t.name)}</div><div style="font-size:10px;color:var(--text-secondary);padding-left:${depth*18}px">${esc(t.dept||'')}</div></td>
 <td><span class="badge badge-blue">${t.projectId}</span></td>
 <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.assignee)}<span style="font-size:11px">${t.assignee.split(' ')[0]}</span></div></td>
-<td style="font-size:11px;font-family:var(--font-mono);color:${isOverdue(t.endDate)?'var(--accent-red)':'inherit'}">${t.endDate}</td>
+<td style="font-size:11px;font-family:var(--font-mono);color:${isOverdue(t.endDate)?'var(--accent-red)':'inherit'}">${t.endDate||''}${t.actualEnd?`<div style="font-size:9px;color:var(--text-muted)">act ${t.actualEnd} ${_varBadge(_taskFinishVarDays(t))}</div>`:''}</td>
 <td style="font-family:var(--font-mono);font-size:11px;text-align:center">${t.milestone?'—':(t.durationHrs?+((t.durationHrs/(_getTaskProjHPD?.(t.projectId)||8)).toFixed(2)):'')}</td>
 <td><div style="display:flex;align-items:center;gap:5px"><div class="progress-bar" style="width:65px;height:5px"><div class="progress-fill" style="width:${t.progress}%;background:${pColor(t.progress)}"></div></div><span style="font-size:10px;font-family:var(--font-mono)">${t.progress}%</span></div></td>
 <td>${sBadge(t.status)}</td><td>${pBadge(t.priority)}</td>
@@ -16532,6 +16536,19 @@ $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><tabl
 </div></td></tr>`;}).join('')}</tbody></table>${_pgNav("tasks",tasks,typeof renderTaskView==="function"?renderTaskView:null)}</div></div>`;}
 
 let _tEditingId=null; // tracks which task is open in the form
+
+// ── Actual vs planned finish variance (calendar days; + = late, - = early) ──
+// Self-contained YMD parsing so it never depends on CPM date helpers.
+function _ymdToMs(s){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s||'');return m?Date.UTC(+m[1],+m[2]-1,+m[3]):null;}
+function _taskFinishVarDays(t){const a=_ymdToMs(t&&t.actualEnd),p=_ymdToMs(t&&t.endDate);return(a===null||p===null)?null:Math.round((a-p)/86400000);}
+function _varBadge(days){
+  if(days===null||days===undefined||isNaN(days))return '';
+  if(days===0)return '<span style="font-size:9px;color:var(--accent-green,#2e7d46)">on time</span>';
+  const late=days>0;
+  return `<span style="font-size:9px;color:${late?'var(--accent-red)':'var(--accent-green,#2e7d46)'}">${late?'+'+days:days}d ${late?'late':'early'}</span>`;
+}
+// Live variance shown beside the Actual End label in the task form.
+function _tActualVar(){const el=$('#tActVar');if(!el)return;const d=_taskFinishVarDays({endDate:$('#tEnd')?.value,actualEnd:$('#tActEnd')?.value});el.innerHTML=(d===null)?'':_varBadge(d);}
 
 function showTaskForm(id=null,defStatus='todo'){
 _tEditingId=id||null;
@@ -16556,6 +16573,8 @@ $('#taskModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">Department</label><input class="form-input" id="tDept" value="${t?.dept||''}" placeholder="Department"></div>
 <div class="form-group"><label class="form-label">Start Date ${_dateNote}</label><input class="form-input" type="date" id="tStart" value="${t?.startDate||''}" ${_dateRO} onchange="_tFormRecalc('start')"></div>
 <div class="form-group"><label class="form-label">End Date ${_dateNote}</label><input class="form-input" type="date" id="tEnd" value="${t?.endDate||''}" ${_dateRO} onchange="_tFormRecalc('end')"></div>
+<div class="form-group"><label class="form-label">Actual Start <span style="font-size:10px;color:var(--text-muted)">— when it really began</span></label><input class="form-input" type="date" id="tActStart" value="${t?.actualStart||''}"></div>
+<div class="form-group"><label class="form-label">Actual End <span id="tActVar" style="margin-left:4px"></span></label><input class="form-input" type="date" id="tActEnd" value="${t?.actualEnd||''}" onchange="_tActualVar()"></div>
 <div class="form-group"><label class="form-label">Planned Hours</label><input class="form-input" type="number" id="tPH" value="${t?.plannedHrs||0}"></div>
 <div class="form-group"><label class="form-label">Actual Hours</label><input class="form-input" type="number" id="tAH" value="${t?.actualHrs||0}"></div>
 <div class="form-group"><label class="form-label">Duration (days) <span style="font-size:10px;color:var(--text-muted)">— working days</span></label><input class="form-input" type="number" id="tDur" step="0.125" min="0" value="${_durVal}" placeholder="e.g. 5" onchange="_tFormRecalc('dur')" ${_isMile?'readonly style="opacity:.55"':''}></div>
@@ -16573,6 +16592,8 @@ $('#taskModalBody').innerHTML=`<div class="form-grid">
 if(!id) setTimeout(()=>{_tRefreshParentOptions('');_tRefreshWbs('');},0);
 // Run live CPM preview immediately so read-only date fields show computed values on open
 if(_hasPred) setTimeout(_runFormCPMPreview, 50);
+// Show finish variance (actual vs planned) if actuals already recorded
+setTimeout(_tActualVar, 0);
 }
 
 // Options for the Parent Task dropdown: same-project tasks, excluding self,
@@ -16621,6 +16642,8 @@ const t={
   assignee:$('#tAss').value,dept:$('#tDept').value,
   startDate:_isMileSave?$('#tStart').value:$('#tStart').value,
   endDate:_isMileSave?$('#tStart').value:$('#tEnd').value, // milestone: end=start
+  actualStart:$('#tActStart')?.value||'',   // real start — independent of CPM schedule
+  actualEnd:$('#tActEnd')?.value||'',        // real finish — independent of CPM schedule
   plannedHrs:(parseFloat($('#tPH').value)||0)||(_isMileSave?0:(_tDurDays>0?_tDurDays*_tHPD:0)),actualHrs:parseFloat($('#tAH').value)||0,
   status:$('#tStat').value,priority:$('#tPri').value,
   progress:parseInt($('#tProg').value)||0,
