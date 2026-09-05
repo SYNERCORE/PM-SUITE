@@ -50,12 +50,16 @@ const ph=tasks.reduce((s,t)=>s+(t.plannedHrs||0),0),ah=tasks.reduce((s,t)=>s+(t.
 const earnedHrs=tasks.reduce((s,t)=>s+((t.plannedHrs||0)*((t.progress||0)/100)),0);
 const prod=ah>0?(earnedHrs/ah).toFixed(2):'—';
 const done=tasks.filter(t=>t.status==='done').length;
+// On-time delivery: of completed tasks with a recorded Actual End, the share
+// that finished on or before their planned End. Null until at least one is measurable.
+const _otp=_onTimePct(tasks);
+const _otpMeasured=tasks.filter(t=>_taskOnTimeState(t)!==null).length;
 $('#kpi').innerHTML=`<div class="section-header" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
 <div><div class="section-title">KPI Analytics Dashboard</div><div class="section-sub">${projects.length} project${projects.length===1?'':'s'} in <strong>${_tfRange().label}</strong></div></div>
 ${_tfFilterHTML('renderKPI()')}
 </div>
 ${projects.length===0?`<div class="empty-state" style="padding:36px"><i class="fas fa-calendar-times" style="font-size:24px;opacity:.4;display:block;margin-bottom:10px"></i><div>No projects overlap ${_tfRange().label}.</div></div>`:''}
-<div class="grid grid-4" style="margin-bottom:14px">
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:14px">
 <div class="card" style="text-align:center"><div class="card-title" title="Cost Performance Index = Earned Value / Actual Cost">Cost Performance Index</div>
 <div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${CPI==='—'?'var(--text-muted)':(parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)')}">${CPI}</div>
 <div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${CPI==='—'?'No cost data yet':(parseFloat(CPI)>=1?'Cost Efficient ✓':'Cost Overrun ✗')+' · EV '+fmtCur(sumEV)+' / AC '+fmtCur(sumAC)}</div>
@@ -72,6 +76,10 @@ ${projects.length===0?`<div class="empty-state" style="padding:36px"><i class="f
 <div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:var(--accent-blue)">${Math.round(avgProg*100)}%</div>
 <div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${done}/${tasks.length} tasks done</div>
 <div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${Math.round(avgProg*100)}%;background:var(--accent-blue)"></div></div></div>
+<div class="card" style="text-align:center"><div class="card-title" title="Of completed tasks with a recorded Actual End, the share finished on or before their planned End date">On-Time Delivery</div>
+<div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${_onTimeColor(_otp)}">${_otp===null?'—':_otp+'%'}</div>
+<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${_otp===null?'No finished tasks with actual dates yet':(_otp>=90?'On-Time ✓':'Slipping ✗')+' · '+_otpMeasured+' task'+(_otpMeasured===1?'':'s')+' measured'}</div>
+<div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${_otp===null?0:_otp}%;background:${_onTimeColor(_otp)}"></div></div></div>
 </div>
 <div class="grid grid-3" style="margin-bottom:14px">
 <div class="card"><div class="card-title">Progress by Project</div><canvas id="kpiProg" height="150" style="width:100%"></canvas></div>
@@ -80,10 +88,11 @@ ${projects.length===0?`<div class="empty-state" style="padding:36px"><i class="f
 </div>
 <div class="card"><div class="card-title" style="margin-bottom:10px">Project KPI Summary</div>
 <div class="table-wrap"><table>
-<thead><tr><th>Project</th><th>PM</th><th>Physical%</th><th>Time%</th><th>Budget%</th><th>Tasks Done</th><th>Risks</th><th>NCRs</th><th>Schedule</th></tr></thead>
+<thead><tr><th>Project</th><th>PM</th><th>Physical%</th><th>Time%</th><th>Budget%</th><th>Tasks Done</th><th>On-Time</th><th>Risks</th><th>NCRs</th><th>Schedule</th></tr></thead>
 <tbody>${projects.map(p=>{
 const pt=tasks.filter(t=>t.projectId===p.id);
 const pd=pt.filter(t=>t.status==='done').length;
+const _otpP=_onTimePct(pt);
 const pr=risks.filter(r=>r.projectId===p.id&&r.status==='active').length;
 const pn=(AppState.data.qaqc||[]).filter(q=>q.projectId===p.id&&q.type==='NCR'&&q.status==='open').length;
 const bp=p.budget?Math.round((p.spent/p.budget)*100):0;
@@ -99,6 +108,7 @@ return`<tr>
 <td style="font-family:var(--font-mono);font-size:11px">${te}%</td>
 <td style="font-family:var(--font-mono);font-size:11px;color:${bp>90?'var(--accent-red)':'inherit'}">${bp}%</td>
 <td style="font-family:var(--font-mono);font-size:11px">${pd}/${pt.length}</td>
+<td style="font-family:var(--font-mono);font-size:11px;color:${_onTimeColor(_otpP)}" title="On-time completed tasks (actual finish vs planned)">${_otpP===null?'—':_otpP+'%'}</td>
 <td style="font-family:var(--font-mono);font-size:11px;color:${pr>2?'var(--accent-red)':pr>0?'var(--accent-amber)':'var(--accent-green)'}">${pr}</td>
 <td style="font-family:var(--font-mono);font-size:11px;color:${pn>0?'var(--accent-red)':'var(--accent-green)'}">${pn}</td>
 <td><span class="badge ${_schedClass}">${_schedLabel}</span></td>

@@ -183,12 +183,15 @@ function renderGantt(){
         const ble=blTask.endDate;
         ghostBar=`<div style="position:absolute;left:${pct(bls)}%;width:${wPct(bls,ble)}%;min-width:3px;top:5px;height:20px;background:rgba(139,148,158,.15);border:1.5px dashed rgba(139,148,158,.5);border-radius:3px;pointer-events:none" title="Baseline: ${bls} → ${ble}"></div>`;
 
-        // SV: positive = finishing earlier than baseline (ahead), negative = behind
-        const sv=SHICBaseline.calcSV(teStr,ble);
+        // SV vs baseline: use the REAL finish (actualEnd) once recorded, else the
+        // current planned end. positive = ahead of baseline, negative = behind.
+        const svEnd=t.actualEnd||teStr;
+        const sv=SHICBaseline.calcSV(svEnd,ble);
         if(sv!==null){
           const svColor=sv>=0?'#3fb950':'#f85149';
           const svSign=sv>=0?'+':'';
-          svHtml=`<span style="font-size:10px;font-weight:700;color:${svColor}" title="Schedule Variance: ${svSign}${sv} days vs baseline">${svSign}${sv}d</span>`;
+          const svBasis=t.actualEnd?'actual finish':'planned end';
+          svHtml=`<span style="font-size:10px;font-weight:700;color:${svColor}" title="Schedule Variance (${svBasis}): ${svSign}${sv} days vs baseline">${svSign}${sv}d${t.actualEnd?'<sup style="font-size:7px">A</sup>':''}</span>`;
         }
       }
 

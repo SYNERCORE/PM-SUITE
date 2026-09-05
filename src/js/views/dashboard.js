@@ -35,6 +35,12 @@ const openNCR=qaqc.filter(q=>q.type==='NCR'&&q.status==='open').length;
 const totalMP=manpower.reduce((s,m)=>s+m.actual,0);
 const delayed=projects.filter(p=>p.status==='active'&&p.progress<35).length;
 const budgetUtil=Math.round((totalSpent/totalBudget)*100);
+// On-time delivery across the in-scope projects: completed tasks whose actual
+// finish is on/before plan. Null (—) until at least one such task is recorded.
+const _dashProjIds=new Set(projects.map(p=>p.id));
+const onTimePct=_onTimePct((tasks||[]).filter(t=>_dashProjIds.has(t.projectId)));
+const _otColor=onTimePct===null?'#8b949e':(onTimePct>=90?'#3fb950':onTimePct>=70?'#f0a450':'#f85149');
+const _otBg=onTimePct===null?'rgba(139,148,158,.15)':(onTimePct>=90?'rgba(63,185,80,.15)':onTimePct>=70?'rgba(240,164,80,.15)':'rgba(248,81,73,.15)');
 const now=new Date();
 const timeStr=now.toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
 const dateStr=now.toLocaleDateString('en',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
@@ -66,11 +72,12 @@ ${sc('fas fa-chart-line','Avg Progress',avgProg+'%'+_tr(avgProg,_prev.avgProg),`
 ${sc('fas fa-dollar-sign','Budget Used',_budgetDisplay,_budgetSub,'#f0a450','rgba(240,164,80,.15)',isAdm?"navigate('costs')":null)}
 ${sc('fas fa-exclamation-triangle','Open Risks',openRisks+_tr(openRisks,_prev.openRisks,false),`${overdueAct} overdue actions`,'#f85149','rgba(248,81,73,.15)',"navigate('risks')")}
 </div>
-<div class="grid grid-4" style="margin-bottom:14px">
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:14px">
 ${sc('fas fa-tasks','Action Items',openActions+_tr(openActions,_prev.openActions,false),`${overdueAct} overdue`,'#bc8cff','rgba(188,140,255,.15)',"navigate('actions')")}
 ${sc('fas fa-hard-hat','Manpower Today',totalMP+_tr(totalMP,_prev.totalMP),`Across all sites`,'#39d3f2','rgba(57,211,242,.15)',"navigate('manpower')")}
 ${sc('fas fa-check-double','Open NCRs',openNCR+_tr(openNCR,_prev.openNCR,false),'QA/QC tracking','#fb8f44','rgba(251,143,68,.15)',"navigate('qaqc')")}
 ${sc('fas fa-flag','At Risk',delayed+_tr(delayed,_prev.delayed,false),`of ${active} active projects`,'#f85149','rgba(248,81,73,.15)',"navigate('projects')")}
+${sc('fas fa-calendar-check','On-Time Delivery',onTimePct===null?'—':onTimePct+'%',onTimePct===null?'No actuals yet':'completed vs plan',_otColor,_otBg,"navigate('kpi')")}
 </div>
 <div class="grid grid-3" style="margin-bottom:14px">
 <div class="card"><div class="card-title">Project Status Distribution</div>

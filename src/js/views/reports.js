@@ -99,6 +99,7 @@ function renderReports(){
             <th style="font-size:10px">Client</th>
             <th style="font-size:10px">PM</th>
             <th style="font-size:10px">Progress</th>
+            <th style="font-size:10px" title="On-time completed tasks: actual finish vs planned">On-Time</th>
             <th style="font-size:10px">Budget</th>
             <th style="font-size:10px">Spent</th>
             <th style="font-size:10px">Status</th>
@@ -116,6 +117,7 @@ function renderReports(){
                 <span style="font-size:10px;font-family:var(--font-mono)">${p.progress}%</span>
               </div>
             </td>
+            <td style="font-size:10px;font-family:var(--font-mono)">${(()=>{const o=_onTimePct((AppState.data.tasks||[]).filter(t=>t.projectId===p.id));return o===null?'<span style="color:var(--text-muted)">—</span>':`<span style="color:${_onTimeColor(o)}">${o}%</span>`;})()}</td>
             <td style="font-size:10px;font-family:var(--font-mono)">${fmtCur(p.budget)}</td>
             <td style="font-size:10px;font-family:var(--font-mono);color:${p.spent/p.budget>0.9?'var(--accent-red)':'inherit'}">${fmtCur(p.spent)}</td>
             <td>${sBadge(p.status)}</td>
@@ -281,16 +283,17 @@ function exportReportCSV(scopeLabel) {
     const planned = pCosts.reduce((s,c)=>s+c.planned,0);
     const actual  = pCosts.reduce((s,c)=>s+c.actual,0);
     const bu = BUs.find(b=>b.id===p.businessUnit);
+    const ot = _onTimePct((AppState.data.tasks||[]).filter(t=>t.projectId===p.id));
     return [
       p.id, p.name, p.client, bu?bu.name:'Main Company',
       p.status, p.progress+'%', p.pm,
       p.budget, p.spent, planned, actual, (planned-actual),
-      p.startDate, p.endDate
+      p.startDate, p.endDate, (ot===null?'':ot+'%')
     ];
   });
   exportCSV(rows,
     ['Project ID','Project Name','Client','Business Unit','Status','Progress','PM',
-     'Contract Budget','Spent','Planned Cost','Actual Cost','Variance','Start Date','End Date'],
+     'Contract Budget','Spent','Planned Cost','Actual Cost','Variance','Start Date','End Date','On-Time %'],
     `SHIC_Report_${scopeLabel.replace(/[^a-z0-9]/gi,'_')}_${new Date().toISOString().slice(0,10)}.csv`
   );
 }

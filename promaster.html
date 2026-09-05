@@ -593,8 +593,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.10.0';
-const APP_BUILD='20260905a';
+const APP_VERSION='2.11.0';
+const APP_BUILD='20260905b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -609,11 +609,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Tasks: record Actual Start/End dates alongside the plan, with finish-variance';
+const APP_RELEASE_NOTE='On-Time Delivery KPI from task actual dates — dashboard, KPI board, Gantt SV, and reports';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.11.0',date:'2026-09-05',type:'minor',notes:[
+    'On-Time Delivery KPI: of completed tasks with a recorded Actual End, the share finished on/before their planned End — shown on the Dashboard, as a KPI card, and per-project in the KPI Summary and Reports (incl. CSV export)',
+    'Gantt Schedule Variance now uses a task’s real finish (Actual End) once recorded, not just the planned end (marked with a small A); still falls back to planned when no actual is set',
+  ]},
   {version:'2.10.0',date:'2026-09-05',type:'minor',notes:[
     'Tasks: new Actual Start and Actual End date fields — record when a task really began and finished, separate from the planned schedule (they stay editable even when planned dates are CPM-computed)',
     'Tasks: finish-variance shown live in the form and in the task table (e.g. +5d late / -2d early / on time)',
@@ -9691,6 +9695,12 @@ const openNCR=qaqc.filter(q=>q.type==='NCR'&&q.status==='open').length;
 const totalMP=manpower.reduce((s,m)=>s+m.actual,0);
 const delayed=projects.filter(p=>p.status==='active'&&p.progress<35).length;
 const budgetUtil=Math.round((totalSpent/totalBudget)*100);
+// On-time delivery across the in-scope projects: completed tasks whose actual
+// finish is on/before plan. Null (—) until at least one such task is recorded.
+const _dashProjIds=new Set(projects.map(p=>p.id));
+const onTimePct=_onTimePct((tasks||[]).filter(t=>_dashProjIds.has(t.projectId)));
+const _otColor=onTimePct===null?'#8b949e':(onTimePct>=90?'#3fb950':onTimePct>=70?'#f0a450':'#f85149');
+const _otBg=onTimePct===null?'rgba(139,148,158,.15)':(onTimePct>=90?'rgba(63,185,80,.15)':onTimePct>=70?'rgba(240,164,80,.15)':'rgba(248,81,73,.15)');
 const now=new Date();
 const timeStr=now.toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
 const dateStr=now.toLocaleDateString('en',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
@@ -9722,11 +9732,12 @@ ${sc('fas fa-chart-line','Avg Progress',avgProg+'%'+_tr(avgProg,_prev.avgProg),`
 ${sc('fas fa-dollar-sign','Budget Used',_budgetDisplay,_budgetSub,'#f0a450','rgba(240,164,80,.15)',isAdm?"navigate('costs')":null)}
 ${sc('fas fa-exclamation-triangle','Open Risks',openRisks+_tr(openRisks,_prev.openRisks,false),`${overdueAct} overdue actions`,'#f85149','rgba(248,81,73,.15)',"navigate('risks')")}
 </div>
-<div class="grid grid-4" style="margin-bottom:14px">
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:14px">
 ${sc('fas fa-tasks','Action Items',openActions+_tr(openActions,_prev.openActions,false),`${overdueAct} overdue`,'#bc8cff','rgba(188,140,255,.15)',"navigate('actions')")}
 ${sc('fas fa-hard-hat','Manpower Today',totalMP+_tr(totalMP,_prev.totalMP),`Across all sites`,'#39d3f2','rgba(57,211,242,.15)',"navigate('manpower')")}
 ${sc('fas fa-check-double','Open NCRs',openNCR+_tr(openNCR,_prev.openNCR,false),'QA/QC tracking','#fb8f44','rgba(251,143,68,.15)',"navigate('qaqc')")}
 ${sc('fas fa-flag','At Risk',delayed+_tr(delayed,_prev.delayed,false),`of ${active} active projects`,'#f85149','rgba(248,81,73,.15)',"navigate('projects')")}
+${sc('fas fa-calendar-check','On-Time Delivery',onTimePct===null?'—':onTimePct+'%',onTimePct===null?'No actuals yet':'completed vs plan',_otColor,_otBg,"navigate('kpi')")}
 </div>
 <div class="grid grid-3" style="margin-bottom:14px">
 <div class="card"><div class="card-title">Project Status Distribution</div>
@@ -16550,6 +16561,24 @@ function _varBadge(days){
 // Live variance shown beside the Actual End label in the task form.
 function _tActualVar(){const el=$('#tActVar');if(!el)return;const d=_taskFinishVarDays({endDate:$('#tEnd')?.value,actualEnd:$('#tActEnd')?.value});el.innerHTML=(d===null)?'':_varBadge(d);}
 
+// ── On-time delivery tracking (shared by KPI, dashboard, reports, gantt) ──
+// A task is measurable for on-time only once it is finished AND carries an
+// Actual End to compare against its planned End. Progress>=100 or status done.
+function _taskComplete(t){return !!t&&(t.status==='done'||(t.progress||0)>=100);}
+// 'ontime' (finished on/before plan) | 'late' | null (not yet measurable)
+function _taskOnTimeState(t){
+  if(!_taskComplete(t))return null;
+  const d=_taskFinishVarDays(t);       // needs both actualEnd and endDate
+  return d===null?null:(d<=0?'ontime':'late');
+}
+// % of measurable completed tasks that finished on/before plan; null if none measurable.
+function _onTimePct(tasks){
+  const m=(tasks||[]).map(_taskOnTimeState).filter(s=>s!==null);
+  return m.length?Math.round(100*m.filter(s=>s==='ontime').length/m.length):null;
+}
+// Colour for an on-time percentage (or muted when there's no data yet).
+function _onTimeColor(pct){return pct===null?'var(--text-muted)':(pct>=90?'var(--accent-green)':pct>=70?'var(--accent-amber)':'var(--accent-red)');}
+
 function showTaskForm(id=null,defStatus='todo'){
 _tEditingId=id||null;
 // Fix #2b: snapshot for conflict detection if editing
@@ -17678,12 +17707,15 @@ function renderGantt(){
         const ble=blTask.endDate;
         ghostBar=`<div style="position:absolute;left:${pct(bls)}%;width:${wPct(bls,ble)}%;min-width:3px;top:5px;height:20px;background:rgba(139,148,158,.15);border:1.5px dashed rgba(139,148,158,.5);border-radius:3px;pointer-events:none" title="Baseline: ${bls} → ${ble}"></div>`;
 
-        // SV: positive = finishing earlier than baseline (ahead), negative = behind
-        const sv=SHICBaseline.calcSV(teStr,ble);
+        // SV vs baseline: use the REAL finish (actualEnd) once recorded, else the
+        // current planned end. positive = ahead of baseline, negative = behind.
+        const svEnd=t.actualEnd||teStr;
+        const sv=SHICBaseline.calcSV(svEnd,ble);
         if(sv!==null){
           const svColor=sv>=0?'#3fb950':'#f85149';
           const svSign=sv>=0?'+':'';
-          svHtml=`<span style="font-size:10px;font-weight:700;color:${svColor}" title="Schedule Variance: ${svSign}${sv} days vs baseline">${svSign}${sv}d</span>`;
+          const svBasis=t.actualEnd?'actual finish':'planned end';
+          svHtml=`<span style="font-size:10px;font-weight:700;color:${svColor}" title="Schedule Variance (${svBasis}): ${svSign}${sv} days vs baseline">${svSign}${sv}d${t.actualEnd?'<sup style="font-size:7px">A</sup>':''}</span>`;
         }
       }
 
@@ -22276,12 +22308,16 @@ const ph=tasks.reduce((s,t)=>s+(t.plannedHrs||0),0),ah=tasks.reduce((s,t)=>s+(t.
 const earnedHrs=tasks.reduce((s,t)=>s+((t.plannedHrs||0)*((t.progress||0)/100)),0);
 const prod=ah>0?(earnedHrs/ah).toFixed(2):'—';
 const done=tasks.filter(t=>t.status==='done').length;
+// On-time delivery: of completed tasks with a recorded Actual End, the share
+// that finished on or before their planned End. Null until at least one is measurable.
+const _otp=_onTimePct(tasks);
+const _otpMeasured=tasks.filter(t=>_taskOnTimeState(t)!==null).length;
 $('#kpi').innerHTML=`<div class="section-header" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
 <div><div class="section-title">KPI Analytics Dashboard</div><div class="section-sub">${projects.length} project${projects.length===1?'':'s'} in <strong>${_tfRange().label}</strong></div></div>
 ${_tfFilterHTML('renderKPI()')}
 </div>
 ${projects.length===0?`<div class="empty-state" style="padding:36px"><i class="fas fa-calendar-times" style="font-size:24px;opacity:.4;display:block;margin-bottom:10px"></i><div>No projects overlap ${_tfRange().label}.</div></div>`:''}
-<div class="grid grid-4" style="margin-bottom:14px">
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:14px">
 <div class="card" style="text-align:center"><div class="card-title" title="Cost Performance Index = Earned Value / Actual Cost">Cost Performance Index</div>
 <div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${CPI==='—'?'var(--text-muted)':(parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)')}">${CPI}</div>
 <div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${CPI==='—'?'No cost data yet':(parseFloat(CPI)>=1?'Cost Efficient ✓':'Cost Overrun ✗')+' · EV '+fmtCur(sumEV)+' / AC '+fmtCur(sumAC)}</div>
@@ -22298,6 +22334,10 @@ ${projects.length===0?`<div class="empty-state" style="padding:36px"><i class="f
 <div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:var(--accent-blue)">${Math.round(avgProg*100)}%</div>
 <div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${done}/${tasks.length} tasks done</div>
 <div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${Math.round(avgProg*100)}%;background:var(--accent-blue)"></div></div></div>
+<div class="card" style="text-align:center"><div class="card-title" title="Of completed tasks with a recorded Actual End, the share finished on or before their planned End date">On-Time Delivery</div>
+<div style="font-size:44px;font-weight:700;font-family:var(--font-mono);color:${_onTimeColor(_otp)}">${_otp===null?'—':_otp+'%'}</div>
+<div style="font-size:11px;color:var(--text-secondary);margin:4px 0">${_otp===null?'No finished tasks with actual dates yet':(_otp>=90?'On-Time ✓':'Slipping ✗')+' · '+_otpMeasured+' task'+(_otpMeasured===1?'':'s')+' measured'}</div>
+<div class="progress-bar" style="height:5px"><div class="progress-fill" style="width:${_otp===null?0:_otp}%;background:${_onTimeColor(_otp)}"></div></div></div>
 </div>
 <div class="grid grid-3" style="margin-bottom:14px">
 <div class="card"><div class="card-title">Progress by Project</div><canvas id="kpiProg" height="150" style="width:100%"></canvas></div>
@@ -22306,10 +22346,11 @@ ${projects.length===0?`<div class="empty-state" style="padding:36px"><i class="f
 </div>
 <div class="card"><div class="card-title" style="margin-bottom:10px">Project KPI Summary</div>
 <div class="table-wrap"><table>
-<thead><tr><th>Project</th><th>PM</th><th>Physical%</th><th>Time%</th><th>Budget%</th><th>Tasks Done</th><th>Risks</th><th>NCRs</th><th>Schedule</th></tr></thead>
+<thead><tr><th>Project</th><th>PM</th><th>Physical%</th><th>Time%</th><th>Budget%</th><th>Tasks Done</th><th>On-Time</th><th>Risks</th><th>NCRs</th><th>Schedule</th></tr></thead>
 <tbody>${projects.map(p=>{
 const pt=tasks.filter(t=>t.projectId===p.id);
 const pd=pt.filter(t=>t.status==='done').length;
+const _otpP=_onTimePct(pt);
 const pr=risks.filter(r=>r.projectId===p.id&&r.status==='active').length;
 const pn=(AppState.data.qaqc||[]).filter(q=>q.projectId===p.id&&q.type==='NCR'&&q.status==='open').length;
 const bp=p.budget?Math.round((p.spent/p.budget)*100):0;
@@ -22325,6 +22366,7 @@ return`<tr>
 <td style="font-family:var(--font-mono);font-size:11px">${te}%</td>
 <td style="font-family:var(--font-mono);font-size:11px;color:${bp>90?'var(--accent-red)':'inherit'}">${bp}%</td>
 <td style="font-family:var(--font-mono);font-size:11px">${pd}/${pt.length}</td>
+<td style="font-family:var(--font-mono);font-size:11px;color:${_onTimeColor(_otpP)}" title="On-time completed tasks (actual finish vs planned)">${_otpP===null?'—':_otpP+'%'}</td>
 <td style="font-family:var(--font-mono);font-size:11px;color:${pr>2?'var(--accent-red)':pr>0?'var(--accent-amber)':'var(--accent-green)'}">${pr}</td>
 <td style="font-family:var(--font-mono);font-size:11px;color:${pn>0?'var(--accent-red)':'var(--accent-green)'}">${pn}</td>
 <td><span class="badge ${_schedClass}">${_schedLabel}</span></td>
@@ -24278,6 +24320,7 @@ function renderReports(){
             <th style="font-size:10px">Client</th>
             <th style="font-size:10px">PM</th>
             <th style="font-size:10px">Progress</th>
+            <th style="font-size:10px" title="On-time completed tasks: actual finish vs planned">On-Time</th>
             <th style="font-size:10px">Budget</th>
             <th style="font-size:10px">Spent</th>
             <th style="font-size:10px">Status</th>
@@ -24295,6 +24338,7 @@ function renderReports(){
                 <span style="font-size:10px;font-family:var(--font-mono)">${p.progress}%</span>
               </div>
             </td>
+            <td style="font-size:10px;font-family:var(--font-mono)">${(()=>{const o=_onTimePct((AppState.data.tasks||[]).filter(t=>t.projectId===p.id));return o===null?'<span style="color:var(--text-muted)">—</span>':`<span style="color:${_onTimeColor(o)}">${o}%</span>`;})()}</td>
             <td style="font-size:10px;font-family:var(--font-mono)">${fmtCur(p.budget)}</td>
             <td style="font-size:10px;font-family:var(--font-mono);color:${p.spent/p.budget>0.9?'var(--accent-red)':'inherit'}">${fmtCur(p.spent)}</td>
             <td>${sBadge(p.status)}</td>
@@ -24460,16 +24504,17 @@ function exportReportCSV(scopeLabel) {
     const planned = pCosts.reduce((s,c)=>s+c.planned,0);
     const actual  = pCosts.reduce((s,c)=>s+c.actual,0);
     const bu = BUs.find(b=>b.id===p.businessUnit);
+    const ot = _onTimePct((AppState.data.tasks||[]).filter(t=>t.projectId===p.id));
     return [
       p.id, p.name, p.client, bu?bu.name:'Main Company',
       p.status, p.progress+'%', p.pm,
       p.budget, p.spent, planned, actual, (planned-actual),
-      p.startDate, p.endDate
+      p.startDate, p.endDate, (ot===null?'':ot+'%')
     ];
   });
   exportCSV(rows,
     ['Project ID','Project Name','Client','Business Unit','Status','Progress','PM',
-     'Contract Budget','Spent','Planned Cost','Actual Cost','Variance','Start Date','End Date'],
+     'Contract Budget','Spent','Planned Cost','Actual Cost','Variance','Start Date','End Date','On-Time %'],
     `SHIC_Report_${scopeLabel.replace(/[^a-z0-9]/gi,'_')}_${new Date().toISOString().slice(0,10)}.csv`
   );
 }

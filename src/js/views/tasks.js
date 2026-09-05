@@ -249,6 +249,24 @@ function _varBadge(days){
 // Live variance shown beside the Actual End label in the task form.
 function _tActualVar(){const el=$('#tActVar');if(!el)return;const d=_taskFinishVarDays({endDate:$('#tEnd')?.value,actualEnd:$('#tActEnd')?.value});el.innerHTML=(d===null)?'':_varBadge(d);}
 
+// ── On-time delivery tracking (shared by KPI, dashboard, reports, gantt) ──
+// A task is measurable for on-time only once it is finished AND carries an
+// Actual End to compare against its planned End. Progress>=100 or status done.
+function _taskComplete(t){return !!t&&(t.status==='done'||(t.progress||0)>=100);}
+// 'ontime' (finished on/before plan) | 'late' | null (not yet measurable)
+function _taskOnTimeState(t){
+  if(!_taskComplete(t))return null;
+  const d=_taskFinishVarDays(t);       // needs both actualEnd and endDate
+  return d===null?null:(d<=0?'ontime':'late');
+}
+// % of measurable completed tasks that finished on/before plan; null if none measurable.
+function _onTimePct(tasks){
+  const m=(tasks||[]).map(_taskOnTimeState).filter(s=>s!==null);
+  return m.length?Math.round(100*m.filter(s=>s==='ontime').length/m.length):null;
+}
+// Colour for an on-time percentage (or muted when there's no data yet).
+function _onTimeColor(pct){return pct===null?'var(--text-muted)':(pct>=90?'var(--accent-green)':pct>=70?'var(--accent-amber)':'var(--accent-red)');}
+
 function showTaskForm(id=null,defStatus='todo'){
 _tEditingId=id||null;
 // Fix #2b: snapshot for conflict detection if editing
