@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.11.0';
-const APP_BUILD='20260905b';
+const APP_VERSION='2.12.0';
+const APP_BUILD='20260905c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='On-Time Delivery KPI from task actual dates — dashboard, KPI board, Gantt SV, and reports';
+const APP_RELEASE_NOTE='Server-First mode — run the workday on the LAN server at zero internet cost, SharePoint daily backup';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.12.0',date:'2026-09-05',type:'minor',notes:[
+    'Server-First mode (Settings → Local Server): use the in-house LAN server as the primary live backend — reads and writes sync over the local network at zero internet cost, auto-refreshing every few minutes so multiple users see each other’s changes. Built for limited-internet sites.',
+    'With Server-First on, SharePoint drops from per-edit sync to a once-a-day offsite backup (plus a "Back up to SharePoint now" button); the per-edit SP push and the recurring SP remote-poll are skipped to save data.',
+    'Opt-in per device and OFF by default; sign-in still needs internet and a new device should Pull once to seed local data.',
+  ]},
   {version:'2.11.0',date:'2026-09-05',type:'minor',notes:[
     'On-Time Delivery KPI: of completed tasks with a recorded Actual End, the share finished on/before their planned End — shown on the Dashboard, as a KPI card, and per-project in the KPI Summary and Reports (incl. CSV export)',
     'Gantt Schedule Variance now uses a task’s real finish (Actual End) once recorded, not just the planned end (marked with a small A); still falls back to planned when no actual is set',

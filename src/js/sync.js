@@ -3533,6 +3533,9 @@ function restorePreSyncSnapshot() {
 
 async function _spPollRemote() {
   if (!_spConnected || !_spAccount || _spSyncing) return;
+  // Server-First: reads come from the LAN server, not SharePoint — skip the
+  // recurring remote poll so it costs no internet data.
+  if (typeof _serverFirstOn === 'function' && _serverFirstOn()) return;
   // Fix #1: skip if user is actively editing — prevents wiping typed text
   if (_isUserActivelyEditing()) {
     console.log('[SP] Poll deferred — user is editing');
@@ -3755,6 +3758,10 @@ const _origSaveForSp = AppState.save.bind(AppState);
 AppState.save = function () {
   _origSaveForSp();
   if (!_spConnected || !_spAccount) return;
+  // Server-First: the LAN server is the primary live backend and SharePoint is
+  // only a throttled daily offsite backup (driven by the serverFirst engine).
+  // Skip the per-edit SharePoint push so edits cost no internet data.
+  if (typeof _serverFirstOn === 'function' && _serverFirstOn()) return;
 
   // Only trigger sync if data actually changed (prevents 30s auto-save storms)
   const currentHash = _spHash(AppState.data);

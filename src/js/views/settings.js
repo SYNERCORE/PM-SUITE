@@ -274,6 +274,24 @@ ${renderSpPanel()}
     </div>
     <div id="localSrvStatus" style="font-size:11px;color:var(--text-muted);margin-top:10px;min-height:16px"></div>
 
+    <!-- Server-First mode: LAN server as the primary live backend -->
+    <div style="margin-top:14px;padding:12px;border:1px solid rgba(63,185,80,.35);border-radius:9px;background:rgba(63,185,80,.06)">
+      <label style="display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;cursor:pointer">
+        <input type="checkbox" id="sfToggle" ${_dev.serverFirst?'checked':''} onchange="_toggleServerFirst(this.checked)">
+        <span><i class="fas fa-bolt" style="color:var(--accent-green);margin-right:5px"></i>Server-First mode</span>
+      </label>
+      <div style="font-size:11px;color:var(--text-secondary);margin:6px 0 0 26px;line-height:1.5">
+        Use the LAN server as the primary live backend — reads and writes sync over the local network at
+        <strong>zero internet cost</strong>, refreshing every few minutes so users see each other's changes.
+        SharePoint drops to a <strong>once-a-day</strong> offsite backup. Best for limited-internet sites with
+        several users. Sign-in still needs internet; a new device should <strong>Pull</strong> once first (below).
+      </div>
+      <div style="margin:10px 0 0 26px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="_sfBackupNow()" title="Push a full copy to SharePoint now (bypasses the once-a-day throttle)"><i class="fas fa-cloud-upload-alt"></i> Back up to SharePoint now</button>
+        <span id="sfStatus" style="font-size:10px;color:var(--text-muted)">${(()=>{try{const t=+localStorage.getItem('pm_sf_last_sp_backup')||0;return (_dev.serverFirst?'On':'Off')+' · last SharePoint backup: '+(t?new Date(t).toLocaleString():'never');}catch(e){return '';}})()}</span>
+      </div>
+    </div>
+
     <!-- Per-entity opt-in + rollback + migrate -->
     <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
       <div style="font-size:12px;font-weight:600;margin-bottom:8px">Entity Routing</div>
@@ -1307,7 +1325,40 @@ function _toggleSharedPC(on) {
 
 function _apiToggleForceSP(on) {
   setDeviceSetting('forceSharepointMode', !!on);
+  if (on && typeof getDeviceSettings === 'function' && getDeviceSettings().serverFirst) {
+    // Force-SP and Server-First are mutually exclusive — turning one on clears the other.
+    setDeviceSetting('serverFirst', false);
+    if (typeof ServerFirst !== 'undefined') ServerFirst.stop();
+    const t = document.getElementById('sfToggle'); if (t) t.checked = false;
+  }
   showToast(on ? 'Force SharePoint Mode ON — server routing disabled' : 'Server routing re-enabled', on ? 'warning' : 'info', 3500);
+}
+
+// ── Server-First mode (device-local): LAN server as the primary live backend ──
+function _toggleServerFirst(on) {
+  setDeviceSetting('serverFirst', !!on);
+  if (on) setDeviceSetting('forceSharepointMode', false); // contradictory with server-first
+  if (typeof ServerFirst !== 'undefined') { if (on) ServerFirst.start(); else ServerFirst.stop(); }
+  showToast(
+    on ? 'Server-First ON — reads & writes sync over the LAN; SharePoint is now a daily backup'
+       : 'Server-First OFF — SharePoint sync resumed',
+    'info', 4000
+  );
+  _sfRefreshStatus();
+}
+function _sfBackupNow() {
+  if (typeof ServerFirst === 'undefined') { showToast('Server-First engine not loaded', 'error'); return; }
+  ServerFirst.backupToSharePointNow();
+  showToast('Backing up to SharePoint…', 'info', 2500);
+  setTimeout(_sfRefreshStatus, 1500);
+}
+function _sfRefreshStatus() {
+  const el = document.getElementById('sfStatus'); if (!el) return;
+  let on = false, started = false, last = 0;
+  try { const s = ServerFirst.status(); on = s.on; started = s.started; last = s.lastSharePointBackup ? Date.parse(s.lastSharePointBackup) : 0; }
+  catch (e) { try { on = !!getDeviceSettings().serverFirst; last = +localStorage.getItem('pm_sf_last_sp_backup') || 0; } catch (e2) {} }
+  el.textContent = (on ? (started ? 'Active — LAN sync running' : 'Waiting for server/login') : 'Off')
+    + ' · last SharePoint backup: ' + (last ? new Date(last).toLocaleString() : 'never');
 }
 
 async function _apiMigrateEntity(entity) {

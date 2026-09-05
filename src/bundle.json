@@ -13,6 +13,7 @@
     "js/ui.js",
     "js/auth.js",
     "js/sync.js",
+    "js/serverFirst.js",
     "js/session.js",
     "js/hardening.js",
     "js/cpm.js",
