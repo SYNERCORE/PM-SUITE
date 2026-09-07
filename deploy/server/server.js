@@ -8,10 +8,11 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { pool } from './db.js';
-import { verifyAzureToken } from './auth.js';
+import { verifyAzureToken, signLanPass, verifyLanPass, setLanSecret } from './auth.js';
 import warehouseItems from './routes/warehouseItems.js';
 import { makeEntityRoutes } from './routes/_entityRoutes.js';
 
@@ -24,6 +25,38 @@ if (fs.existsSync(envPath)) {
     const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
     if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
   }
+}
+
+// ── LAN pass secret + revocations ────────────────────────────
+// The server signs its own offline session tokens with this secret. Prefer
+// SESSION_SECRET from .env; otherwise generate one and persist it to
+// session.key so it survives restarts with zero manual setup. Keep this file
+// admin-readable only.
+const OFFLINE_PASS_DAYS = Number(process.env.OFFLINE_PASS_DAYS || 14);
+(function initLanSecret() {
+  let secret = process.env.SESSION_SECRET || '';
+  if (!secret) {
+    const keyPath = path.join(__dirname, 'session.key');
+    try {
+      if (fs.existsSync(keyPath)) secret = fs.readFileSync(keyPath, 'utf8').trim();
+      if (!secret) { secret = crypto.randomBytes(48).toString('hex'); fs.writeFileSync(keyPath, secret, { mode: 0o600 }); }
+    } catch (e) { secret = crypto.randomBytes(48).toString('hex'); } // last resort: in-memory only
+  }
+  setLanSecret(new TextEncoder().encode(secret));
+})();
+
+// Revocation: passes issued for an email BEFORE its revocation time are rejected.
+// Stored as { email: unixSeconds } in revocations.json (no DB migration needed).
+const _revPath = path.join(__dirname, 'revocations.json');
+let _revocations = {};
+try { if (fs.existsSync(_revPath)) _revocations = JSON.parse(fs.readFileSync(_revPath, 'utf8') || '{}'); } catch (e) {}
+function _isRevoked(email, iatSeconds) {
+  const cut = _revocations[String(email || '').toLowerCase()];
+  return !!(cut && iatSeconds && iatSeconds < cut);
+}
+function _revoke(email) {
+  _revocations[String(email || '').toLowerCase()] = Math.floor(Date.now() / 1000);
+  try { fs.writeFileSync(_revPath, JSON.stringify(_revocations), { mode: 0o600 }); } catch (e) {}
 }
 
 const app = Fastify({
@@ -102,11 +135,18 @@ app.addHook('preHandler', async (req, reply) => {
   const auth = req.headers.authorization || '';
   const m = auth.match(/^Bearer\s+(.+)$/i);
   if (!m) return reply.code(401).send({ error: 'missing bearer token' });
+  // Try the LAN pass FIRST — it validates locally with no internet, so a device
+  // that signed in days ago keeps working through an outage. Fall back to a live
+  // Microsoft token (needs cached/online JWKS) for the sign-in/exchange path.
   try {
-    req.user = await verifyAzureToken(m[1]);
-  } catch (e) {
-    req.log.warn({ err: e.message }, 'token verification failed');
-    return reply.code(401).send({ error: 'invalid token' });
+    req.user = await verifyLanPass(m[1], _isRevoked);
+  } catch (eLan) {
+    try {
+      req.user = await verifyAzureToken(m[1]);
+    } catch (eM365) {
+      req.log.warn({ lan: eLan.message, m365: eM365.message }, 'token verification failed');
+      return reply.code(401).send({ error: 'invalid token' });
+    }
   }
   // Upsert the user so FK constraints (created_by / updated_by) always resolve.
   // Cheap: one INSERT ... ON CONFLICT per request; Postgres treats a duplicate
@@ -127,6 +167,63 @@ app.addHook('preHandler', async (req, reply) => {
     req.log.warn({ err: e.message }, 'user upsert failed');
     // Don't 500 — let the route try; if it needs the FK it'll fail with a clearer error
   }
+});
+
+// ── Admin check: explicit allowlist (ADMIN_EMAILS in .env) or users.role ──
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+async function _isAdminEmail(email) {
+  const e = String(email || '').toLowerCase();
+  if (!e) return false;
+  if (ADMIN_EMAILS.includes(e)) return true;
+  try {
+    const { rows } = await pool.query('SELECT role FROM users WHERE lower(email)=lower($1)', [e]);
+    return !!(rows[0] && ['admin', 'manager'].includes(rows[0].role));
+  } catch (err) { return false; }
+}
+
+// ── Offline session (LAN pass) endpoints ──────────────────────────────
+// exchange: a live Microsoft sign-in (online) → a LAN pass valid OFFLINE_PASS_DAYS.
+// A LAN pass cannot renew itself here — renewal requires a fresh Microsoft
+// sign-in, which enforces periodic re-validation against Microsoft.
+app.post('/api/session/exchange', async (req, reply) => {
+  if (req.user?.viaLanPass) return reply.code(403).send({ error: 'sign in with Microsoft to get or renew an offline pass' });
+  const isAdmin = await _isAdminEmail(req.user.email);
+  const pass = await signLanPass(
+    { email: req.user.email, name: req.user.name, oid: req.user.oid, isAdmin, role: isAdmin ? 'admin' : 'user' },
+    OFFLINE_PASS_DAYS, true);
+  return { pass, days: OFFLINE_PASS_DAYS, email: req.user.email, isAdmin };
+});
+
+// issue-for: an admin (online) pre-issues a pass for another user, so a brand-new
+// device can work through an outage without that user ever signing in online first.
+app.post('/api/session/issue-for', async (req, reply) => {
+  if (!(await _isAdminEmail(req.user.email))) return reply.code(403).send({ error: 'admin only' });
+  const email = (req.body && req.body.email || '').trim();
+  const name = (req.body && req.body.name || '').trim();
+  if (!email) return reply.code(400).send({ error: 'email required' });
+  try {
+    await pool.query(`INSERT INTO users (email, name, last_seen_at) VALUES ($1, $2, NOW())
+      ON CONFLICT (email) DO UPDATE SET name = COALESCE(EXCLUDED.name, users.name)`, [email, name || email]);
+  } catch (e) {}
+  const isAdmin = await _isAdminEmail(email);
+  const pass = await signLanPass({ email, name: name || email, oid: email, isAdmin, role: isAdmin ? 'admin' : 'user' }, OFFLINE_PASS_DAYS, false);
+  req.log.info({ by: req.user.email, for: email }, 'admin pre-issued offline pass');
+  return { pass, days: OFFLINE_PASS_DAYS, email };
+});
+
+// revoke: an admin cuts off a user — every pass issued before now is rejected.
+app.post('/api/session/revoke', async (req, reply) => {
+  if (!(await _isAdminEmail(req.user.email))) return reply.code(403).send({ error: 'admin only' });
+  const email = (req.body && req.body.email || '').trim();
+  if (!email) return reply.code(400).send({ error: 'email required' });
+  _revoke(email);
+  req.log.warn({ by: req.user.email, revoked: email }, 'admin revoked offline passes');
+  return { ok: true, revoked: email };
+});
+
+// whoami: how the server sees the caller (handy for validating offline mode).
+app.get('/api/session/whoami', async (req) => {
+  return { email: req.user.email, name: req.user.name, isAdmin: !!req.user.isAdmin, viaLanPass: !!req.user.viaLanPass, exp: req.user.exp || null };
 });
 
 // ── Route registration ────────────────────────────────────

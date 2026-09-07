@@ -260,6 +260,42 @@ projectIdHistory, deletionRequests, userPerms, workflowDefs.
 - **Schema version:** `psql -U postgres -d proc_master -c "SELECT * FROM schema_version ORDER BY version;"`
 - **Emergency rollback of routing:** in the app, **Settings → Force SharePoint Mode** disables all local-server routing instantly (reads/writes go to SharePoint only). Use if the server is down mid-day; untick when it's back.
 
+### Offline passes (multi-day internet outages)
+
+For sites that lose internet for days: the API issues its own **LAN passes** so a
+device that signed in with Microsoft once keeps working entirely offline for a
+window (default **14 days**). Sign-in itself still needs internet; everything
+after runs on the LAN.
+
+- **Secret:** the server signs passes with `SESSION_SECRET`. If you don't set it
+  in `.env`, the server generates one on first boot and saves it to
+  `C:\ProcMaster\session.key` (keep admin-only) — zero setup. Deleting that file
+  or changing the secret invalidates every outstanding pass.
+- **Admins:** set `ADMIN_EMAILS` in `.env` (comma-separated) to say who may
+  **pre-issue** a pass for another user and **revoke** users. Without it, admin
+  is read from `users.role` (`admin`/`manager`), which the app may not set — so
+  set `ADMIN_EMAILS` explicitly.
+- **Window:** override with `OFFLINE_PASS_DAYS` in `.env` (default 14).
+- **No new Azure config:** passes are exchanged using the same
+  `api://<client-id>/access_as_user` token the app already sends to the server,
+  so if the local server already accepts writes, this already works.
+- **How users get one:** a normal Microsoft sign-in (online) silently mints a
+  pass on that device. A **brand-new device during an outage** uses an
+  admin-issued pass: an admin (online) clicks **Settings → Local Server → Issue
+  offline pass…**, enters the user's email, copies the code, and the user pastes
+  it via **"Use an offline pass"** on the login screen.
+- **Revoke a lost device:** `POST /api/session/revoke` with `{ "email": "…" }`
+  (admin token) — every pass issued to that email before now is rejected. The
+  cutoff is persisted to `revocations.json` in the runtime folder
+  (`C:\ProcMaster`).
+- **Endpoints:** `POST /api/session/exchange` (mint from a live M365 sign-in),
+  `POST /api/session/issue-for` (admin pre-issue), `POST /api/session/revoke`
+  (admin), `GET /api/session/whoami` (debug: how the server sees the caller).
+
+This release changed `deploy/server/*`, so **redeploy the API** (Part B step 3:
+copy `deploy\server\*` → `C:\ProcMaster`, `npm ci --omit=dev`, restart) after
+pulling.
+
 ### Recovering a lost `postgres` password
 
 The app role `proc_master` is used day to day, so its password is known. The

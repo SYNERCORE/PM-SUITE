@@ -146,6 +146,9 @@ async function doM365Login() {
     if (typeof spWriteAuditLog === 'function') spWriteAuditLog('login', 'session', uid, name, { email });
     // Initialize SharePoint sync
     if (typeof spAutoInit === 'function') spAutoInit().catch(e => console.warn('[SP] Auto-init error:', e.message));
+    // Trade this online sign-in for a LAN offline pass (~14 days) so this device
+    // can keep working through internet outages. Best-effort, non-blocking.
+    _exchangeLanPass().catch(() => {});
   } catch(e) {
     console.error('[M365 Auth] Login error:', e);
     if (e.errorCode === 'user_cancelled' || e.message?.includes('cancelled')) {
@@ -208,6 +211,115 @@ async function selfApproveAsAdmin() {
 }
 
 // ── Auto-login on page load (silent token) ──────────────────
+// ── Offline pass: server-issued LAN session for multi-day offline ─────────
+// A user signs in with Microsoft ONCE while online; the LAN server exchanges
+// that for a pass valid ~14 days. The app then opens and the server accepts
+// reads/writes ENTIRELY offline for that window. All best-effort: if the server
+// isn't reachable or no pass exists, the app behaves exactly as before.
+const _LAN_PASS_KEY = 'pm_lan_pass';
+function _lanPassStore(p) { try { localStorage.setItem(_LAN_PASS_KEY, p || ''); } catch (e) {} }
+function _lanPassRaw() { try { return localStorage.getItem(_LAN_PASS_KEY) || ''; } catch (e) { return ''; } }
+function _lanPassClear() { try { localStorage.removeItem(_LAN_PASS_KEY); } catch (e) {} }
+function _lanPassDecode(p) {
+  try {
+    const b = (p || _lanPassRaw()).split('.')[1]; if (!b) return null;
+    return JSON.parse(decodeURIComponent(escape(atob(b.replace(/-/g, '+').replace(/_/g, '/')))));
+  } catch (e) { return null; }
+}
+function _lanPassValidPayload() {
+  const j = _lanPassDecode(); if (!j || j.typ !== 'lan-pass' || !j.exp) return null;
+  if (Date.now() / 1000 > j.exp - 60) return null;           // 60s skew
+  return j;
+}
+// Global used by Api.getToken: the LAN pass if still valid, else '' (fall back to MSAL).
+function getLanToken() { return _lanPassValidPayload() ? _lanPassRaw() : ''; }
+function lanPassDaysLeft() { const j = _lanPassValidPayload(); return j ? Math.max(0, Math.floor((j.exp - Date.now() / 1000) / 86400)) : 0; }
+window.getLanToken = getLanToken;
+window.lanPassDaysLeft = lanPassDaysLeft;
+
+async function _acquireApiToken() {
+  const clientId = _spClientId || localStorage.getItem('shic_sp_clientid') || '';
+  const scopes = ['api://' + clientId + '/access_as_user'];
+  return (await _spMsalApp.acquireTokenSilent({ scopes, account: _spAccount })).accessToken;
+}
+
+// After an online sign-in: trade the Microsoft token for a LAN pass. Best-effort.
+async function _exchangeLanPass() {
+  try {
+    const url = (getDeviceSettings().localServerUrl || '').replace(/\/+$/, ''); if (!url) return;
+    if (typeof _spMsalApp === 'undefined' || !_spMsalApp || !_spAccount) return;
+    let at = ''; try { at = await _acquireApiToken(); } catch (e) { return; }
+    const r = await fetch(url + '/api/session/exchange', { method: 'POST', headers: { 'Authorization': 'Bearer ' + at, 'Content-Type': 'application/json' } });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j && j.pass) { _lanPassStore(j.pass); console.log('[OfflinePass] issued — valid ' + j.days + ' days'); }
+  } catch (e) { /* offline pass is optional */ }
+}
+window._exchangeLanPass = _exchangeLanPass;
+
+// Enter the app OFFLINE from a stored valid pass — no Microsoft, no network.
+async function _enterAppOffline() {
+  const j = _lanPassValidPayload(); if (!j) return false;
+  const email = j.email, name = j.name || email, uid = j.oid || email;
+  _currentUser = { uid, email, displayName: name };
+  _currentUserProfile = { uid, email, name, isAdmin: !!j.isAdmin, role: j.role || 'User', status: 'approved' };
+  _m365LoggedIn = true;
+  if (typeof _initEncryption === 'function') await _initEncryption(uid);
+  const sidebarLabel = document.getElementById('sidebarUserLabel');
+  if (sidebarLabel) sidebarLabel.textContent = name + (j.isAdmin ? ' · Admin' : '') + ' · offline';
+  showAuthOverlay(false);
+  if (typeof _decryptFromStorage === 'function') {
+    const dj = await _decryptFromStorage();
+    if (dj) { try { AppState.data = JSON.parse(dj); } catch (e) { _restoreLocalData(); } } else { _restoreLocalData(); }
+  } else { _restoreLocalData(); }
+  if (typeof _idbAdoptIfFuller === 'function') { try { await _idbAdoptIfFuller(); } catch (e) {} }
+  if (typeof migrateData === 'function') migrateData();
+  if (typeof buildSidebar === 'function') buildSidebar();
+  navigate(AppState.currentPage || 'dashboard');
+  const d = lanPassDaysLeft();
+  showToast('Signed in offline — ' + d + ' day' + (d === 1 ? '' : 's') + ' of offline access left', 'info', 4000);
+  if (typeof _startSessionTimer === 'function') _startSessionTimer();
+  return true;
+}
+
+// Boot: enter offline if a valid pass exists. Returns true if we entered.
+async function _tryEnterOffline() {
+  if (!_lanPassValidPayload()) return false;
+  try { return await _enterAppOffline(); }
+  catch (e) { console.warn('[OfflinePass] offline entry failed:', e.message); return false; }
+}
+
+// Accept a pasted admin-issued pass on a new device, then enter.
+async function acceptOfflinePass(passStr) {
+  passStr = (passStr || '').trim();
+  const j = _lanPassDecode(passStr);
+  if (!j || j.typ !== 'lan-pass') { showToast('That doesn’t look like a valid offline pass', 'error'); return false; }
+  if (Date.now() / 1000 > j.exp) { showToast('That offline pass has expired', 'error'); return false; }
+  _lanPassStore(passStr);
+  return await _enterAppOffline();
+}
+window.acceptOfflinePass = acceptOfflinePass;
+
+// Login-screen entry point: paste a pass handed out by an admin.
+function _promptOfflinePass() {
+  const p = window.prompt('Paste the offline pass your admin gave you (a long code). It lets this device work offline for up to 14 days:');
+  if (p && p.trim()) acceptOfflinePass(p.trim());
+}
+window._promptOfflinePass = _promptOfflinePass;
+
+// Admin (online): pre-issue a pass for another user. Returns the pass string.
+async function adminIssueOfflinePass(email, name) {
+  const url = (getDeviceSettings().localServerUrl || '').replace(/\/+$/, '');
+  if (!url) throw new Error('Set the Local Server URL first (Settings → Local Server)');
+  if (typeof _spMsalApp === 'undefined' || !_spMsalApp || !_spAccount) throw new Error('Sign in with Microsoft first');
+  const at = await _acquireApiToken();
+  const r = await fetch(url + '/api/session/issue-for', { method: 'POST', headers: { 'Authorization': 'Bearer ' + at, 'Content-Type': 'application/json' }, body: JSON.stringify({ email, name }) });
+  if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error('Server ' + r.status + ': ' + t.slice(0, 140)); }
+  const j = await r.json();
+  return j.pass;
+}
+window.adminIssueOfflinePass = adminIssueOfflinePass;
+
 async function m365AutoLogin() {
   // ── ALWAYS show login screen — never auto sign in ──────
   // User must explicitly click "Sign in with Microsoft" each session.
@@ -614,7 +726,11 @@ async function deleteUser(uid,name){
 // M365 handles authentication.
 
 document.addEventListener('DOMContentLoaded', () => {
-  m365AutoLogin();
+  // If this device holds a valid offline pass, enter straight away with no
+  // internet. Otherwise fall back to the normal Microsoft sign-in screen.
+  _tryEnterOffline()
+    .then(entered => { if (!entered) m365AutoLogin(); })
+    .catch(() => m365AutoLogin());
 });
 
 function initOneDriveSync(){

@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.12.0';
-const APP_BUILD='20260905c';
+const APP_VERSION='2.13.0';
+const APP_BUILD='20260907a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Server-First mode — run the workday on the LAN server at zero internet cost, SharePoint daily backup';
+const APP_RELEASE_NOTE='Offline passes — sign in once, then work on the LAN for up to 14 days with no internet';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.13.0',date:'2026-09-07',type:'minor',notes:[
+    'Offline passes for multi-day outages: sign in with Microsoft ONCE while online and the LAN server issues a pass that lets this device open the app and read/write over the local network for up to 14 days with NO internet. Renew by signing in again when internet is next available.',
+    'Admins can pre-issue an offline pass for another user (Settings → Local Server → "Issue offline pass…") so a brand-new device can work through an outage without ever signing in online first — the user pastes it via "Use an offline pass" on the login screen.',
+    'LAN API calls now use the offline pass when present, so they keep working with no internet; admins can revoke a user\'s passes on the server.',
+  ]},
   {version:'2.12.0',date:'2026-09-05',type:'minor',notes:[
     'Server-First mode (Settings → Local Server): use the in-house LAN server as the primary live backend — reads and writes sync over the local network at zero internet cost, auto-refreshing every few minutes so multiple users see each other’s changes. Built for limited-internet sites.',
     'With Server-First on, SharePoint drops from per-edit sync to a once-a-day offsite backup (plus a "Back up to SharePoint now" button); the per-edit SP push and the recurring SP remote-poll are skipped to save data.',

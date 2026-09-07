@@ -288,6 +288,7 @@ ${renderSpPanel()}
       </div>
       <div style="margin:10px 0 0 26px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <button class="btn btn-secondary btn-sm" onclick="_sfBackupNow()" title="Push a full copy to SharePoint now (bypasses the once-a-day throttle)"><i class="fas fa-cloud-upload-alt"></i> Back up to SharePoint now</button>
+        ${(typeof isAdminUser==='function'&&isAdminUser())?`<button class="btn btn-secondary btn-sm" onclick="_adminIssuePass()" title="Generate an offline pass for another user so a brand-new device can work through an outage without signing in online first"><i class="fas fa-id-badge"></i> Issue offline pass…</button>`:''}
         <span id="sfStatus" style="font-size:10px;color:var(--text-muted)">${(()=>{try{const t=+localStorage.getItem('pm_sf_last_sp_backup')||0;return (_dev.serverFirst?'On':'Off')+' · last SharePoint backup: '+(t?new Date(t).toLocaleString():'never');}catch(e){return '';}})()}</span>
       </div>
     </div>
@@ -1241,6 +1242,7 @@ function _localSrvSave() {
     Api.configure({
       baseUrl: raw,
       getToken: async () => {
+        const _lp = (typeof getLanToken === 'function') ? getLanToken() : ''; if (_lp) return _lp; // offline pass — works with no internet
         if (typeof _spMsalApp === 'undefined' || !_spMsalApp || !_spAccount) return '';
         const clientId = (typeof _spClientId !== 'undefined') ? _spClientId : '';
         const scopes = [ 'api://' + clientId + '/access_as_user' ];
@@ -1346,6 +1348,18 @@ function _toggleServerFirst(on) {
   );
   _sfRefreshStatus();
 }
+async function _adminIssuePass() {
+  if (typeof adminIssueOfflinePass !== 'function') { showToast('Offline-pass feature not available', 'error'); return; }
+  const email = (window.prompt('Issue an offline pass for which user? Enter their email:') || '').trim();
+  if (!email) return;
+  const name = (window.prompt('Their name (optional):') || '').trim();
+  showToast('Requesting pass from the server…', 'info', 2000);
+  try {
+    const pass = await adminIssueOfflinePass(email, name);
+    window.prompt('Offline pass for ' + email + ' — valid 14 days.\n\nCopy this whole code and, on their device, click "Use an offline pass" on the login screen and paste it:', pass);
+    showToast('Pass issued for ' + email, 'success', 4000);
+  } catch (e) { showToast('Could not issue pass: ' + e.message, 'error', 6000); }
+}
 function _sfBackupNow() {
   if (typeof ServerFirst === 'undefined') { showToast('Server-First engine not loaded', 'error'); return; }
   ServerFirst.backupToSharePointNow();
@@ -1402,6 +1416,7 @@ async function _apiHydrateEntity(entity) {
       Api.configure({
         baseUrl: url,
         getToken: async () => {
+          const _lp = (typeof getLanToken === 'function') ? getLanToken() : ''; if (_lp) return _lp; // offline pass — works with no internet
           if (typeof _spMsalApp === 'undefined' || !_spMsalApp || !_spAccount) return '';
           const clientId = (typeof _spClientId !== 'undefined') ? _spClientId : '';
           const scopes = [ 'api://' + clientId + '/access_as_user' ];
