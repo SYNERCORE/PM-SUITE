@@ -116,9 +116,28 @@ app.addHook('onSend', async (req, reply, payload) => {
   return payload;
 });
 await app.register(rateLimit, {
-  max: 600,
+  // Generous by design: this is a trusted LAN server, and Server-First mode has
+  // each user pull ~33 entities on boot plus a delta sweep every few minutes.
+  // The old 600/min-by-IP tripped 429s (all users can share one IP behind Caddy).
+  max: Number(process.env.RATE_LIMIT_MAX || 3000),
   timeWindow: '1 minute',
   hook: 'preHandler',
+  // Key PER USER (from the bearer token's identity), not per IP — fair across
+  // many users behind a single proxy IP, and immune to X-Forwarded-For quirks.
+  // Reads the raw token claims without verifying (auth still enforces validity).
+  keyGenerator: (req) => {
+    const a = req.headers.authorization || '';
+    const m = a.match(/^Bearer\s+(.+)$/i);
+    if (m) {
+      try {
+        const seg = (m[1].split('.')[1] || '').replace(/-/g, '+').replace(/_/g, '/');
+        const j = JSON.parse(Buffer.from(seg, 'base64').toString('utf8'));
+        const id = j && (j.email || j.sub || j.oid);
+        if (id) return 'u:' + String(id).toLowerCase();
+      } catch (e) {}
+    }
+    return req.ip;
+  },
 });
 
 // ── Health check — no auth required so IT can smoke-test ───
