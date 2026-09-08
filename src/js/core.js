@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.1';
-const APP_BUILD='20260908b';
+const APP_VERSION='2.14.2';
+const APP_BUILD='20260908c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -20,6 +20,9 @@ const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.2',date:'2026-09-08',type:'patch',notes:[
+    'Fixed a crash ("Aw Snap") when opening a Gantt chart if any task had a mistyped year (e.g. 2926 instead of 2026) — the chart now clamps to a sane window around the project dates and flags that some task dates look off, instead of trying to draw tens of thousands of month columns.',
+  ]},
   {version:'2.14.1',date:'2026-09-08',type:'patch',notes:[
     'Gantt Print (planned vs actual + progress, with the optional Variance toggle) is now also available inside a project’s Gantt Chart tab — the Print button prints just that project.',
   ]},

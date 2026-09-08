@@ -3951,11 +3951,24 @@ function renderDetailGantt(){
   }
 
   // ── Date range ──
-  const allDates=[p.startDate,p.endDate,...tasks.flatMap(t=>[t.startDate,t.endDate,t.dueDate]),...allocs.flatMap(a=>[a.startDate,a.endDate])].filter(d=>d&&/^\d{4}-\d{2}-\d{2}$/.test(d));
+  const _rxDate=/^\d{4}-\d{2}-\d{2}$/;
+  const allDates=[p.startDate,p.endDate,...tasks.flatMap(t=>[t.startDate,t.endDate,t.dueDate]),...allocs.flatMap(a=>[a.startDate,a.endDate])].filter(d=>d&&_rxDate.test(d));
   if(!allDates.length){$('#detailTabContent').innerHTML=`<div class="card" style="padding:24px;text-align:center"><p style="color:var(--text-muted)">Tasks need start and due dates to show the Gantt chart.</p></div>`;return;}
 
-  const mD=new Date(allDates.reduce((a,b)=>a<b?a:b));mD.setDate(mD.getDate()-2);
-  const xD=new Date(allDates.reduce((a,b)=>a>b?a:b));xD.setDate(xD.getDate()+5);
+  // Guard: a single mistyped year (e.g. 2926 or 9999) would otherwise blow the
+  // month grid up to ~95,000 columns and crash the tab. Anchor on the project's
+  // own dates and ignore task dates absurdly far from that window (~5 years).
+  const _MAX_SPAN=1830; // days (~5 years) — far beyond any real project
+  const _anchor=(_rxDate.test(p.startDate)?p.startDate:null)||allDates.slice().sort()[Math.floor(allDates.length/2)];
+  const _lo=new Date(_anchor);_lo.setDate(_lo.getDate()-400);
+  const _hi=new Date(_anchor);_hi.setDate(_hi.getDate()+_MAX_SPAN);
+  const _loS=_lo.toISOString().split('T')[0],_hiS=_hi.toISOString().split('T')[0];
+  const _saneDates=allDates.filter(d=>d>=_loS&&d<=_hiS);
+  const _ganttClamped=_saneDates.length!==allDates.length;
+  const _useDates=_saneDates.length?_saneDates:[_anchor];
+
+  const mD=new Date(_useDates.reduce((a,b)=>a<b?a:b));mD.setDate(mD.getDate()-2);
+  const xD=new Date(_useDates.reduce((a,b)=>a>b?a:b));xD.setDate(xD.getDate()+5);
   const minDate=mD.toISOString().split('T')[0];
   const maxDate=xD.toISOString().split('T')[0];
   const totalDays=Math.max(1,daysBetween(minDate,maxDate));
@@ -3973,6 +3986,7 @@ function renderDetailGantt(){
   const months=[];
   const cur=new Date(mD);cur.setDate(1);
   while(cur<=xD){
+    if(months.length>130)break; // hard safety — never build an unbounded grid
     const ms=new Date(Math.max(+cur,+mD));
     const me=new Date(Math.min(+(new Date(cur.getFullYear(),cur.getMonth()+1,0)),+xD));
     const p1=Math.max(0,daysBetween(minDate,ms.toISOString().split('T')[0])/totalDays*100);
@@ -4125,6 +4139,7 @@ function renderDetailGantt(){
   <div class="card" style="padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
     <div><span style="font-size:12px;color:var(--text-secondary)">Range: </span><span style="font-size:12px;font-weight:600;font-family:var(--font-mono)">${p.startDate} → ${p.endDate}</span></div>
     <div><span style="font-size:12px;color:var(--text-secondary)">Duration: </span><span style="font-size:12px;font-weight:600;font-family:var(--font-mono)">${daysBetween(p.startDate,p.endDate)} days</span></div>
+    ${_ganttClamped?`<div style="font-size:11px;color:var(--accent-amber);font-weight:600" title="One or more tasks have a start/end date far outside the project window (likely a mistyped year). The chart view is clamped; please check task dates."><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i>Some task dates look off — view clamped; check for a mistyped year</div>`:''}
     ${todayPct>0&&todayPct<100?`<div style="display:flex;align-items:center;gap:5px"><div style="width:12px;height:12px;background:var(--accent-red);border-radius:50%"></div><span style="font-size:11px">Today: ${today}</span></div>`:''}
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       ${[['#388bfd','In Progress'],['#3fb950','Done'],['#8b949e','Todo'],['#f85149','Overdue'],['var(--accent-amber)','Milestone ◆']].map(([c,l])=>`<div style="display:flex;align-items:center;gap:4px"><div style="width:14px;height:8px;background:${c};border-radius:2px"></div><span style="font-size:10px">${l}</span></div>`).join('')}

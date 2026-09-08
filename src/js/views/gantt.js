@@ -26,8 +26,17 @@ function renderGantt(){
     return;
   }
 
-  const autoMin=allDates.reduce((a,b)=>a<b?a:b);
-  const autoMax=allDates.reduce((a,b)=>a>b?a:b);
+  // Guard: a mistyped year (e.g. 2926/9999) would explode the month grid and
+  // crash the tab. Drop dates absurdly far from the median before ranging.
+  const _gSorted=allDates.slice().sort();
+  const _gMed=_gSorted[Math.floor(_gSorted.length/2)];
+  const _gLo=new Date(_gMed);_gLo.setDate(_gLo.getDate()-366*3);
+  const _gHi=new Date(_gMed);_gHi.setDate(_gHi.getDate()+366*5);
+  const _gLoS=_gLo.toISOString().split('T')[0],_gHiS=_gHi.toISOString().split('T')[0];
+  const _gUse=allDates.filter(d=>d>=_gLoS&&d<=_gHiS);
+  const _gSane=_gUse.length?_gUse:[_gMed];
+  const autoMin=_gSane.reduce((a,b)=>a<b?a:b);
+  const autoMax=_gSane.reduce((a,b)=>a>b?a:b);
   const effFrom=ganttFrom||autoMin;
   const effTo=ganttTo||autoMax;
 
@@ -69,6 +78,7 @@ function renderGantt(){
   // ── Month Headers ─────────────────────────────────────────────
   const months=[];const cur2=new Date(mD);
   while(cur2<=xD){
+    if(months.length>130)break; // hard safety — never build an unbounded grid
     const visStart=new Date(Math.max(+cur2,+mD));
     const visEnd=new Date(Math.min(+(new Date(cur2.getFullYear(),cur2.getMonth()+1,0)),+xD));
     const p1=Math.max(0,daysBetween(minDate,visStart.toISOString().split('T')[0])/totalDays*100);
