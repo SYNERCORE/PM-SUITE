@@ -4128,7 +4128,9 @@ function renderDetailGantt(){
     ${todayPct>0&&todayPct<100?`<div style="display:flex;align-items:center;gap:5px"><div style="width:12px;height:12px;background:var(--accent-red);border-radius:50%"></div><span style="font-size:11px">Today: ${today}</span></div>`:''}
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       ${[['#388bfd','In Progress'],['#3fb950','Done'],['#8b949e','Todo'],['#f85149','Overdue'],['var(--accent-amber)','Milestone ◆']].map(([c,l])=>`<div style="display:flex;align-items:center;gap:4px"><div style="width:14px;height:8px;background:${c};border-radius:2px"></div><span style="font-size:10px">${l}</span></div>`).join('')}
-      <button class="btn btn-secondary btn-sm" onclick="exportGanttPDF('${pid}')" title="Export Gantt to PDF (SY3-F-EPD-002 format)" style="margin-left:8px"><i class="fas fa-file-pdf" style="color:#f85149"></i> Export PDF</button>
+      <label style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--text-secondary);margin-left:8px" title="Include a finish-variance column (late/early) in the printout"><input type="checkbox" ${window.ganttPrintVariance?'checked':''} onchange="window.ganttPrintVariance=this.checked" style="accent-color:var(--accent-blue)">Variance</label>
+      <button class="btn btn-secondary btn-sm" onclick="printGantt('${pid}')" title="Print this project's Gantt — planned vs actual dates + progress (works offline)"><i class="fas fa-print"></i> Print</button>
+      <button class="btn btn-secondary btn-sm" onclick="exportGanttPDF('${pid}')" title="Export Gantt to PDF (SY3-F-EPD-002 format)"><i class="fas fa-file-pdf" style="color:#f85149"></i> Export PDF</button>
     </div>
   </div>
 

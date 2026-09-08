@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.0';
-const APP_BUILD='20260908a';
+const APP_VERSION='2.14.1';
+const APP_BUILD='20260908b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -20,6 +20,9 @@ const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.1',date:'2026-09-08',type:'patch',notes:[
+    'Gantt Print (planned vs actual + progress, with the optional Variance toggle) is now also available inside a project’s Gantt Chart tab — the Print button prints just that project.',
+  ]},
   {version:'2.14.0',date:'2026-09-08',type:'minor',notes:[
     'Gantt: new "Print" button — prints a Planned-vs-Actual report per project (planned & actual start/end and progress for every task, plus a planned-vs-actual bar). Uses the browser\'s native print/Save-as-PDF, so it works fully offline (no internet needed, unlike Export PDF).',
     'Optional finish-variance column (late/early) via a "Variance" checkbox next to Print — off by default.',
