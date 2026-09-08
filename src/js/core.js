@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.2';
-const APP_BUILD='20260908c';
+const APP_VERSION='2.14.3';
+const APP_BUILD='20260908d';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -20,6 +20,11 @@ const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.3',date:'2026-09-08',type:'patch',notes:[
+    'Task CSV import: dates like "Wed 7/22/26" (weekday prefix and 2-digit years) now parse correctly to YYYY-MM-DD instead of being stored as unusable text.',
+    'Task CSV import: importing from inside a project’s Tasks tab now puts the tasks in THAT project, instead of whatever ID sat in the CSV’s Project ID column (so imported tasks no longer vanish under a different project).',
+    'Task CSV import: tolerates a misspelled "Prohress %" header so progress still imports.',
+  ]},
   {version:'2.14.2',date:'2026-09-08',type:'patch',notes:[
     'Fixed a crash ("Aw Snap") when opening a Gantt chart if any task had a mistyped year (e.g. 2926 instead of 2026) — the chart now clamps to a sane window around the project dates and flags that some task dates look off, instead of trying to draw tens of thousands of month columns.',
   ]},
