@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.13.0';
-const APP_BUILD='20260907a';
+const APP_VERSION='2.14.0';
+const APP_BUILD='20260908a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Offline passes — sign in once, then work on the LAN for up to 14 days with no internet';
+const APP_RELEASE_NOTE='Print the Gantt (planned vs actual dates + progress per project) — works offline';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.0',date:'2026-09-08',type:'minor',notes:[
+    'Gantt: new "Print" button — prints a Planned-vs-Actual report per project (planned & actual start/end, finish variance, and progress for every task, plus a planned-vs-actual bar). Uses the browser\'s native print/Save-as-PDF, so it works fully offline (no internet needed, unlike Export PDF).',
+    'Print respects the current project filter — print one project or all at once.',
+  ]},
   {version:'2.13.0',date:'2026-09-07',type:'minor',notes:[
     'Offline passes for multi-day outages: sign in with Microsoft ONCE while online and the LAN server issues a pass that lets this device open the app and read/write over the local network for up to 14 days with NO internet. Renew by signing in again when internet is next available.',
     'Admins can pre-issue an offline pass for another user (Settings → Local Server → "Issue offline pass…") so a brand-new device can work through an outage without ever signing in online first — the user pastes it via "Use an offline pass" on the login screen.',

@@ -362,6 +362,7 @@ function renderGantt(){
     </div>
     <div style="display:flex;gap:6px">
       ${hasBL?`<button class="btn btn-secondary btn-sm" onclick="showBaselineManager()" title="Manage baselines"><i class="fas fa-layer-group"></i> Baselines</button>`:''}
+      <button class="btn btn-secondary btn-sm" onclick="printGantt(ganttProjFilter)" title="Print the Gantt — planned vs actual dates + progress (works offline)"><i class="fas fa-print"></i> Print</button>
       <button class="btn btn-secondary btn-sm" onclick="exportGanttPDF(ganttProjFilter)" title="Export Gantt to PDF (SY3-F-EPD-002 format)"><i class="fas fa-file-pdf" style="color:#f85149"></i> Export PDF</button>
       <button class="btn btn-primary btn-sm" onclick="showTaskForm()"><i class="fas fa-plus"></i> Add Task</button>
     </div>
