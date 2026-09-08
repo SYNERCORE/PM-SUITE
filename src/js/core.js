@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.3';
-const APP_BUILD='20260908d';
+const APP_VERSION='2.14.4';
+const APP_BUILD='20260908e';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -20,6 +20,9 @@ const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.4',date:'2026-09-08',type:'patch',notes:[
+    'Task CSV import: fixed rows being dropped when many tasks share the same name and the WBS column is blank — the importer was folding every duplicate name into the first one. All rows now import; re-importing the same file still updates in place instead of duplicating.',
+  ]},
   {version:'2.14.3',date:'2026-09-08',type:'patch',notes:[
     'Task CSV import: dates like "Wed 7/22/26" (weekday prefix and 2-digit years) now parse correctly to YYYY-MM-DD instead of being stored as unusable text.',
     'Task CSV import: importing from inside a project’s Tasks tab now puts the tasks in THAT project, instead of whatever ID sat in the CSV’s Project ID column (so imported tasks no longer vanish under a different project).',
