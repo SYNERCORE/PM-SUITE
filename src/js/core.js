@@ -21,7 +21,8 @@ const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
   {version:'2.14.0',date:'2026-09-08',type:'minor',notes:[
-    'Gantt: new "Print" button — prints a Planned-vs-Actual report per project (planned & actual start/end, finish variance, and progress for every task, plus a planned-vs-actual bar). Uses the browser\'s native print/Save-as-PDF, so it works fully offline (no internet needed, unlike Export PDF).',
+    'Gantt: new "Print" button — prints a Planned-vs-Actual report per project (planned & actual start/end and progress for every task, plus a planned-vs-actual bar). Uses the browser\'s native print/Save-as-PDF, so it works fully offline (no internet needed, unlike Export PDF).',
+    'Optional finish-variance column (late/early) via a "Variance" checkbox next to Print — off by default.',
     'Print respects the current project filter — print one project or all at once.',
   ]},
   {version:'2.13.0',date:'2026-09-07',type:'minor',notes:[

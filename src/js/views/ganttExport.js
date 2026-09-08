@@ -389,7 +389,8 @@ window.exportGanttPDF=exportGanttPDF;
 function _ganttPrintEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function _ganttPrintPos(dateStr,min,max){ const d=Date.parse(dateStr); if(isNaN(d)||max<=min) return null; return Math.max(0,Math.min(100,((d-min)/(max-min))*100)); }
 
-function buildGanttPrintHTML(projectId){
+function buildGanttPrintHTML(projectId,opts){
+  opts=opts||{}; const inclVar=!!opts.variance;   // finish-variance column is opt-in
   const esc=_ganttPrintEsc;
   const projects=(AppState.data.projects)||[];
   const tasks=(AppState.data.tasks)||[];
@@ -431,7 +432,7 @@ function buildGanttPrintHTML(projectId){
         <td>${esc((t.assignee||'').split(' ')[0])}</td>
         <td class="mono">${fmt(t.startDate)}</td><td class="mono">${fmt(t.endDate)}</td>
         <td class="mono a">${fmt(t.actualStart)}</td><td class="mono a">${fmt(t.actualEnd)}</td>
-        <td class="mono ${varCls(t)}">${varText(t)}</td>
+        ${inclVar?`<td class="mono ${varCls(t)}">${varText(t)}</td>`:''}
         <td class="mono">${t.progress||0}%</td>
         <td><div class="track">${planned}${actual}</div></td>
       </tr>`;
@@ -448,9 +449,9 @@ function buildGanttPrintHTML(projectId){
       </tr></tbody></table>
       <table class="tasks"><thead><tr>
         <th>WBS</th><th>Task</th><th>Assignee</th><th>Plan Start</th><th>Plan End</th>
-        <th>Act Start</th><th>Act End</th><th>Variance</th><th>Prog</th>
+        <th>Act Start</th><th>Act End</th>${inclVar?'<th>Variance</th>':''}<th>Prog</th>
         <th>Planned <b class="lg pl"></b> vs Actual <b class="lg al"></b></th>
-      </tr></thead><tbody>${rows||'<tr><td colspan="10" class="empty">No tasks</td></tr>'}</tbody></table>
+      </tr></thead><tbody>${rows||`<tr><td colspan="${inclVar?10:9}" class="empty">No tasks</td></tr>`}</tbody></table>
     </section>`;
   });
 
@@ -492,7 +493,7 @@ function buildGanttPrintHTML(projectId){
 }
 
 function printGantt(projectId){
-  const html=buildGanttPrintHTML(projectId);
+  const html=buildGanttPrintHTML(projectId,{variance:!!window.ganttPrintVariance});
   if(!html){ if(typeof showToast==='function') showToast('No projects to print','error'); return; }
   const w=window.open('','_blank');
   if(!w){ if(typeof showToast==='function') showToast('Allow pop-ups for this site to print','error'); return; }

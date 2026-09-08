@@ -362,6 +362,7 @@ function renderGantt(){
     </div>
     <div style="display:flex;gap:6px">
       ${hasBL?`<button class="btn btn-secondary btn-sm" onclick="showBaselineManager()" title="Manage baselines"><i class="fas fa-layer-group"></i> Baselines</button>`:''}
+      <label style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--text-secondary);margin-right:2px" title="Include a finish-variance column (late/early) in the printout"><input type="checkbox" ${window.ganttPrintVariance?'checked':''} onchange="window.ganttPrintVariance=this.checked" style="accent-color:var(--accent-blue)">Variance</label>
       <button class="btn btn-secondary btn-sm" onclick="printGantt(ganttProjFilter)" title="Print the Gantt — planned vs actual dates + progress (works offline)"><i class="fas fa-print"></i> Print</button>
       <button class="btn btn-secondary btn-sm" onclick="exportGanttPDF(ganttProjFilter)" title="Export Gantt to PDF (SY3-F-EPD-002 format)"><i class="fas fa-file-pdf" style="color:#f85149"></i> Export PDF</button>
       <button class="btn btn-primary btn-sm" onclick="showTaskForm()"><i class="fas fa-plus"></i> Add Task</button>
