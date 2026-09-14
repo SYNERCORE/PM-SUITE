@@ -1,1 +1,1 @@
-{"version":"2.14.5","note":"Dashboard \"Pending Actions\" now hides closed items; Gantt dependency arrows stay aligned to their bars","released":"2026-09-14 09:55"}
+{"version":"2.14.6","note":"One-click \"Migrate everything to server\" — uploads all data to the LAN server one record at a time (no SharePoint bulk hit)","released":"2026-09-14 16:05"}

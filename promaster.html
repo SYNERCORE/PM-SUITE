@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.5';
-const APP_BUILD='20260914a';
+const APP_VERSION='2.14.6';
+const APP_BUILD='20260914b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Dashboard "Pending Actions" now hides closed items; Gantt dependency arrows stay aligned to their bars';
+const APP_RELEASE_NOTE='One-click "Migrate everything to server" — uploads all data to the LAN server one record at a time (no SharePoint bulk hit)';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.6',date:'2026-09-14',type:'feat',notes:[
+    'Local Server: new "Migrate everything to server" button (Settings → Local Server → Entity Routing) uploads all local data to the LAN server one record at a time — paced (~500/min) with automatic back-off if the server rate-limits, and a live progress line + Stop button. It talks only to the LAN server, so a full migration never fires a SharePoint bulk request. Safe to re-run: the server upserts by id.',
+    'Action Items: the per-project "N overdue" badge no longer counts Closed actions — a closed item past its due date is done, not overdue (matches the Overdue KPI). Closed rows also no longer show their due date in amber.',
+    'Tasks / Gantt: fixed WBS ordering — sibling tasks now sort by WBS number segment-by-segment (so 2, 3, 4, 5 not import order; 5.1 before 5.2; 5.2 before 5.10; a parent "5" before "5.1"). Projects without WBS keep their existing order.',
+    'Project-detail Gantt: rows now show the WBS code, are indented by hierarchy level, and follow WBS order — so the Gantt lines up with the Tasks tab and is easier to navigate.',
+  ]},
   {version:'2.14.5',date:'2026-09-14',type:'patch',notes:[
     'Dashboard: the "Pending Actions" card no longer lists Closed items — it now shows only open/overdue actions (matching the counter above it), with a "No pending actions" message when everything is closed.',
     'Gantt Chart: fixed CPM dependency arrows drifting off their task bars further down the chart ("floating arrows"). Row borders weren’t counted in the arrow overlay’s coordinates, so the error accumulated row by row; arrows now stay locked to the bars.',
@@ -15088,7 +15094,7 @@ function renderDetailGantt(){
     <div style="width:80px;min-width:80px;padding:4px 6px;font-size:9px;font-weight:700;color:var(--text-secondary);border-left:1px solid var(--border)">STATUS</div>
   </div>`;
 
-  tasks.forEach(t=>{
+  (typeof _orderTasksHier==='function'?_orderTasksHier(tasks):tasks.map(t=>({t,depth:0}))).forEach(({t,depth})=>{
     const c=scColor[t.status]||'#8b949e';
     const s=t.startDate||p.startDate;
     const e=t.endDate||t.dueDate||p.endDate;
@@ -15113,9 +15119,10 @@ function renderDetailGantt(){
     }
 
     rowsHtml+=`<div id="ganttRow_${t.id}" style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)}">
-      <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:5px 10px;border-right:1px solid var(--border);overflow:hidden">
+      <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:5px 10px 5px ${10+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
         <div style="display:flex;align-items:center;gap:5px">
           <i class="fas ${isMile?'fa-diamond':'fa-circle'}" style="color:${isMile?'var(--accent-amber)':c};font-size:${isMile?'9':'6'}px;flex-shrink:0"></i>
+          ${t.wbs?`<span style="font-size:9px;font-family:var(--font-mono);color:var(--text-muted);flex-shrink:0">${esc(t.wbs)}</span>`:''}
           <span style="font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.name)}</span>
         </div>
         ${t.assignee?`<div style="font-size:9px;color:var(--text-muted);padding-left:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.assignee}</div>`:''}
@@ -16746,6 +16753,27 @@ function _taskIsDescendant(candidateId,ofId,tasks){
 }
 // DFS order: roots first, each followed by its children. Tasks whose parent
 // is missing from the list (filtered out / deleted) surface as roots.
+// Order siblings by WBS, segment-by-segment and numerically: "5" before
+// "5.1", "5.2" before "5.10", numbered before un-numbered. Blank/equal WBS
+// falls back to insertion order (stable sort), so projects without WBS are
+// left untouched.
+function _cmpWbs(a,b){
+  const aw=(a&&a.wbs||'').trim(), bw=(b&&b.wbs||'').trim();
+  if(aw&&bw){
+    const as=aw.split('.'), bs=bw.split('.');
+    for(let i=0;i<Math.max(as.length,bs.length);i++){
+      if(as[i]==null)return -1;   // shorter prefix first (5 before 5.1)
+      if(bs[i]==null)return 1;
+      const x=parseInt(as[i],10), y=parseInt(bs[i],10);
+      if(!isNaN(x)&&!isNaN(y)){ if(x!==y)return x-y; }
+      else { const c=String(as[i]).localeCompare(String(bs[i])); if(c)return c; }
+    }
+    return 0;
+  }
+  if(aw)return -1;  // numbered items before un-numbered
+  if(bw)return 1;
+  return 0;         // both blank → keep insertion order
+}
 function _orderTasksHier(list){
   const ids=new Set(list.map(t=>t.id));
   const out=[];const visited=new Set();
@@ -16753,9 +16781,9 @@ function _orderTasksHier(list){
     if(visited.has(t.id))return; // cycle guard
     visited.add(t.id);
     out.push({t,depth});
-    list.filter(c=>c.parentId===t.id).forEach(c=>add(c,Math.min(depth+1,6)));
+    list.filter(c=>c.parentId===t.id).sort(_cmpWbs).forEach(c=>add(c,Math.min(depth+1,6)));
   };
-  list.filter(t=>!t.parentId||!ids.has(t.parentId)).forEach(t=>add(t,0));
+  list.filter(t=>!t.parentId||!ids.has(t.parentId)).sort(_cmpWbs).forEach(t=>add(t,0));
   list.forEach(t=>{if(!visited.has(t.id))add(t,0);}); // orphans in a cycle
   return out;
 }
@@ -21782,7 +21810,7 @@ return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${a.id}</td>
 <td style="font-size:12px;font-weight:500;max-width:180px">${a.description}</td>
 <td><div style="display:flex;align-items:center;gap:5px">${avatarH(a.assignee)}<span style="font-size:11px">${a.assignee.split(' ')[0]}</span></div></td>
-<td style="font-size:11px;font-family:var(--font-mono);color:${a.status==='overdue'?'var(--accent-red)':isOverdue(a.dueDate)?'var(--accent-amber)':'inherit'}">${a.dueDate}</td>
+<td style="font-size:11px;font-family:var(--font-mono);color:${a.status==='closed'?'inherit':a.status==='overdue'?'var(--accent-red)':isOverdue(a.dueDate)?'var(--accent-amber)':'inherit'}">${a.dueDate}</td>
 <td>${pBadge(a.priority)}</td><td>${sBadge(a.status)}</td>
 <td style="max-width:220px">${lastText}</td>
 <td><div style="display:flex;gap:4px">
@@ -21806,7 +21834,7 @@ const proj=projectMap[pid];
 const projName=proj?`${pid} — ${proj.name||''}`:pid;
 const open=grp.filter(a=>a.status!=='closed').length;
 const closed=grp.filter(a=>a.status==='closed').length;
-const overdue=grp.filter(a=>a.status==='overdue'||isOverdue(a.dueDate)).length;
+const overdue=grp.filter(a=>a.status!=='closed'&&(a.status==='overdue'||isOverdue(a.dueDate))).length;
 return`<div class="card" style="margin-bottom:12px">
 <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);background:linear-gradient(90deg,rgba(56,139,253,.08),transparent);cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none';this.querySelector('.act-chevron').style.transform=this.nextElementSibling.style.display===''?'':'rotate(-90deg)'">
   <div style="display:flex;align-items:center;gap:10px">
@@ -25470,6 +25498,15 @@ ${renderSpPanel()}
     <!-- Per-entity opt-in + rollback + migrate -->
     <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
       <div style="font-size:12px;font-weight:600;margin-bottom:8px">Entity Routing</div>
+      <!-- One-click full migration: every entity, one record at a time, paced & 429-safe, LAN only -->
+      <div style="margin-bottom:12px;padding:10px;border:1px solid rgba(56,139,253,.35);border-radius:8px;background:rgba(56,139,253,.06)">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" id="apiMigrateAllBtn" onclick="_apiMigrateAll()"><i class="fas fa-cloud-upload-alt"></i> Migrate everything to server</button>
+          <button class="btn btn-secondary btn-sm" id="apiMigrateAllStop" hidden onclick="_apiMigrateAllStop()"><i class="fas fa-stop"></i> Stop</button>
+          <span style="font-size:10px;color:var(--text-muted)">Uploads every record one-by-one (paced ~500/min, retries on rate-limit). <strong>LAN only — never touches SharePoint.</strong> Safe to re-run.</span>
+        </div>
+        <div id="apiMigrateAllStatus" style="font-size:11px;color:var(--text-muted);margin-top:6px;min-height:14px"></div>
+      </div>
       <label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 0">
         <input type="checkbox" id="apiEnt_warehouseItems" ${((_dev.apiEntities||[]).includes('warehouseItems'))?'checked':''} onchange="_apiToggleEntity('warehouseItems',this.checked)">
         <span><strong>Warehouse Items</strong> <span style="font-size:10px;color:var(--text-muted)">— reads stay local; writes mirror to server</span></span>
@@ -26566,6 +26603,72 @@ async function _apiMigrateEntity(entity) {
     if (el) { el.style.color = 'var(--accent-red)'; el.textContent = 'Failed: ' + e.message; }
     showToast('Migration failed: ' + e.message, 'error', 5000);
   }
+}
+
+// ── Migrate EVERYTHING to the local server, one record at a time ──────
+// Loops the full entity list and reuses Store.migrate for each — that path
+// pushes rows sequentially at ~500/min with 429 back-off, and only calls the
+// LAN Api (never SharePoint). Safe to re-run (server upserts by id).
+let _migrateAllCancel = false;
+async function _apiMigrateAll() {
+  if (typeof Store === 'undefined' || !Store.migrate) { showToast('Store engine not loaded', 'error'); return; }
+  if (typeof Api === 'undefined' || !Api.enabled || !Api.enabled()) {
+    showToast('Connect the Local Server first — set its URL and Test above.', 'error', 6000); return;
+  }
+  const ents = [
+    ['warehouseItems','Warehouse Items'],['projects','Projects'],['tasks','Tasks'],['resources','Resources'],
+    ['procurement','Procurement'],['costs','Costs'],['qaqc','QA/QC'],['risks','Risks'],['actions','Action Items'],
+    ['documents','Documents'],['stockTransactions','Stock Transactions'],['resourceAllocations','Resource Allocations'],
+    ['resourceUsageLogs','Usage Logs'],['manpower','Manpower'],['procurementLogs','Procurement Logs'],
+    ['issuanceRequests','Issuance Requests'],['equipment','Equipment'],['tools','Tools'],['vehicles','Vehicles'],
+    ['consumables','Consumables'],['materials','Materials'],['warehouseLocations','Warehouse Locations'],
+    ['thirdParty','Third Party'],['trades','Trades'],['businessUnits','Business Units'],['projectTeam','Project Team'],
+    ['dailyMeetingLogs','Daily Meeting Logs'],['progress','Progress'],['kpiData','KPI Data'],['calendar','Calendar'],
+    ['assetHistory','Asset History'],['assetUtilization','Asset Utilization'],['libraryDocs','Library Docs']
+  ];
+  let grand = 0;
+  ents.forEach(([e]) => { try { grand += (AppState.data[e] || []).filter(r => r && r.id).length; } catch (_) {} });
+  if (!grand) { showToast('No local records to migrate.', 'info', 4000); return; }
+  const mins = Math.max(1, Math.round(grand * 0.12 / 60));
+  if (!confirm(`Migrate ALL local data to the local server, one record at a time?\n\n${grand} records across ${ents.length} entities — about ${mins} min at a gentle pace.\n\nLAN only — this does NOT touch SharePoint. Safe to re-run.`)) return;
+
+  _migrateAllCancel = false;
+  const bar = document.getElementById('apiMigrateAllStatus');
+  const btn = document.getElementById('apiMigrateAllBtn');
+  const stopBtn = document.getElementById('apiMigrateAllStop');
+  if (btn) btn.disabled = true;
+  if (stopBtn) stopBtn.hidden = false;
+
+  let doneRecords = 0, okTotal = 0, failTotal = 0;
+  const started = Date.now();
+  for (const [ent, label] of ents) {
+    if (_migrateAllCancel) break;
+    const cnt = (AppState.data[ent] || []).filter(r => r && r.id).length;
+    if (!cnt) continue;
+    try {
+      const res = await Store.migrate(ent, p => {
+        if (bar) bar.textContent = `${label}: ${p.migrated}/${p.total}  ·  overall ${doneRecords + p.migrated}/${grand}${(failTotal + p.failed) ? ` (${failTotal + p.failed} failed)` : ''}`;
+      });
+      okTotal += res.migrated; failTotal += res.failed; doneRecords += res.total;
+    } catch (e) {
+      failTotal += cnt; doneRecords += cnt;
+      if (bar) { bar.style.color = 'var(--accent-red)'; bar.textContent = `${label}: failed — ${e.message}`; }
+    }
+  }
+
+  if (btn) btn.disabled = false;
+  if (stopBtn) stopBtn.hidden = true;
+  const secs = Math.round((Date.now() - started) / 1000);
+  const msg = _migrateAllCancel
+    ? `Stopped — ${okTotal}/${grand} migrated so far${failTotal ? `, ${failTotal} failed` : ''}`
+    : `Done — ${okTotal}/${grand} migrated${failTotal ? `, ${failTotal} failed` : ''} in ${secs}s`;
+  if (bar) { bar.style.color = failTotal ? 'var(--accent-amber)' : 'var(--accent-green)'; bar.textContent = '✓ ' + msg; }
+  showToast(msg, failTotal ? 'warning' : 'success', 6000);
+}
+function _apiMigrateAllStop() {
+  _migrateAllCancel = true;
+  const b = document.getElementById('apiMigrateAllStatus');
+  if (b) b.textContent = 'Stopping after the current entity…';
 }
 
 async function _apiHydrateEntity(entity) {

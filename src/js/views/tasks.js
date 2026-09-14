@@ -53,6 +53,27 @@ function _taskIsDescendant(candidateId,ofId,tasks){
 }
 // DFS order: roots first, each followed by its children. Tasks whose parent
 // is missing from the list (filtered out / deleted) surface as roots.
+// Order siblings by WBS, segment-by-segment and numerically: "5" before
+// "5.1", "5.2" before "5.10", numbered before un-numbered. Blank/equal WBS
+// falls back to insertion order (stable sort), so projects without WBS are
+// left untouched.
+function _cmpWbs(a,b){
+  const aw=(a&&a.wbs||'').trim(), bw=(b&&b.wbs||'').trim();
+  if(aw&&bw){
+    const as=aw.split('.'), bs=bw.split('.');
+    for(let i=0;i<Math.max(as.length,bs.length);i++){
+      if(as[i]==null)return -1;   // shorter prefix first (5 before 5.1)
+      if(bs[i]==null)return 1;
+      const x=parseInt(as[i],10), y=parseInt(bs[i],10);
+      if(!isNaN(x)&&!isNaN(y)){ if(x!==y)return x-y; }
+      else { const c=String(as[i]).localeCompare(String(bs[i])); if(c)return c; }
+    }
+    return 0;
+  }
+  if(aw)return -1;  // numbered items before un-numbered
+  if(bw)return 1;
+  return 0;         // both blank → keep insertion order
+}
 function _orderTasksHier(list){
   const ids=new Set(list.map(t=>t.id));
   const out=[];const visited=new Set();
@@ -60,9 +81,9 @@ function _orderTasksHier(list){
     if(visited.has(t.id))return; // cycle guard
     visited.add(t.id);
     out.push({t,depth});
-    list.filter(c=>c.parentId===t.id).forEach(c=>add(c,Math.min(depth+1,6)));
+    list.filter(c=>c.parentId===t.id).sort(_cmpWbs).forEach(c=>add(c,Math.min(depth+1,6)));
   };
-  list.filter(t=>!t.parentId||!ids.has(t.parentId)).forEach(t=>add(t,0));
+  list.filter(t=>!t.parentId||!ids.has(t.parentId)).sort(_cmpWbs).forEach(t=>add(t,0));
   list.forEach(t=>{if(!visited.has(t.id))add(t,0);}); // orphans in a cycle
   return out;
 }

@@ -6,7 +6,7 @@ return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${a.id}</td>
 <td style="font-size:12px;font-weight:500;max-width:180px">${a.description}</td>
 <td><div style="display:flex;align-items:center;gap:5px">${avatarH(a.assignee)}<span style="font-size:11px">${a.assignee.split(' ')[0]}</span></div></td>
-<td style="font-size:11px;font-family:var(--font-mono);color:${a.status==='overdue'?'var(--accent-red)':isOverdue(a.dueDate)?'var(--accent-amber)':'inherit'}">${a.dueDate}</td>
+<td style="font-size:11px;font-family:var(--font-mono);color:${a.status==='closed'?'inherit':a.status==='overdue'?'var(--accent-red)':isOverdue(a.dueDate)?'var(--accent-amber)':'inherit'}">${a.dueDate}</td>
 <td>${pBadge(a.priority)}</td><td>${sBadge(a.status)}</td>
 <td style="max-width:220px">${lastText}</td>
 <td><div style="display:flex;gap:4px">
@@ -30,7 +30,7 @@ const proj=projectMap[pid];
 const projName=proj?`${pid} — ${proj.name||''}`:pid;
 const open=grp.filter(a=>a.status!=='closed').length;
 const closed=grp.filter(a=>a.status==='closed').length;
-const overdue=grp.filter(a=>a.status==='overdue'||isOverdue(a.dueDate)).length;
+const overdue=grp.filter(a=>a.status!=='closed'&&(a.status==='overdue'||isOverdue(a.dueDate))).length;
 return`<div class="card" style="margin-bottom:12px">
 <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);background:linear-gradient(90deg,rgba(56,139,253,.08),transparent);cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none';this.querySelector('.act-chevron').style.transform=this.nextElementSibling.style.display===''?'':'rotate(-90deg)'">
   <div style="display:flex;align-items:center;gap:10px">

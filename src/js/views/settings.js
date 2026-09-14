@@ -296,6 +296,15 @@ ${renderSpPanel()}
     <!-- Per-entity opt-in + rollback + migrate -->
     <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
       <div style="font-size:12px;font-weight:600;margin-bottom:8px">Entity Routing</div>
+      <!-- One-click full migration: every entity, one record at a time, paced & 429-safe, LAN only -->
+      <div style="margin-bottom:12px;padding:10px;border:1px solid rgba(56,139,253,.35);border-radius:8px;background:rgba(56,139,253,.06)">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" id="apiMigrateAllBtn" onclick="_apiMigrateAll()"><i class="fas fa-cloud-upload-alt"></i> Migrate everything to server</button>
+          <button class="btn btn-secondary btn-sm" id="apiMigrateAllStop" hidden onclick="_apiMigrateAllStop()"><i class="fas fa-stop"></i> Stop</button>
+          <span style="font-size:10px;color:var(--text-muted)">Uploads every record one-by-one (paced ~500/min, retries on rate-limit). <strong>LAN only — never touches SharePoint.</strong> Safe to re-run.</span>
+        </div>
+        <div id="apiMigrateAllStatus" style="font-size:11px;color:var(--text-muted);margin-top:6px;min-height:14px"></div>
+      </div>
       <label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 0">
         <input type="checkbox" id="apiEnt_warehouseItems" ${((_dev.apiEntities||[]).includes('warehouseItems'))?'checked':''} onchange="_apiToggleEntity('warehouseItems',this.checked)">
         <span><strong>Warehouse Items</strong> <span style="font-size:10px;color:var(--text-muted)">— reads stay local; writes mirror to server</span></span>
@@ -1392,6 +1401,72 @@ async function _apiMigrateEntity(entity) {
     if (el) { el.style.color = 'var(--accent-red)'; el.textContent = 'Failed: ' + e.message; }
     showToast('Migration failed: ' + e.message, 'error', 5000);
   }
+}
+
+// ── Migrate EVERYTHING to the local server, one record at a time ──────
+// Loops the full entity list and reuses Store.migrate for each — that path
+// pushes rows sequentially at ~500/min with 429 back-off, and only calls the
+// LAN Api (never SharePoint). Safe to re-run (server upserts by id).
+let _migrateAllCancel = false;
+async function _apiMigrateAll() {
+  if (typeof Store === 'undefined' || !Store.migrate) { showToast('Store engine not loaded', 'error'); return; }
+  if (typeof Api === 'undefined' || !Api.enabled || !Api.enabled()) {
+    showToast('Connect the Local Server first — set its URL and Test above.', 'error', 6000); return;
+  }
+  const ents = [
+    ['warehouseItems','Warehouse Items'],['projects','Projects'],['tasks','Tasks'],['resources','Resources'],
+    ['procurement','Procurement'],['costs','Costs'],['qaqc','QA/QC'],['risks','Risks'],['actions','Action Items'],
+    ['documents','Documents'],['stockTransactions','Stock Transactions'],['resourceAllocations','Resource Allocations'],
+    ['resourceUsageLogs','Usage Logs'],['manpower','Manpower'],['procurementLogs','Procurement Logs'],
+    ['issuanceRequests','Issuance Requests'],['equipment','Equipment'],['tools','Tools'],['vehicles','Vehicles'],
+    ['consumables','Consumables'],['materials','Materials'],['warehouseLocations','Warehouse Locations'],
+    ['thirdParty','Third Party'],['trades','Trades'],['businessUnits','Business Units'],['projectTeam','Project Team'],
+    ['dailyMeetingLogs','Daily Meeting Logs'],['progress','Progress'],['kpiData','KPI Data'],['calendar','Calendar'],
+    ['assetHistory','Asset History'],['assetUtilization','Asset Utilization'],['libraryDocs','Library Docs']
+  ];
+  let grand = 0;
+  ents.forEach(([e]) => { try { grand += (AppState.data[e] || []).filter(r => r && r.id).length; } catch (_) {} });
+  if (!grand) { showToast('No local records to migrate.', 'info', 4000); return; }
+  const mins = Math.max(1, Math.round(grand * 0.12 / 60));
+  if (!confirm(`Migrate ALL local data to the local server, one record at a time?\n\n${grand} records across ${ents.length} entities — about ${mins} min at a gentle pace.\n\nLAN only — this does NOT touch SharePoint. Safe to re-run.`)) return;
+
+  _migrateAllCancel = false;
+  const bar = document.getElementById('apiMigrateAllStatus');
+  const btn = document.getElementById('apiMigrateAllBtn');
+  const stopBtn = document.getElementById('apiMigrateAllStop');
+  if (btn) btn.disabled = true;
+  if (stopBtn) stopBtn.hidden = false;
+
+  let doneRecords = 0, okTotal = 0, failTotal = 0;
+  const started = Date.now();
+  for (const [ent, label] of ents) {
+    if (_migrateAllCancel) break;
+    const cnt = (AppState.data[ent] || []).filter(r => r && r.id).length;
+    if (!cnt) continue;
+    try {
+      const res = await Store.migrate(ent, p => {
+        if (bar) bar.textContent = `${label}: ${p.migrated}/${p.total}  ·  overall ${doneRecords + p.migrated}/${grand}${(failTotal + p.failed) ? ` (${failTotal + p.failed} failed)` : ''}`;
+      });
+      okTotal += res.migrated; failTotal += res.failed; doneRecords += res.total;
+    } catch (e) {
+      failTotal += cnt; doneRecords += cnt;
+      if (bar) { bar.style.color = 'var(--accent-red)'; bar.textContent = `${label}: failed — ${e.message}`; }
+    }
+  }
+
+  if (btn) btn.disabled = false;
+  if (stopBtn) stopBtn.hidden = true;
+  const secs = Math.round((Date.now() - started) / 1000);
+  const msg = _migrateAllCancel
+    ? `Stopped — ${okTotal}/${grand} migrated so far${failTotal ? `, ${failTotal} failed` : ''}`
+    : `Done — ${okTotal}/${grand} migrated${failTotal ? `, ${failTotal} failed` : ''} in ${secs}s`;
+  if (bar) { bar.style.color = failTotal ? 'var(--accent-amber)' : 'var(--accent-green)'; bar.textContent = '✓ ' + msg; }
+  showToast(msg, failTotal ? 'warning' : 'success', 6000);
+}
+function _apiMigrateAllStop() {
+  _migrateAllCancel = true;
+  const b = document.getElementById('apiMigrateAllStatus');
+  if (b) b.textContent = 'Stopping after the current entity…';
 }
 
 async function _apiHydrateEntity(entity) {

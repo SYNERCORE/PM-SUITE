@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.5';
-const APP_BUILD='20260914a';
+const APP_VERSION='2.14.6';
+const APP_BUILD='20260914b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Dashboard "Pending Actions" now hides closed items; Gantt dependency arrows stay aligned to their bars';
+const APP_RELEASE_NOTE='One-click "Migrate everything to server" — uploads all data to the LAN server one record at a time (no SharePoint bulk hit)';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.6',date:'2026-09-14',type:'feat',notes:[
+    'Local Server: new "Migrate everything to server" button (Settings → Local Server → Entity Routing) uploads all local data to the LAN server one record at a time — paced (~500/min) with automatic back-off if the server rate-limits, and a live progress line + Stop button. It talks only to the LAN server, so a full migration never fires a SharePoint bulk request. Safe to re-run: the server upserts by id.',
+    'Action Items: the per-project "N overdue" badge no longer counts Closed actions — a closed item past its due date is done, not overdue (matches the Overdue KPI). Closed rows also no longer show their due date in amber.',
+    'Tasks / Gantt: fixed WBS ordering — sibling tasks now sort by WBS number segment-by-segment (so 2, 3, 4, 5 not import order; 5.1 before 5.2; 5.2 before 5.10; a parent "5" before "5.1"). Projects without WBS keep their existing order.',
+    'Project-detail Gantt: rows now show the WBS code, are indented by hierarchy level, and follow WBS order — so the Gantt lines up with the Tasks tab and is easier to navigate.',
+  ]},
   {version:'2.14.5',date:'2026-09-14',type:'patch',notes:[
     'Dashboard: the "Pending Actions" card no longer lists Closed items — it now shows only open/overdue actions (matching the counter above it), with a "No pending actions" message when everything is closed.',
     'Gantt Chart: fixed CPM dependency arrows drifting off their task bars further down the chart ("floating arrows"). Row borders weren’t counted in the arrow overlay’s coordinates, so the error accumulated row by row; arrows now stay locked to the bars.',

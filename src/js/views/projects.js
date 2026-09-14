@@ -4036,7 +4036,7 @@ function renderDetailGantt(){
     <div style="width:80px;min-width:80px;padding:4px 6px;font-size:9px;font-weight:700;color:var(--text-secondary);border-left:1px solid var(--border)">STATUS</div>
   </div>`;
 
-  tasks.forEach(t=>{
+  (typeof _orderTasksHier==='function'?_orderTasksHier(tasks):tasks.map(t=>({t,depth:0}))).forEach(({t,depth})=>{
     const c=scColor[t.status]||'#8b949e';
     const s=t.startDate||p.startDate;
     const e=t.endDate||t.dueDate||p.endDate;
@@ -4061,9 +4061,10 @@ function renderDetailGantt(){
     }
 
     rowsHtml+=`<div id="ganttRow_${t.id}" style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)}">
-      <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:5px 10px;border-right:1px solid var(--border);overflow:hidden">
+      <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:5px 10px 5px ${10+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
         <div style="display:flex;align-items:center;gap:5px">
           <i class="fas ${isMile?'fa-diamond':'fa-circle'}" style="color:${isMile?'var(--accent-amber)':c};font-size:${isMile?'9':'6'}px;flex-shrink:0"></i>
+          ${t.wbs?`<span style="font-size:9px;font-family:var(--font-mono);color:var(--text-muted);flex-shrink:0">${esc(t.wbs)}</span>`:''}
           <span style="font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.name)}</span>
         </div>
         ${t.assignee?`<div style="font-size:9px;color:var(--text-muted);padding-left:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.assignee}</div>`:''}
