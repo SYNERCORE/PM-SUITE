@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.4';
-const APP_BUILD='20260908e';
+const APP_VERSION='2.14.5';
+const APP_BUILD='20260914a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Print the Gantt (planned vs actual dates + progress per project) — works offline';
+const APP_RELEASE_NOTE='Dashboard "Pending Actions" now hides closed items; Gantt dependency arrows stay aligned to their bars';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.5',date:'2026-09-14',type:'patch',notes:[
+    'Dashboard: the "Pending Actions" card no longer lists Closed items — it now shows only open/overdue actions (matching the counter above it), with a "No pending actions" message when everything is closed.',
+    'Gantt Chart: fixed CPM dependency arrows drifting off their task bars further down the chart ("floating arrows"). Row borders weren’t counted in the arrow overlay’s coordinates, so the error accumulated row by row; arrows now stay locked to the bars.',
+  ]},
   {version:'2.14.4',date:'2026-09-08',type:'patch',notes:[
     'Task CSV import: fixed rows being dropped when many tasks share the same name and the WBS column is blank — the importer was folding every duplicate name into the first one. All rows now import; re-importing the same file still updates in place instead of duplicating.',
   ]},

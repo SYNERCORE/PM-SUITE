@@ -153,7 +153,7 @@ function renderGantt(){
         ${showBL?`<span style="font-size:8px;color:var(--text-muted)">BL</span>${cvHtml}`:'<span style="font-size:9px;color:var(--text-muted)">—</span>'}
       </div>
     </div>`;
-    currentY+=PROJ_H;
+    currentY+=PROJ_H+2; // +2px: row border-bottom, so arrow Y stays aligned with bars
 
     if(!pt.length){
       rows+=`<div style="display:flex;border-bottom:1px solid var(--border)">
@@ -161,7 +161,7 @@ function renderGantt(){
         <div style="flex:1;height:28px;position:relative">${todayLine}</div>
         <div style="width:${161+SV_W}px;min-width:${161+SV_W}px;border-left:1px solid var(--border)"></div>
       </div>`;
-      currentY+=28;
+      currentY+=29; // 28px cell + 1px border-bottom
     }
 
     const ptOrdered=typeof _orderTasksHier==='function'?_orderTasksHier(pt):pt.map(t=>({t,depth:0}));
@@ -239,7 +239,7 @@ function renderGantt(){
       const predCount=(window.SHICCPMEngine&&t.predecessors)?SHICCPMEngine.parsePredecessors(t.predecessors).length:0;
 
       rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0?' — Float: '+tf.toFixed(1)+'d':''}">
-        <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:4px 10px 4px ${26+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
+        <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;height:${TASK_H}px;padding:3px 10px 3px ${26+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
           <div style="display:flex;align-items:center;gap:5px">
             <i class="fas ${isSummary?'fa-folder-open':isMile?'fa-diamond':'fa-circle'}" style="color:${isSummary?'#6e7681':isMile?(isCrit?'#f85149':'var(--accent-amber)'):tc};font-size:${isSummary?'9':isMile?'9':'5'}px;flex-shrink:0"></i>
             <span style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${isCrit?'var(--accent-red)':overdue?'var(--accent-red)':'inherit'};font-weight:${isSummary?'700':isCrit?'600':'400'}">${esc(t.name)}</span>
@@ -262,7 +262,7 @@ function renderGantt(){
         </div>
         <div style="width:${SV_W}px;min-width:${SV_W}px;padding:4px;border-left:1px solid var(--border);display:flex;align-items:center;justify-content:center">${svHtml}</div>
       </div>`;
-      currentY+=TASK_H;
+      currentY+=TASK_H+1; // +1px: row border-bottom
     });
   });
 

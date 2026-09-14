@@ -1,1 +1,1 @@
-{"version":"2.14.4","note":"Print the Gantt (planned vs actual dates + progress per project) — works offline","released":"2026-09-08 15:04"}
+{"version":"2.14.5","note":"Dashboard \"Pending Actions\" now hides closed items; Gantt dependency arrows stay aligned to their bars","released":"2026-09-14 09:55"}

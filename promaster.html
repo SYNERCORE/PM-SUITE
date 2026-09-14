@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.4';
-const APP_BUILD='20260908e';
+const APP_VERSION='2.14.5';
+const APP_BUILD='20260914a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Print the Gantt (planned vs actual dates + progress per project) — works offline';
+const APP_RELEASE_NOTE='Dashboard "Pending Actions" now hides closed items; Gantt dependency arrows stay aligned to their bars';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.5',date:'2026-09-14',type:'patch',notes:[
+    'Dashboard: the "Pending Actions" card no longer lists Closed items — it now shows only open/overdue actions (matching the counter above it), with a "No pending actions" message when everything is closed.',
+    'Gantt Chart: fixed CPM dependency arrows drifting off their task bars further down the chart ("floating arrows"). Row borders weren’t counted in the arrow overlay’s coordinates, so the error accumulated row by row; arrows now stay locked to the bars.',
+  ]},
   {version:'2.14.4',date:'2026-09-08',type:'patch',notes:[
     'Task CSV import: fixed rows being dropped when many tasks share the same name and the WBS column is blank — the importer was folding every duplicate name into the first one. All rows now import; re-importing the same file still updates in place instead of duplicating.',
   ]},
@@ -10178,14 +10182,14 @@ return`<div style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid v
 <div style="font-size:10px;color:var(--text-secondary)">${r.projectId} &middot; ${r.owner.split(' ')[0]} &middot; Due: ${r.dueDate}</div></div></div>`;
 }).join('')}</div>
 <div class="card"><div class="section-header"><div class="section-title">Pending Actions</div><button class="btn btn-secondary btn-sm" onclick="navigate('actions')">All Actions</button></div>
-${actions.slice(0,4).map(a=>`
+${(function(){const _pa=actions.filter(a=>a.status!=='closed');return _pa.length?_pa.slice(0,4).map(a=>`
 <div style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">
 <div style="width:6px;border-radius:3px;background:${a.priority==='critical'?'var(--accent-red)':a.priority==='high'?'var(--accent-amber)':'var(--accent-blue)'}"></div>
 <div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:500;margin-bottom:2px">${a.description}</div>
 <div style="font-size:10px;color:var(--text-secondary);display:flex;align-items:center;gap:6px">
 <span>${a.projectId}</span><span>·</span><span>${a.assignee.split(' ')[0]}</span><span>·</span>
 <span style="color:${isOverdue(a.dueDate)?'var(--accent-red)':'var(--text-secondary)'}">Due: ${a.dueDate}</span>
-${sBadge(a.status)}</div></div></div>`).join('')}</div></div>
+${sBadge(a.status)}</div></div></div>`).join(''):`<div style="padding:16px 0;font-size:12px;color:var(--text-secondary)">No pending actions</div>`;})()}</div></div>
 ${_renderWarehouseDashSection()}
 ${_renderReorderAlerts()}
 `;
@@ -18054,7 +18058,7 @@ function renderGantt(){
         ${showBL?`<span style="font-size:8px;color:var(--text-muted)">BL</span>${cvHtml}`:'<span style="font-size:9px;color:var(--text-muted)">—</span>'}
       </div>
     </div>`;
-    currentY+=PROJ_H;
+    currentY+=PROJ_H+2; // +2px: row border-bottom, so arrow Y stays aligned with bars
 
     if(!pt.length){
       rows+=`<div style="display:flex;border-bottom:1px solid var(--border)">
@@ -18062,7 +18066,7 @@ function renderGantt(){
         <div style="flex:1;height:28px;position:relative">${todayLine}</div>
         <div style="width:${161+SV_W}px;min-width:${161+SV_W}px;border-left:1px solid var(--border)"></div>
       </div>`;
-      currentY+=28;
+      currentY+=29; // 28px cell + 1px border-bottom
     }
 
     const ptOrdered=typeof _orderTasksHier==='function'?_orderTasksHier(pt):pt.map(t=>({t,depth:0}));
@@ -18140,7 +18144,7 @@ function renderGantt(){
       const predCount=(window.SHICCPMEngine&&t.predecessors)?SHICCPMEngine.parsePredecessors(t.predecessors).length:0;
 
       rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0?' — Float: '+tf.toFixed(1)+'d':''}">
-        <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:4px 10px 4px ${26+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
+        <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;height:${TASK_H}px;padding:3px 10px 3px ${26+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
           <div style="display:flex;align-items:center;gap:5px">
             <i class="fas ${isSummary?'fa-folder-open':isMile?'fa-diamond':'fa-circle'}" style="color:${isSummary?'#6e7681':isMile?(isCrit?'#f85149':'var(--accent-amber)'):tc};font-size:${isSummary?'9':isMile?'9':'5'}px;flex-shrink:0"></i>
             <span style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${isCrit?'var(--accent-red)':overdue?'var(--accent-red)':'inherit'};font-weight:${isSummary?'700':isCrit?'600':'400'}">${esc(t.name)}</span>
@@ -18163,7 +18167,7 @@ function renderGantt(){
         </div>
         <div style="width:${SV_W}px;min-width:${SV_W}px;padding:4px;border-left:1px solid var(--border);display:flex;align-items:center;justify-content:center">${svHtml}</div>
       </div>`;
-      currentY+=TASK_H;
+      currentY+=TASK_H+1; // +1px: row border-bottom
     });
   });
 

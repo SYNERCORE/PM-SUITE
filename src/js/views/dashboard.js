@@ -158,14 +158,14 @@ return`<div style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid v
 <div style="font-size:10px;color:var(--text-secondary)">${r.projectId} &middot; ${r.owner.split(' ')[0]} &middot; Due: ${r.dueDate}</div></div></div>`;
 }).join('')}</div>
 <div class="card"><div class="section-header"><div class="section-title">Pending Actions</div><button class="btn btn-secondary btn-sm" onclick="navigate('actions')">All Actions</button></div>
-${actions.slice(0,4).map(a=>`
+${(function(){const _pa=actions.filter(a=>a.status!=='closed');return _pa.length?_pa.slice(0,4).map(a=>`
 <div style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">
 <div style="width:6px;border-radius:3px;background:${a.priority==='critical'?'var(--accent-red)':a.priority==='high'?'var(--accent-amber)':'var(--accent-blue)'}"></div>
 <div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:500;margin-bottom:2px">${a.description}</div>
 <div style="font-size:10px;color:var(--text-secondary);display:flex;align-items:center;gap:6px">
 <span>${a.projectId}</span><span>·</span><span>${a.assignee.split(' ')[0]}</span><span>·</span>
 <span style="color:${isOverdue(a.dueDate)?'var(--accent-red)':'var(--text-secondary)'}">Due: ${a.dueDate}</span>
-${sBadge(a.status)}</div></div></div>`).join('')}</div></div>
+${sBadge(a.status)}</div></div></div>`).join(''):`<div style="padding:16px 0;font-size:12px;color:var(--text-secondary)">No pending actions</div>`;})()}</div></div>
 ${_renderWarehouseDashSection()}
 ${_renderReorderAlerts()}
 `;
