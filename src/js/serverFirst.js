@@ -61,8 +61,17 @@
     return m;
   }
 
+  // Mass-delete circuit breaker. Server-First replicates "was synced, now gone" as a
+  // server delete — correct for real edits, catastrophic if a device's local cache is
+  // lost (corruption, cleared site data, a failed load): that would tell the server to
+  // wipe everyone's data. So when local has lost the bulk of its records at once, we
+  // SUPPRESS all deletions for that cycle and keep the server's copy. Adds and updates
+  // still flow; only destructive deletes are held back until local looks intact again.
+  const DELETE_GUARD_MIN_PREV = 20;   // ignore the guard on tiny datasets
+  const DELETE_GUARD_MIN_RATIO = 0.25; // trip if <25% of the previously-synced set remains
+
   // ── Writes: push only the records whose JSON changed since last sync ──
-  async function _pushEntity(ent) {
+  async function _pushEntity(ent, allowDeletes) {
     const arr = AppState.data[ent] || [];
     const prev = _sig[ent] || new Map();
     const cur = new Map();
@@ -79,6 +88,7 @@
     // Deletions: ids we had synced before that are no longer present locally.
     for (const id of prev.keys()) {
       if (!cur.has(id)) {
+        if (!allowDeletes) { cur.set(id, prev.get(id)); continue; } // guard tripped — keep the server row, remember it
         try { await Api.remove(ent, id); n++; await _sfSleep(PUSH_PACE_MS); }
         catch (e) { ok = false; cur.set(id, prev.get(id)); if (/\b429\b/.test(e.message || '')) await _sfSleep(2500); }
       }
@@ -92,9 +102,22 @@
     // Never fight an in-progress bulk migration — it paces itself; our push would
     // collide on the rate limit and cause 429 storms.
     if (typeof Store !== 'undefined' && Store.migrating && Store.migrating()) return { pushed: 0, failed: [] };
+    // Decide once, across ALL entities, whether deletions are safe this cycle. A near-total
+    // disappearance of previously-synced records is almost certainly a local data loss, not
+    // 30+ entities' worth of simultaneous user deletes — so hold deletes back and protect the server.
+    let totalPrev = 0, totalLive = 0;
+    for (const ent of ENTITIES) {
+      totalPrev += (_sig[ent] ? _sig[ent].size : 0);
+      totalLive += (AppState.data[ent] || []).filter(r => r && r.id != null).length;
+    }
+    const allowDeletes = !(totalPrev >= DELETE_GUARD_MIN_PREV && totalLive < totalPrev * DELETE_GUARD_MIN_RATIO);
+    if (!allowDeletes) {
+      try { console.warn(`[Server-First] Delete guard TRIPPED — local holds ${totalLive} of ${totalPrev} previously-synced records. Suppressing all deletions this cycle to protect the server (likely a local data loss, not real deletes). Pull from the server to restore this device.`); } catch (e) {}
+      if (typeof showToast === 'function') { try { showToast('Sync paused deletions — this device lost local data. Your server copy is safe; use Settings → Local Server → Pull everything to restore.', 'warning', 8000); } catch (e) {} }
+    }
     let pushed = 0; const failed = [];
     for (const ent of ENTITIES) {
-      try { const r = await _pushEntity(ent); pushed += r.n; if (!r.ok) failed.push(ent); }
+      try { const r = await _pushEntity(ent, allowDeletes); pushed += r.n; if (!r.ok) failed.push(ent); }
       catch (e) { failed.push(ent); }
     }
     return { pushed, failed };

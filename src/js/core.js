@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.9';
-const APP_BUILD='20260915c';
+const APP_VERSION='2.14.10';
+const APP_BUILD='20260915d';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='New "Pull everything from server" button seeds a fresh/empty device in one click (inverse of Migrate everything), on top of the 401-storm fix';
+const APP_RELEASE_NOTE='Server-First now refuses to delete server data when a device loses its local cache — a mass-delete circuit breaker that protects everyone’s data';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.10',date:'2026-09-15',type:'patch',notes:[
+    'Server-First: added a mass-delete circuit breaker. Server-First treats a record that was synced before but is now gone locally as a deletion to replicate to the server — correct for real edits, but dangerous if a device loses its local cache (corruption, cleared site data, a failed load), because it could tell the server to wipe the shared dataset. It now checks, once per cycle across all entities, whether the local data has lost the bulk of its previously-synced records at once (<25% remaining of 20+ records); if so it suppresses ALL deletions for that cycle, keeps the server copy intact, and shows a notice to Pull from the server to restore the device. Adds and updates still sync normally — only destructive deletes are held back until local looks intact again.',
+  ]},
   {version:'2.14.9',date:'2026-09-15',type:'feat',notes:[
     'Local Server: new "Pull everything from server" button (Settings → Local Server → Entity Routing, next to "Migrate everything"). One click downloads every entity from the server into this device — the inverse of migrate-all, for seeding a new or empty device without pulling each of the 33 entities by hand. Refuses to run until you are signed in (so you get a clear "sign in first" instead of errors), shows live progress, and re-renders the app when done.',
   ]},
