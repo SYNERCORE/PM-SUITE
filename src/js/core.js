@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.11';
-const APP_BUILD='20260915e';
+const APP_VERSION='2.14.12';
+const APP_BUILD='20260915f';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Server-First now auto-loads your data from the server on every boot when local is empty — no more manual "Pull everything" and no more empty dashboard after a reload';
+const APP_RELEASE_NOTE='Fixes server-side deletes — deleting a record now actually removes it from the server (was silently rejected before, so deletions came back on the next sync)';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.12',date:'2026-09-15',type:'patch',notes:[
+    'Local Server: fixed server-side deletes returning "400 Bad Request". The API client sent every request — including bodyless DELETEs — with a JSON content-type header, and the server’s body parser rejects an empty body declared as JSON. The result was that deletions never reached the server: a deleted record stayed in the database and reappeared on the next sync. The client now sends the JSON content-type only when there is an actual body, so DELETE (and any future bodyless call) works. Reads and saves were never affected.',
+  ]},
   {version:'2.14.11',date:'2026-09-15',type:'patch',notes:[
     'Server-First: the app now auto-loads your data from the server on boot whenever the local copy is empty. Previously, if a device booted with no local data (encrypted cache not yet unlocked, cleared site data, or a fresh device), you saw an empty dashboard and had to click "Pull everything from server" by hand every time. Server-First now detects the empty state on start and does a one-time full pull to seed it, then keeps it in light delta-sync — so a reload just refills itself. The server is the source of truth in Server-First mode, so this is always safe, and unlike a manual Pull it leaves no "changes pending" behind.',
   ]},

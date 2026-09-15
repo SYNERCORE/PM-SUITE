@@ -42,10 +42,15 @@ const Api = (function () {
     // would repeat that for all 33 entities on every cycle = a 401 storm. Throwing here
     // makes callers treat it as "not ready", so they quietly retry once a token exists.
     if (!token) throw new Error('Api not ready: no auth token yet (sign in to the local server first)');
+    // Only declare a JSON content-type when we actually send a body. A DELETE (or any
+    // bodyless request) sent with Content-Type: application/json makes Fastify's body
+    // parser reject the empty body with 400 Bad Request — which silently broke every
+    // server-side delete (deleted records stayed on the server and came back on the
+    // next pull). GET has no body so it was unaffected; PUT carries a real body.
     const headers = Object.assign(
-      { 'Content-Type': 'application/json' },
+      init.body != null ? { 'Content-Type': 'application/json' } : {},
       init.headers || {},
-      token ? { Authorization: 'Bearer ' + token } : {}
+      { Authorization: 'Bearer ' + token }
     );
     let res;
     try {
