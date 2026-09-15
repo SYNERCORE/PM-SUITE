@@ -198,11 +198,27 @@
   function start() {
     if (_started || !on() || !_apiReady()) return;
     _started = true;
-    ENTITIES.forEach(e => { _sig[e] = _snap(e); if (!_lastPull[e]) _lastPull[e] = new Date().toISOString(); });
+    // Watermark decides delta vs. full pull on the first cycle:
+    //   • entity has local rows  → watermark to now, pull only what changed since (light delta)
+    //   • entity is EMPTY locally → leave watermark unset so the first cycle FULL-pulls it.
+    // This auto-seeds a fresh/empty device (or one whose local cache didn't survive a reload)
+    // straight from the server on boot — no manual "Pull everything" needed. Server is the
+    // source of truth in Server-First mode, so refilling from it is always safe.
+    let seeding = 0;
+    ENTITIES.forEach(e => {
+      _sig[e] = _snap(e);
+      const hasLocal = (AppState.data[e] || []).some(r => r && r.id != null);
+      if (hasLocal) { if (!_lastPull[e]) _lastPull[e] = new Date().toISOString(); }
+      else { _lastPull[e] = null; seeding++; } // empty → first cycle full-pulls to seed
+    });
     clearInterval(_refreshTimer);
     _refreshTimer = setInterval(() => { cycle().catch(() => {}); }, REFRESH_MS);
-    cycle().catch(() => {}); // first pass now (push any pending local diffs)
-    if (typeof showToast === 'function') showToast('Server-First mode active — syncing over the local network', 'success', 3000);
+    cycle().catch(() => {}); // first pass now (seeds empty entities, pushes any pending diffs)
+    if (typeof showToast === 'function') {
+      showToast(seeding >= ENTITIES.length
+        ? 'Server-First mode — loading your data from the local network…'
+        : 'Server-First mode active — syncing over the local network', 'success', 3000);
+    }
   }
   function stop() {
     _started = false;

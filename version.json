@@ -1,1 +1,1 @@
-{"version":"2.14.10","note":"Server-First now refuses to delete server data when a device loses its local cache — a mass-delete circuit breaker that protects everyone’s data","released":"2026-09-15 13:34"}
+{"version":"2.14.11","note":"Server-First now auto-loads your data from the server on every boot when local is empty — no more manual \"Pull everything\" and no more empty dashboard after a reload","released":"2026-09-15 14:30"}

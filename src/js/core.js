@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.10';
-const APP_BUILD='20260915d';
+const APP_VERSION='2.14.11';
+const APP_BUILD='20260915e';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Server-First now refuses to delete server data when a device loses its local cache — a mass-delete circuit breaker that protects everyone’s data';
+const APP_RELEASE_NOTE='Server-First now auto-loads your data from the server on every boot when local is empty — no more manual "Pull everything" and no more empty dashboard after a reload';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.11',date:'2026-09-15',type:'patch',notes:[
+    'Server-First: the app now auto-loads your data from the server on boot whenever the local copy is empty. Previously, if a device booted with no local data (encrypted cache not yet unlocked, cleared site data, or a fresh device), you saw an empty dashboard and had to click "Pull everything from server" by hand every time. Server-First now detects the empty state on start and does a one-time full pull to seed it, then keeps it in light delta-sync — so a reload just refills itself. The server is the source of truth in Server-First mode, so this is always safe, and unlike a manual Pull it leaves no "changes pending" behind.',
+  ]},
   {version:'2.14.10',date:'2026-09-15',type:'patch',notes:[
     'Server-First: added a mass-delete circuit breaker. Server-First treats a record that was synced before but is now gone locally as a deletion to replicate to the server — correct for real edits, but dangerous if a device loses its local cache (corruption, cleared site data, a failed load), because it could tell the server to wipe the shared dataset. It now checks, once per cycle across all entities, whether the local data has lost the bulk of its previously-synced records at once (<25% remaining of 20+ records); if so it suppresses ALL deletions for that cycle, keeps the server copy intact, and shows a notice to Pull from the server to restore the device. Adds and updates still sync normally — only destructive deletes are held back until local looks intact again.',
   ]},
