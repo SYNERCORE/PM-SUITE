@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.7';
-const APP_BUILD='20260915a';
+const APP_VERSION='2.14.8';
+const APP_BUILD='20260915b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Migration hardening — see exactly which records failed, more 429 retries, and Server-First no longer collides with a bulk migration';
+const APP_RELEASE_NOTE='Fixes the local-server "nothing loads / 401" storm — the app no longer fires data requests before you are signed in, and hydrates the moment sign-in completes';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.8',date:'2026-09-15',type:'patch',notes:[
+    'Local Server: fixed the "nothing loads from the server / 401 storm" reported right after opening the app. The cause was the app firing /api requests before Microsoft sign-in had finished wiring the account — those requests went out with no Authorization header, so the server rejected every one ("missing bearer token") and Server-First repeated it for all 33 entities each cycle. The API client now refuses to send a data request until a real token exists, instead of sending a header-less one.',
+    'Local Server: Server-First now hydrates the moment sign-in completes — as soon as a token becomes available it pulls once, so you no longer wait up to 3 minutes (or a manual reload) for data to appear after logging in.',
+  ]},
   {version:'2.14.7',date:'2026-09-15',type:'patch',notes:[
     'Migration: "Migrate everything to server" now lists exactly which records failed — the summary shows a "show which N" link, and the full list (entity + id) is logged to the console and kept in window._migrateFailures. Re-running retries them (idempotent).',
     'Migration: each record now retries up to 3 times with growing back-off on a 429, so brief rate-limit collisions no longer cost a record.',
@@ -2900,6 +2904,11 @@ const Api = (function () {
   async function _fetch(path, init = {}) {
     if (!_cfg.baseUrl) throw new Error('Api not configured — call Api.configure first');
     const token = typeof _cfg.getToken === 'function' ? await _cfg.getToken() : null;
+    // No token yet (sign-in not finished, or MSAL account not wired) — DON'T fire a
+    // bare request. The server would just 401 "missing bearer token", and Server-First
+    // would repeat that for all 33 entities on every cycle = a 401 storm. Throwing here
+    // makes callers treat it as "not ready", so they quietly retry once a token exists.
+    if (!token) throw new Error('Api not ready: no auth token yet (sign in to the local server first)');
     const headers = Object.assign(
       { 'Content-Type': 'application/json' },
       init.headers || {},
@@ -2963,7 +2972,14 @@ const Api = (function () {
 
   function lastHealthyAt() { return _lastHealthy; }
 
-  return { configure, enabled, health, list, get, put, remove, lastHealthyAt };
+  // Resolve the current auth token (or '' if none). Lets callers gate on genuine
+  // readiness — a configured Api isn't the same as a signed-in one.
+  async function _tokenNow() {
+    try { return (typeof _cfg.getToken === 'function' ? await _cfg.getToken() : '') || ''; }
+    catch (e) { return ''; }
+  }
+
+  return { configure, enabled, health, list, get, put, remove, lastHealthyAt, _tokenNow };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Api;
@@ -9797,6 +9813,14 @@ async function spDeleteFormTemplate(spId) {
 
   function on()       { try { return !!(getDeviceSettings().serverFirst); } catch (e) { return false; } }
   function _apiReady(){ return typeof Api !== 'undefined' && Api.enabled && Api.enabled(); }
+  // Api.enabled() only checks that a baseUrl + getToken fn are configured — NOT that a
+  // token can actually be obtained. Firing pulls before sign-in wires the account sends
+  // header-less requests the server 401s ("missing bearer token"). This resolves a real
+  // token so we can gate on genuine readiness and kick a cycle the moment one appears.
+  async function _hasToken() {
+    try { return !!(Api._tokenNow ? await Api._tokenNow() : true); } catch (e) { return false; }
+  }
+  let _hadToken = false;
   function _editing() { try { return typeof _isUserActivelyEditing === 'function' && _isUserActivelyEditing(); } catch (e) { return false; } }
   // sync.js reads this to gate the per-edit SP push and the SP remote poll.
   window._serverFirstOn = on;
@@ -9947,7 +9971,15 @@ async function spDeleteFormTemplate(spId) {
   // Readiness watcher: Api is configured only after login, and the toggle can
   // flip at runtime — this starts/stops the engine to match, cheaply.
   _readyTimer = setInterval(() => {
-    if (on() && _apiReady()) { if (!_started) start(); }
+    if (on() && _apiReady()) {
+      if (!_started) start();
+      // Recover promptly after sign-in: the moment a token first becomes obtainable
+      // (account wired), pull once so the app hydrates without waiting for the 3-min tick.
+      _hasToken().then(has => {
+        if (has && !_hadToken) { _hadToken = true; cycle().catch(() => {}); }
+        else if (!has) { _hadToken = false; }
+      });
+    }
     else if (_started) stop();
   }, 5000);
 

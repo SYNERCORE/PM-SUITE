@@ -43,6 +43,14 @@
 
   function on()       { try { return !!(getDeviceSettings().serverFirst); } catch (e) { return false; } }
   function _apiReady(){ return typeof Api !== 'undefined' && Api.enabled && Api.enabled(); }
+  // Api.enabled() only checks that a baseUrl + getToken fn are configured — NOT that a
+  // token can actually be obtained. Firing pulls before sign-in wires the account sends
+  // header-less requests the server 401s ("missing bearer token"). This resolves a real
+  // token so we can gate on genuine readiness and kick a cycle the moment one appears.
+  async function _hasToken() {
+    try { return !!(Api._tokenNow ? await Api._tokenNow() : true); } catch (e) { return false; }
+  }
+  let _hadToken = false;
   function _editing() { try { return typeof _isUserActivelyEditing === 'function' && _isUserActivelyEditing(); } catch (e) { return false; } }
   // sync.js reads this to gate the per-edit SP push and the SP remote poll.
   window._serverFirstOn = on;
@@ -193,7 +201,15 @@
   // Readiness watcher: Api is configured only after login, and the toggle can
   // flip at runtime — this starts/stops the engine to match, cheaply.
   _readyTimer = setInterval(() => {
-    if (on() && _apiReady()) { if (!_started) start(); }
+    if (on() && _apiReady()) {
+      if (!_started) start();
+      // Recover promptly after sign-in: the moment a token first becomes obtainable
+      // (account wired), pull once so the app hydrates without waiting for the 3-min tick.
+      _hasToken().then(has => {
+        if (has && !_hadToken) { _hadToken = true; cycle().catch(() => {}); }
+        else if (!has) { _hadToken = false; }
+      });
+    }
     else if (_started) stop();
   }, 5000);
 

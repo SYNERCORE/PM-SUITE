@@ -1,1 +1,1 @@
-{"version":"2.14.7","note":"Migration hardening — see exactly which records failed, more 429 retries, and Server-First no longer collides with a bulk migration","released":"2026-09-15 11:08"}
+{"version":"2.14.8","note":"Fixes the local-server \"nothing loads / 401\" storm — the app no longer fires data requests before you are signed in, and hydrates the moment sign-in completes","released":"2026-09-15 13:09"}

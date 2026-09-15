@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.7';
-const APP_BUILD='20260915a';
+const APP_VERSION='2.14.8';
+const APP_BUILD='20260915b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Migration hardening — see exactly which records failed, more 429 retries, and Server-First no longer collides with a bulk migration';
+const APP_RELEASE_NOTE='Fixes the local-server "nothing loads / 401" storm — the app no longer fires data requests before you are signed in, and hydrates the moment sign-in completes';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.8',date:'2026-09-15',type:'patch',notes:[
+    'Local Server: fixed the "nothing loads from the server / 401 storm" reported right after opening the app. The cause was the app firing /api requests before Microsoft sign-in had finished wiring the account — those requests went out with no Authorization header, so the server rejected every one ("missing bearer token") and Server-First repeated it for all 33 entities each cycle. The API client now refuses to send a data request until a real token exists, instead of sending a header-less one.',
+    'Local Server: Server-First now hydrates the moment sign-in completes — as soon as a token becomes available it pulls once, so you no longer wait up to 3 minutes (or a manual reload) for data to appear after logging in.',
+  ]},
   {version:'2.14.7',date:'2026-09-15',type:'patch',notes:[
     'Migration: "Migrate everything to server" now lists exactly which records failed — the summary shows a "show which N" link, and the full list (entity + id) is logged to the console and kept in window._migrateFailures. Re-running retries them (idempotent).',
     'Migration: each record now retries up to 3 times with growing back-off on a 429, so brief rate-limit collisions no longer cost a record.',

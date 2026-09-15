@@ -37,6 +37,11 @@ const Api = (function () {
   async function _fetch(path, init = {}) {
     if (!_cfg.baseUrl) throw new Error('Api not configured — call Api.configure first');
     const token = typeof _cfg.getToken === 'function' ? await _cfg.getToken() : null;
+    // No token yet (sign-in not finished, or MSAL account not wired) — DON'T fire a
+    // bare request. The server would just 401 "missing bearer token", and Server-First
+    // would repeat that for all 33 entities on every cycle = a 401 storm. Throwing here
+    // makes callers treat it as "not ready", so they quietly retry once a token exists.
+    if (!token) throw new Error('Api not ready: no auth token yet (sign in to the local server first)');
     const headers = Object.assign(
       { 'Content-Type': 'application/json' },
       init.headers || {},
@@ -100,7 +105,14 @@ const Api = (function () {
 
   function lastHealthyAt() { return _lastHealthy; }
 
-  return { configure, enabled, health, list, get, put, remove, lastHealthyAt };
+  // Resolve the current auth token (or '' if none). Lets callers gate on genuine
+  // readiness — a configured Api isn't the same as a signed-in one.
+  async function _tokenNow() {
+    try { return (typeof _cfg.getToken === 'function' ? await _cfg.getToken() : '') || ''; }
+    catch (e) { return ''; }
+  }
+
+  return { configure, enabled, health, list, get, put, remove, lastHealthyAt, _tokenNow };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Api;
