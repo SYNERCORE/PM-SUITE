@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.6';
-const APP_BUILD='20260914b';
+const APP_VERSION='2.14.7';
+const APP_BUILD='20260915a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='One-click "Migrate everything to server" — uploads all data to the LAN server one record at a time (no SharePoint bulk hit)';
+const APP_RELEASE_NOTE='Migration hardening — see exactly which records failed, more 429 retries, and Server-First no longer collides with a bulk migration';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.7',date:'2026-09-15',type:'patch',notes:[
+    'Migration: "Migrate everything to server" now lists exactly which records failed — the summary shows a "show which N" link, and the full list (entity + id) is logged to the console and kept in window._migrateFailures. Re-running retries them (idempotent).',
+    'Migration: each record now retries up to 3 times with growing back-off on a 429, so brief rate-limit collisions no longer cost a record.',
+    'Server-First: the background push is now paced and skips entirely while a bulk migration is running — this was the cause of the 429 storm when migrating a large freshly-imported dataset with Server-First left on.',
+  ]},
   {version:'2.14.6',date:'2026-09-14',type:'feat',notes:[
     'Local Server: new "Migrate everything to server" button (Settings → Local Server → Entity Routing) uploads all local data to the LAN server one record at a time — paced (~500/min) with automatic back-off if the server rate-limits, and a live progress line + Stop button. It talks only to the LAN server, so a full migration never fires a SharePoint bulk request. Safe to re-run: the server upserts by id.',
     'Action Items: the per-project "N overdue" badge no longer counts Closed actions — a closed item past its due date is done, not overdue (matches the Overdue KPI). Closed rows also no longer show their due date in amber.',

@@ -239,28 +239,31 @@ const Store = (function () {
     _migrating = true;
     const arr = _arr(entity).filter(r => r && r.id);
     let migrated = 0, failed = 0;
-    const PACE_MS = 120;         // ~500 req/min — under the 600/min server cap
+    const failures = [];          // { id, error } for each record that never made it
+    const PACE_MS = 120;          // ~500 req/min — under the 600/min server cap
     const RETRY_BACKOFF_MS = 3000;
     const _sleep = ms => new Promise(r => setTimeout(r, ms));
     for (const rec of arr) {
-      let ok = false;
-      try { await Api.put(entity, rec.id, rec); ok = true; }
-      catch (e) {
-        // On 429, wait then retry once
-        if (/\b429\b/.test(e.message || '')) {
-          await _sleep(RETRY_BACKOFF_MS);
-          try { await Api.put(entity, rec.id, rec); ok = true; }
-          catch (e2) { /* second failure — count below */ }
+      let ok = false, lastErr = '';
+      // On 429, back off and retry up to 3 times with growing delay — small
+      // rate-limit collisions shouldn't cost a record.
+      for (let attempt = 0; attempt < 4 && !ok; attempt++) {
+        try { await Api.put(entity, rec.id, rec); ok = true; }
+        catch (e) {
+          lastErr = e && e.message ? e.message : String(e);
+          if (/\b429\b/.test(lastErr) && attempt < 3) { await _sleep(RETRY_BACKOFF_MS * (attempt + 1)); }
+          else break; // non-429, or out of retries
         }
       }
-      if (ok) migrated++; else failed++;
+      if (ok) migrated++; else { failed++; failures.push({ id: rec.id, error: lastErr }); }
       if (typeof progressCb === 'function') progressCb({ total: arr.length, migrated, failed });
       await _sleep(PACE_MS);
     }
     if (typeof Audit !== 'undefined') Audit.record('sync',
       'Migrated ' + entity + ' to server', { total: arr.length, migrated, failed });
+    if (failures.length) console.warn('[Migrate] ' + entity + ' — ' + failures.length + ' failed:', failures);
     _migrating = false;
-    return { total: arr.length, migrated, failed };
+    return { total: arr.length, migrated, failed, failures };
   }
 
   return { list, get, put, remove, subscribe, tx, hydrate, migrate, migrating, _generateId };

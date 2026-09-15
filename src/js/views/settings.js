@@ -1438,6 +1438,7 @@ async function _apiMigrateAll() {
   if (stopBtn) stopBtn.hidden = false;
 
   let doneRecords = 0, okTotal = 0, failTotal = 0;
+  const allFailures = [];  // { entity, id, error } across every entity
   const started = Date.now();
   for (const [ent, label] of ents) {
     if (_migrateAllCancel) break;
@@ -1448,8 +1449,10 @@ async function _apiMigrateAll() {
         if (bar) bar.textContent = `${label}: ${p.migrated}/${p.total}  ·  overall ${doneRecords + p.migrated}/${grand}${(failTotal + p.failed) ? ` (${failTotal + p.failed} failed)` : ''}`;
       });
       okTotal += res.migrated; failTotal += res.failed; doneRecords += res.total;
+      (res.failures || []).forEach(f => allFailures.push({ entity: ent, id: f.id, error: f.error }));
     } catch (e) {
       failTotal += cnt; doneRecords += cnt;
+      allFailures.push({ entity: ent, id: '(whole entity)', error: e.message });
       if (bar) { bar.style.color = 'var(--accent-red)'; bar.textContent = `${label}: failed — ${e.message}`; }
     }
   }
@@ -1457,11 +1460,30 @@ async function _apiMigrateAll() {
   if (btn) btn.disabled = false;
   if (stopBtn) stopBtn.hidden = true;
   const secs = Math.round((Date.now() - started) / 1000);
+  // Make the failures inspectable: stash on window and log a table so the user
+  // can see exactly which records (entity + id) didn't make it.
+  if (allFailures.length) {
+    window._migrateFailures = allFailures;
+    try { console.warn('[Migrate] ' + allFailures.length + ' record(s) failed:'); console.table(allFailures); } catch (_) {}
+  } else { window._migrateFailures = []; }
   const msg = _migrateAllCancel
     ? `Stopped — ${okTotal}/${grand} migrated so far${failTotal ? `, ${failTotal} failed` : ''}`
     : `Done — ${okTotal}/${grand} migrated${failTotal ? `, ${failTotal} failed` : ''} in ${secs}s`;
-  if (bar) { bar.style.color = failTotal ? 'var(--accent-amber)' : 'var(--accent-green)'; bar.textContent = '✓ ' + msg; }
+  if (bar) {
+    bar.style.color = failTotal ? 'var(--accent-amber)' : 'var(--accent-green)';
+    bar.innerHTML = '✓ ' + msg + (failTotal
+      ? ` — <a href="#" onclick="_showMigrateFailures();return false" style="color:var(--accent-amber);text-decoration:underline">show which ${failTotal}</a>`
+      : '');
+  }
   showToast(msg, failTotal ? 'warning' : 'success', 6000);
+}
+// List the failed records (entity + id) from the last "Migrate everything" run.
+function _showMigrateFailures() {
+  const f = window._migrateFailures || [];
+  if (!f.length) { showToast('No recorded migration failures', 'info', 3000); return; }
+  const lines = f.map(x => `${x.entity} / ${x.id}${x.error ? '  — ' + String(x.error).slice(0, 80) : ''}`);
+  try { console.table(f); } catch (_) {}
+  alert(`These ${f.length} record(s) did not migrate:\n\n` + lines.join('\n') + `\n\nRe-run "Migrate everything" (with Server-First OFF) to retry them — it's safe, the server upserts by id.`);
 }
 function _apiMigrateAllStop() {
   _migrateAllCancel = true;

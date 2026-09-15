@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.6';
-const APP_BUILD='20260914b';
+const APP_VERSION='2.14.7';
+const APP_BUILD='20260915a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='One-click "Migrate everything to server" — uploads all data to the LAN server one record at a time (no SharePoint bulk hit)';
+const APP_RELEASE_NOTE='Migration hardening — see exactly which records failed, more 429 retries, and Server-First no longer collides with a bulk migration';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.7',date:'2026-09-15',type:'patch',notes:[
+    'Migration: "Migrate everything to server" now lists exactly which records failed — the summary shows a "show which N" link, and the full list (entity + id) is logged to the console and kept in window._migrateFailures. Re-running retries them (idempotent).',
+    'Migration: each record now retries up to 3 times with growing back-off on a 429, so brief rate-limit collisions no longer cost a record.',
+    'Server-First: the background push is now paced and skips entirely while a bulk migration is running — this was the cause of the 429 storm when migrating a large freshly-imported dataset with Server-First left on.',
+  ]},
   {version:'2.14.6',date:'2026-09-14',type:'feat',notes:[
     'Local Server: new "Migrate everything to server" button (Settings → Local Server → Entity Routing) uploads all local data to the LAN server one record at a time — paced (~500/min) with automatic back-off if the server rate-limits, and a live progress line + Stop button. It talks only to the LAN server, so a full migration never fires a SharePoint bulk request. Safe to re-run: the server upserts by id.',
     'Action Items: the per-project "N overdue" badge no longer counts Closed actions — a closed item past its due date is done, not overdue (matches the Overdue KPI). Closed rows also no longer show their due date in amber.',
@@ -2383,28 +2388,31 @@ const Store = (function () {
     _migrating = true;
     const arr = _arr(entity).filter(r => r && r.id);
     let migrated = 0, failed = 0;
-    const PACE_MS = 120;         // ~500 req/min — under the 600/min server cap
+    const failures = [];          // { id, error } for each record that never made it
+    const PACE_MS = 120;          // ~500 req/min — under the 600/min server cap
     const RETRY_BACKOFF_MS = 3000;
     const _sleep = ms => new Promise(r => setTimeout(r, ms));
     for (const rec of arr) {
-      let ok = false;
-      try { await Api.put(entity, rec.id, rec); ok = true; }
-      catch (e) {
-        // On 429, wait then retry once
-        if (/\b429\b/.test(e.message || '')) {
-          await _sleep(RETRY_BACKOFF_MS);
-          try { await Api.put(entity, rec.id, rec); ok = true; }
-          catch (e2) { /* second failure — count below */ }
+      let ok = false, lastErr = '';
+      // On 429, back off and retry up to 3 times with growing delay — small
+      // rate-limit collisions shouldn't cost a record.
+      for (let attempt = 0; attempt < 4 && !ok; attempt++) {
+        try { await Api.put(entity, rec.id, rec); ok = true; }
+        catch (e) {
+          lastErr = e && e.message ? e.message : String(e);
+          if (/\b429\b/.test(lastErr) && attempt < 3) { await _sleep(RETRY_BACKOFF_MS * (attempt + 1)); }
+          else break; // non-429, or out of retries
         }
       }
-      if (ok) migrated++; else failed++;
+      if (ok) migrated++; else { failed++; failures.push({ id: rec.id, error: lastErr }); }
       if (typeof progressCb === 'function') progressCb({ total: arr.length, migrated, failed });
       await _sleep(PACE_MS);
     }
     if (typeof Audit !== 'undefined') Audit.record('sync',
       'Migrated ' + entity + ' to server', { total: arr.length, migrated, failed });
+    if (failures.length) console.warn('[Migrate] ' + entity + ' — ' + failures.length + ' failed:', failures);
     _migrating = false;
-    return { total: arr.length, migrated, failed };
+    return { total: arr.length, migrated, failed, failures };
   }
 
   return { list, get, put, remove, subscribe, tx, hydrate, migrate, migrating, _generateId };
@@ -9778,7 +9786,9 @@ async function spDeleteFormTemplate(spId) {
   const PUSH_DEBOUNCE_MS = 1500;            // coalesce rapid saves into one push
   const SP_BACKUP_MS     = 24 * 60 * 60 * 1000; // throttle SharePoint to daily
   const PAGE             = 500;             // server list page size
+  const PUSH_PACE_MS     = 60;              // gap between record PUTs so a big dirty batch can't flood the server
   const LS_LAST_SP       = 'pm_sf_last_sp_backup';
+  const _sfSleep = ms => new Promise(r => setTimeout(r, ms));
 
   let _sig      = Object.create(null);  // entity -> Map(id -> JSON signature of last-known-synced record)
   let _lastPull = Object.create(null);  // entity -> ISO string of last successful delta pull
@@ -9808,15 +9818,15 @@ async function spDeleteFormTemplate(spId) {
       const id = String(r.id), s = JSON.stringify(r);
       cur.set(id, s);
       if (prev.get(id) !== s) {
-        try { await Api.put(ent, r.id, r); n++; }
-        catch (e) { ok = false; cur.set(id, prev.get(id)); } // keep old sig → retried next cycle
+        try { await Api.put(ent, r.id, r); n++; await _sfSleep(PUSH_PACE_MS); }
+        catch (e) { ok = false; cur.set(id, prev.get(id)); if (/\b429\b/.test(e.message || '')) await _sfSleep(2500); } // keep old sig → retried next cycle
       }
     }
     // Deletions: ids we had synced before that are no longer present locally.
     for (const id of prev.keys()) {
       if (!cur.has(id)) {
-        try { await Api.remove(ent, id); n++; }
-        catch (e) { ok = false; cur.set(id, prev.get(id)); }
+        try { await Api.remove(ent, id); n++; await _sfSleep(PUSH_PACE_MS); }
+        catch (e) { ok = false; cur.set(id, prev.get(id)); if (/\b429\b/.test(e.message || '')) await _sfSleep(2500); }
       }
     }
     _sig[ent] = cur;
@@ -9825,6 +9835,9 @@ async function spDeleteFormTemplate(spId) {
 
   async function pushDirty() {
     if (!on() || !_apiReady()) return { pushed: 0, failed: [] };
+    // Never fight an in-progress bulk migration — it paces itself; our push would
+    // collide on the rate limit and cause 429 storms.
+    if (typeof Store !== 'undefined' && Store.migrating && Store.migrating()) return { pushed: 0, failed: [] };
     let pushed = 0; const failed = [];
     for (const ent of ENTITIES) {
       try { const r = await _pushEntity(ent); pushed += r.n; if (!r.ok) failed.push(ent); }
@@ -26640,6 +26653,7 @@ async function _apiMigrateAll() {
   if (stopBtn) stopBtn.hidden = false;
 
   let doneRecords = 0, okTotal = 0, failTotal = 0;
+  const allFailures = [];  // { entity, id, error } across every entity
   const started = Date.now();
   for (const [ent, label] of ents) {
     if (_migrateAllCancel) break;
@@ -26650,8 +26664,10 @@ async function _apiMigrateAll() {
         if (bar) bar.textContent = `${label}: ${p.migrated}/${p.total}  ·  overall ${doneRecords + p.migrated}/${grand}${(failTotal + p.failed) ? ` (${failTotal + p.failed} failed)` : ''}`;
       });
       okTotal += res.migrated; failTotal += res.failed; doneRecords += res.total;
+      (res.failures || []).forEach(f => allFailures.push({ entity: ent, id: f.id, error: f.error }));
     } catch (e) {
       failTotal += cnt; doneRecords += cnt;
+      allFailures.push({ entity: ent, id: '(whole entity)', error: e.message });
       if (bar) { bar.style.color = 'var(--accent-red)'; bar.textContent = `${label}: failed — ${e.message}`; }
     }
   }
@@ -26659,11 +26675,30 @@ async function _apiMigrateAll() {
   if (btn) btn.disabled = false;
   if (stopBtn) stopBtn.hidden = true;
   const secs = Math.round((Date.now() - started) / 1000);
+  // Make the failures inspectable: stash on window and log a table so the user
+  // can see exactly which records (entity + id) didn't make it.
+  if (allFailures.length) {
+    window._migrateFailures = allFailures;
+    try { console.warn('[Migrate] ' + allFailures.length + ' record(s) failed:'); console.table(allFailures); } catch (_) {}
+  } else { window._migrateFailures = []; }
   const msg = _migrateAllCancel
     ? `Stopped — ${okTotal}/${grand} migrated so far${failTotal ? `, ${failTotal} failed` : ''}`
     : `Done — ${okTotal}/${grand} migrated${failTotal ? `, ${failTotal} failed` : ''} in ${secs}s`;
-  if (bar) { bar.style.color = failTotal ? 'var(--accent-amber)' : 'var(--accent-green)'; bar.textContent = '✓ ' + msg; }
+  if (bar) {
+    bar.style.color = failTotal ? 'var(--accent-amber)' : 'var(--accent-green)';
+    bar.innerHTML = '✓ ' + msg + (failTotal
+      ? ` — <a href="#" onclick="_showMigrateFailures();return false" style="color:var(--accent-amber);text-decoration:underline">show which ${failTotal}</a>`
+      : '');
+  }
   showToast(msg, failTotal ? 'warning' : 'success', 6000);
+}
+// List the failed records (entity + id) from the last "Migrate everything" run.
+function _showMigrateFailures() {
+  const f = window._migrateFailures || [];
+  if (!f.length) { showToast('No recorded migration failures', 'info', 3000); return; }
+  const lines = f.map(x => `${x.entity} / ${x.id}${x.error ? '  — ' + String(x.error).slice(0, 80) : ''}`);
+  try { console.table(f); } catch (_) {}
+  alert(`These ${f.length} record(s) did not migrate:\n\n` + lines.join('\n') + `\n\nRe-run "Migrate everything" (with Server-First OFF) to retry them — it's safe, the server upserts by id.`);
 }
 function _apiMigrateAllStop() {
   _migrateAllCancel = true;

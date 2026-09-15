@@ -1,1 +1,1 @@
-{"version":"2.14.6","note":"One-click \"Migrate everything to server\" — uploads all data to the LAN server one record at a time (no SharePoint bulk hit)","released":"2026-09-14 16:05"}
+{"version":"2.14.7","note":"Migration hardening — see exactly which records failed, more 429 retries, and Server-First no longer collides with a bulk migration","released":"2026-09-15 11:08"}

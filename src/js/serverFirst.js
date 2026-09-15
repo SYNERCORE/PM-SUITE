@@ -32,7 +32,9 @@
   const PUSH_DEBOUNCE_MS = 1500;            // coalesce rapid saves into one push
   const SP_BACKUP_MS     = 24 * 60 * 60 * 1000; // throttle SharePoint to daily
   const PAGE             = 500;             // server list page size
+  const PUSH_PACE_MS     = 60;              // gap between record PUTs so a big dirty batch can't flood the server
   const LS_LAST_SP       = 'pm_sf_last_sp_backup';
+  const _sfSleep = ms => new Promise(r => setTimeout(r, ms));
 
   let _sig      = Object.create(null);  // entity -> Map(id -> JSON signature of last-known-synced record)
   let _lastPull = Object.create(null);  // entity -> ISO string of last successful delta pull
@@ -62,15 +64,15 @@
       const id = String(r.id), s = JSON.stringify(r);
       cur.set(id, s);
       if (prev.get(id) !== s) {
-        try { await Api.put(ent, r.id, r); n++; }
-        catch (e) { ok = false; cur.set(id, prev.get(id)); } // keep old sig → retried next cycle
+        try { await Api.put(ent, r.id, r); n++; await _sfSleep(PUSH_PACE_MS); }
+        catch (e) { ok = false; cur.set(id, prev.get(id)); if (/\b429\b/.test(e.message || '')) await _sfSleep(2500); } // keep old sig → retried next cycle
       }
     }
     // Deletions: ids we had synced before that are no longer present locally.
     for (const id of prev.keys()) {
       if (!cur.has(id)) {
-        try { await Api.remove(ent, id); n++; }
-        catch (e) { ok = false; cur.set(id, prev.get(id)); }
+        try { await Api.remove(ent, id); n++; await _sfSleep(PUSH_PACE_MS); }
+        catch (e) { ok = false; cur.set(id, prev.get(id)); if (/\b429\b/.test(e.message || '')) await _sfSleep(2500); }
       }
     }
     _sig[ent] = cur;
@@ -79,6 +81,9 @@
 
   async function pushDirty() {
     if (!on() || !_apiReady()) return { pushed: 0, failed: [] };
+    // Never fight an in-progress bulk migration — it paces itself; our push would
+    // collide on the rate limit and cause 429 storms.
+    if (typeof Store !== 'undefined' && Store.migrating && Store.migrating()) return { pushed: 0, failed: [] };
     let pushed = 0; const failed = [];
     for (const ent of ENTITIES) {
       try { const r = await _pushEntity(ent); pushed += r.n; if (!r.ok) failed.push(ent); }
