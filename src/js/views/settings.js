@@ -304,6 +304,12 @@ ${renderSpPanel()}
           <span style="font-size:10px;color:var(--text-muted)">Uploads every record one-by-one (paced ~500/min, retries on rate-limit). <strong>LAN only — never touches SharePoint.</strong> Safe to re-run.</span>
         </div>
         <div id="apiMigrateAllStatus" style="font-size:11px;color:var(--text-muted);margin-top:6px;min-height:14px"></div>
+        <!-- One-click full pull: seed a fresh/empty device from the server (inverse of migrate-all) -->
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px dashed rgba(56,139,253,.25)">
+          <button class="btn btn-secondary btn-sm" id="apiPullAllBtn" onclick="_apiPullAll()"><i class="fas fa-cloud-download-alt"></i> Pull everything from server</button>
+          <span style="font-size:10px;color:var(--text-muted)">Downloads every entity from the server into this device — use once to seed a new or empty device. <strong>Replaces local copies with the server's.</strong></span>
+        </div>
+        <div id="apiPullAllStatus" style="font-size:11px;color:var(--text-muted);margin-top:6px;min-height:14px"></div>
       </div>
       <label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 0">
         <input type="checkbox" id="apiEnt_warehouseItems" ${((_dev.apiEntities||[]).includes('warehouseItems'))?'checked':''} onchange="_apiToggleEntity('warehouseItems',this.checked)">
@@ -1503,6 +1509,51 @@ async function _apiHydrateEntity(entity) {
     if (el) { el.style.color = 'var(--accent-red)'; el.textContent = 'Failed: ' + e.message; }
     showToast('Pull failed: ' + e.message, 'error', 5000);
   }
+}
+
+// One-click full pull — seed a fresh/empty device from the server. The inverse of
+// _apiMigrateAll: pulls every entity down (Store.hydrate) instead of pushing up. Talks
+// only to the LAN server. Safe on an empty device; on a populated one it replaces each
+// entity's local copy with the server's, so it confirms first.
+async function _apiPullAll() {
+  if (typeof Store === 'undefined' || !Store.hydrate) { showToast('Store engine not loaded', 'error'); return; }
+  if (typeof Api === 'undefined' || !Api.enabled || !Api.enabled()) {
+    showToast('Connect the Local Server first — set its URL and Test above.', 'error', 6000); return;
+  }
+  // Refuse to run without a real token, so we surface "sign in first" instead of a wall of 401s.
+  let tok = ''; try { tok = Api._tokenNow ? await Api._tokenNow() : 'x'; } catch (_) {}
+  if (!tok) { showToast('Not signed in yet — sign in to the server, then try again.', 'error', 6000); return; }
+
+  const ents = [
+    ['warehouseItems','Warehouse Items'],['projects','Projects'],['tasks','Tasks'],['resources','Resources'],
+    ['procurement','Procurement'],['costs','Costs'],['qaqc','QA/QC'],['risks','Risks'],['actions','Action Items'],
+    ['documents','Documents'],['stockTransactions','Stock Transactions'],['resourceAllocations','Resource Allocations'],
+    ['resourceUsageLogs','Usage Logs'],['manpower','Manpower'],['procurementLogs','Procurement Logs'],
+    ['issuanceRequests','Issuance Requests'],['equipment','Equipment'],['tools','Tools'],['vehicles','Vehicles'],
+    ['consumables','Consumables'],['materials','Materials'],['warehouseLocations','Warehouse Locations'],
+    ['thirdParty','Third Party'],['trades','Trades'],['businessUnits','Business Units'],['projectTeam','Project Team'],
+    ['dailyMeetingLogs','Daily Meeting Logs'],['progress','Progress'],['kpiData','KPI Data'],['calendar','Calendar'],
+    ['assetHistory','Asset History'],['assetUtilization','Asset Utilization'],['libraryDocs','Library Docs']
+  ];
+  const localTotal = ents.reduce((s, [e]) => { try { return s + (AppState.data[e] || []).length; } catch (_) { return s; } }, 0);
+  if (!confirm(`Pull ALL data from the server into this device?\n\n${localTotal ? `This replaces this device's ${localTotal} local record(s) with the server's copy.` : 'This device is empty — it will be seeded from the server.'}\n\nLAN only. Use this to set up a new or empty device.`)) return;
+
+  const btn = document.getElementById('apiPullAllBtn');
+  const bar = document.getElementById('apiPullAllStatus');
+  if (btn) btn.disabled = true;
+  let grand = 0, failed = 0; const started = Date.now();
+  for (const [ent, label] of ents) {
+    if (bar) bar.textContent = `Pulling ${label}…  ·  ${grand} records so far`;
+    try { const n = await Store.hydrate(ent); grand += n; }
+    catch (e) { failed++; if (bar) { bar.style.color = 'var(--accent-amber)'; bar.textContent = `${label} failed — ${e.message}`; } }
+  }
+  try { AppState.save(); } catch (_) {}
+  try { if (typeof renderPage === 'function') renderPage(AppState.currentPage || 'dashboard'); } catch (_) {}
+  if (btn) btn.disabled = false;
+  const secs = Math.round((Date.now() - started) / 1000);
+  const msg = `Done — pulled ${grand} record(s) from the server${failed ? `, ${failed} entit${failed === 1 ? 'y' : 'ies'} failed` : ''} in ${secs}s`;
+  if (bar) { bar.style.color = failed ? 'var(--accent-amber)' : 'var(--accent-green)'; bar.textContent = '✓ ' + msg; }
+  showToast(msg, failed ? 'warning' : 'success', 6000);
 }
 
 // Auto-configure Api on app boot from persisted setting.

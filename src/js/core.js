@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.8';
-const APP_BUILD='20260915b';
+const APP_VERSION='2.14.9';
+const APP_BUILD='20260915c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Fixes the local-server "nothing loads / 401" storm — the app no longer fires data requests before you are signed in, and hydrates the moment sign-in completes';
+const APP_RELEASE_NOTE='New "Pull everything from server" button seeds a fresh/empty device in one click (inverse of Migrate everything), on top of the 401-storm fix';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.9',date:'2026-09-15',type:'feat',notes:[
+    'Local Server: new "Pull everything from server" button (Settings → Local Server → Entity Routing, next to "Migrate everything"). One click downloads every entity from the server into this device — the inverse of migrate-all, for seeding a new or empty device without pulling each of the 33 entities by hand. Refuses to run until you are signed in (so you get a clear "sign in first" instead of errors), shows live progress, and re-renders the app when done.',
+  ]},
   {version:'2.14.8',date:'2026-09-15',type:'patch',notes:[
     'Local Server: fixed the "nothing loads from the server / 401 storm" reported right after opening the app. The cause was the app firing /api requests before Microsoft sign-in had finished wiring the account — those requests went out with no Authorization header, so the server rejected every one ("missing bearer token") and Server-First repeated it for all 33 entities each cycle. The API client now refuses to send a data request until a real token exists, instead of sending a header-less one.',
     'Local Server: Server-First now hydrates the moment sign-in completes — as soon as a token becomes available it pulls once, so you no longer wait up to 3 minutes (or a manual reload) for data to appear after logging in.',

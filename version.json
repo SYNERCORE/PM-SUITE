@@ -1,1 +1,1 @@
-{"version":"2.14.8","note":"Fixes the local-server \"nothing loads / 401\" storm — the app no longer fires data requests before you are signed in, and hydrates the moment sign-in completes","released":"2026-09-15 13:09"}
+{"version":"2.14.9","note":"New \"Pull everything from server\" button seeds a fresh/empty device in one click (inverse of Migrate everything), on top of the 401-storm fix","released":"2026-09-15 13:28"}
