@@ -34,7 +34,30 @@
   const PAGE             = 500;             // server list page size
   const PUSH_PACE_MS     = 60;              // gap between record PUTs so a big dirty batch can't flood the server
   const LS_LAST_SP       = 'pm_sf_last_sp_backup';
+  const LS_DEVICE_ID     = 'pm_sf_device_id';
   const _sfSleep = ms => new Promise(r => setTimeout(r, ms));
+
+  // ── SharePoint reconciler (distributed, admin-coordinated via a server lease) ──
+  // Any admin device that is on the LAN and has internet keeps Postgres and the
+  // SharePoint mirror converged so off-site (SP-reading) users see fresh data.
+  // A single-row server lease (deploy/sql/010-sync-lease.sql) guarantees exactly
+  // one device reconciles at a time, with automatic failover when a holder goes
+  // away. See /api/sync-lease/* in deploy/server/server.js.
+  const RECONCILE_MS   = 15 * 60 * 1000;    // reconcile SP at most this often (last_sync_at is global)
+  const LEASE_TTL_SEC  = 90;                // how long the server grants the lease
+  const LEASE_RENEW_MS = 30 * 1000;         // renew mid-sync so a long push can't outlive the lease
+  let _reconciling = false;                 // this device is mid-reconcile
+  let _leaseHeld = false;                    // this device currently holds the lease
+  let _leaseRenewTimer = null;
+
+  // Stable per-device id so the server can tell "still me (renew)" from "someone else".
+  function _deviceId() {
+    try {
+      let id = localStorage.getItem(LS_DEVICE_ID);
+      if (!id) { id = 'dev-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36); localStorage.setItem(LS_DEVICE_ID, id); }
+      return id;
+    } catch (e) { return 'dev-ephemeral'; }
+  }
 
   let _sig      = Object.create(null);  // entity -> Map(id -> JSON signature of last-known-synced record)
   let _lastPull = Object.create(null);  // entity -> ISO string of last successful delta pull
@@ -166,20 +189,68 @@
         } catch (e) { /* leave _lastPull as-is → this entity retries next cycle */ }
       }
       if (touched) { AppState.save(); _scheduleRerender(); }
-      _maybeSharePointBackup();
+      _maybeReconcile().catch(() => {}); // fire-and-forget; has its own reentrancy + lease guard
     } finally { _busy = false; }
   }
 
-  // ── SharePoint: at most one offsite backup per day, on top of nightly pg_dump ──
-  function _maybeSharePointBackup() {
-    if (typeof spPushData !== 'function') return;
-    if (typeof _spConnected === 'undefined' || !_spConnected) return; // only if SP is set up
-    let last = 0; try { last = +localStorage.getItem(LS_LAST_SP) || 0; } catch (e) {}
-    if (Date.now() - last < SP_BACKUP_MS) return;
-    try { localStorage.setItem(LS_LAST_SP, String(Date.now())); } catch (e) {}
-    try { Promise.resolve(spPushData(true)).catch(() => {}); } catch (e) {}
+  // ── SharePoint reconciler: lease-coordinated, admins only ────────────────
+  // Eligible = Server-First ON + Api ready + this user is an Admin + online +
+  // SharePoint is set up here. Server-side, the lease endpoints ALSO enforce
+  // admin, so a non-admin client can never reconcile even if this check is wrong.
+  function _reconcilerEligible() {
+    if (!on() || !_apiReady()) return false;
+    if (typeof spPushData !== 'function') return false;
+    if (typeof _spConnected === 'undefined' || !_spConnected) return false; // SP must be set up here
+    try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return false; } catch (e) {}
+    try { return typeof isAdminUser === 'function' && isAdminUser(); } catch (e) { return false; }
   }
-  // Manual "Back up to SharePoint now" (Settings button) — bypasses the daily gate.
+
+  async function _leaseAcquire() {
+    // Endpoint may not exist yet (server not migrated) → _fetch throws → treat as "no lease".
+    try { return await Api.post('/api/sync-lease/acquire', { deviceId: _deviceId(), ttlSeconds: LEASE_TTL_SEC }); }
+    catch (e) { return null; }
+  }
+  async function _leaseRelease() {
+    clearInterval(_leaseRenewTimer); _leaseRenewTimer = null;
+    if (!_leaseHeld) return;
+    _leaseHeld = false;
+    try { await Api.post('/api/sync-lease/release', { deviceId: _deviceId() }); } catch (e) {}
+  }
+
+  // Runs at the tail of each LAN cycle (~3 min). Grabs the lease; if a reconcile
+  // is actually due (>= RECONCILE_MS since ANY admin last completed one), runs the
+  // paced two-way SharePoint sync (v2.14.13) and stamps completion server-side.
+  async function _maybeReconcile() {
+    if (!_reconcilerEligible()) { if (_leaseHeld) await _leaseRelease(); return; }
+    if (_reconciling) return;              // already working
+    if (_editing()) return;                // never reconcile over an open form
+
+    const got = await _leaseAcquire();
+    if (!got || !got.granted) return;      // another admin holds it, or no lease endpoint
+    _leaseHeld = true;
+
+    // Due? last_sync_at is global — another admin's recent completion counts.
+    const last = got.lastSyncAt ? Date.parse(got.lastSyncAt) : 0;
+    if (last && (Date.now() - last) < RECONCILE_MS) { await _leaseRelease(); return; }
+
+    _reconciling = true;
+    // Renew mid-sync so a long push (thousands of records) can't let the lease expire.
+    clearInterval(_leaseRenewTimer);
+    _leaseRenewTimer = setInterval(() => { _leaseAcquire().catch(() => {}); }, LEASE_RENEW_MS);
+    try {
+      await Promise.resolve(spPushData(true));   // silent, paced, two-way (v2.14.13)
+      try { await Api.post('/api/sync-lease/synced', { deviceId: _deviceId() }); } catch (e) {}
+      try { localStorage.setItem(LS_LAST_SP, String(Date.now())); } catch (e) {}
+    } catch (e) {
+      try { console.warn('[Server-First] SharePoint reconcile failed:', e && e.message); } catch (e2) {}
+    } finally {
+      _reconciling = false;
+      await _leaseRelease();
+    }
+  }
+
+  // Manual "Back up to SharePoint now" (Settings button) — bypasses the lease and
+  // the due-gate. A deliberate admin action; shows the normal (non-silent) UI.
   function backupToSharePointNow() {
     if (typeof spPushData !== 'function') { if (typeof showToast === 'function') showToast('SharePoint not available', 'error'); return; }
     try { localStorage.setItem(LS_LAST_SP, String(Date.now())); } catch (e) {}
@@ -224,7 +295,21 @@
     _started = false;
     clearInterval(_refreshTimer); _refreshTimer = null;
     clearTimeout(_pushTimer); _pushTimer = null;
+    // Don't squat on the reconciler lease while stopped.
+    _leaseRelease().catch(() => {});
   }
+
+  // Best-effort lease release when the tab/laptop goes away, so the next eligible
+  // admin needn't wait out the TTL. This is only a fast-path nicety — if it doesn't
+  // land (unload aborts the request), the lease still frees itself when the TTL
+  // expires, so correctness never depends on it.
+  function _releaseLeaseOnUnload() {
+    if (!_leaseHeld) return;
+    _leaseHeld = false;
+    clearInterval(_leaseRenewTimer); _leaseRenewTimer = null;
+    try { Api.post('/api/sync-lease/release', { deviceId: _deviceId() }).catch(() => {}); } catch (e) {}
+  }
+  try { window.addEventListener('pagehide', _releaseLeaseOnUnload); window.addEventListener('beforeunload', _releaseLeaseOnUnload); } catch (e) {}
   function cycleNow() { return cycle(); }
 
   // Save hook: schedule a debounced push whenever the app persists data.
@@ -257,7 +342,11 @@
     isOn: on,
     status() {
       let last = 0; try { last = +localStorage.getItem(LS_LAST_SP) || 0; } catch (e) {}
-      return { on: on(), apiReady: _apiReady(), started: _started, lastSharePointBackup: last ? new Date(last).toISOString() : null };
+      return {
+        on: on(), apiReady: _apiReady(), started: _started,
+        lastSharePointBackup: last ? new Date(last).toISOString() : null,
+        reconciler: { eligible: _reconcilerEligible(), holdingLease: _leaseHeld, reconciling: _reconciling, deviceId: _deviceId() }
+      };
     }
   };
 })();

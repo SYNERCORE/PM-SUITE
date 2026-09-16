@@ -108,6 +108,17 @@ const Api = (function () {
     });
   }
 
+  // Generic POST to a non-entity server endpoint (e.g. the sync-lease routes).
+  // path is an absolute server path like '/api/sync-lease/acquire'. Returns the
+  // parsed JSON. Throws like _fetch on non-2xx — so design endpoints that have a
+  // meaningful "no" (lease not granted) to answer 200 with a body, not 4xx.
+  async function post(path, data) {
+    return _fetch(path, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    });
+  }
+
   function lastHealthyAt() { return _lastHealthy; }
 
   // Resolve the current auth token (or '' if none). Lets callers gate on genuine
@@ -117,7 +128,7 @@ const Api = (function () {
     catch (e) { return ''; }
   }
 
-  return { configure, enabled, health, list, get, put, remove, lastHealthyAt, _tokenNow };
+  return { configure, enabled, health, list, get, put, remove, post, lastHealthyAt, _tokenNow };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Api;

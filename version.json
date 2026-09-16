@@ -1,1 +1,1 @@
-{"version":"2.14.13","note":"SharePoint sync no longer storms — a big catch-up now paces itself under SharePoint’s rate limit so off-site users get a full, up-to-date copy without 429 errors","released":"2026-09-16 08:13"}
+{"version":"2.14.14","note":"SharePoint now stays in sync automatically — an admin device on the LAN with internet keeps the SharePoint copy up to date for off-site users, with exactly one device syncing at a time and automatic hand-off if it goes offline","released":"2026-09-16 08:38"}

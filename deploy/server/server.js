@@ -245,6 +245,93 @@ app.get('/api/session/whoami', async (req) => {
   return { email: req.user.email, name: req.user.name, isAdmin: !!req.user.isAdmin, viaLanPass: !!req.user.viaLanPass, exp: req.user.exp || null };
 });
 
+// ── SharePoint reconciler lease (distributed, admin-coordinated) ──────────
+// Any admin device that is on the LAN and has internet may reconcile Postgres
+// <-> SharePoint, but only ONE at a time. The server hands out a single-row
+// lease with a short TTL; the holder renews each cycle, and if it disappears
+// the lease simply expires so the next eligible device takes over. See
+// deploy/sql/010-sync-lease.sql for the rationale.
+const LEASE_ID = 'sharepoint';
+const LEASE_MAX_TTL = 300;   // clamp: never hand out a lease longer than 5 min
+const LEASE_MIN_TTL = 30;    // clamp: a lease shorter than this is pointless
+
+// acquire/renew: grant the lease to `deviceId` if it's free, expired, or already
+// ours. Atomic — the WHERE clause is the whole concurrency guard, so two admins
+// racing can never both win. Returns the current state either way.
+app.post('/api/sync-lease/acquire', async (req, reply) => {
+  if (!req.user?.isAdmin && !(await _isAdminEmail(req.user?.email)))
+    return reply.code(403).send({ error: 'admin only' });
+  const deviceId = String((req.body && req.body.deviceId) || '').trim();
+  if (!deviceId) return reply.code(400).send({ error: 'deviceId required' });
+  const ttl = Math.min(LEASE_MAX_TTL, Math.max(LEASE_MIN_TTL,
+    Number(req.body && req.body.ttlSeconds) || 90));
+  const email = req.user?.email || null;
+  try {
+    // Ensure the row exists (first run after migration, or a wiped table).
+    await pool.query(`INSERT INTO sync_lease (id) VALUES ($1) ON CONFLICT (id) DO NOTHING`, [LEASE_ID]);
+    const { rows, rowCount } = await pool.query(
+      `UPDATE sync_lease
+          SET holder = $2, holder_email = $3,
+              acquired_at = CASE WHEN holder = $2 THEN acquired_at ELSE NOW() END,
+              expires_at = NOW() + ($4 || ' seconds')::interval,
+              updated_at = NOW()
+        WHERE id = $1
+          AND (holder IS NULL OR holder = $2 OR expires_at IS NULL OR expires_at < NOW())
+        RETURNING holder, holder_email, expires_at, last_sync_at`,
+      [LEASE_ID, deviceId, email, String(ttl)]
+    );
+    if (rowCount === 1) {
+      return { granted: true, holder: deviceId, expiresAt: rows[0].expires_at, lastSyncAt: rows[0].last_sync_at };
+    }
+    // Someone else holds it — report who and when it frees.
+    const cur = await pool.query(`SELECT holder, holder_email, expires_at, last_sync_at FROM sync_lease WHERE id = $1`, [LEASE_ID]);
+    const r = cur.rows[0] || {};
+    return { granted: false, holder: r.holder || null, holderEmail: r.holder_email || null, expiresAt: r.expires_at || null, lastSyncAt: r.last_sync_at || null };
+  } catch (e) {
+    req.log.warn({ err: e.message }, 'sync-lease acquire failed');
+    return reply.code(500).send({ error: 'lease acquire failed' });
+  }
+});
+
+// synced: the holder reports a completed SharePoint reconcile. Only the current
+// holder may stamp it, so a stale device can't rewrite the clock.
+app.post('/api/sync-lease/synced', async (req, reply) => {
+  if (!req.user?.isAdmin && !(await _isAdminEmail(req.user?.email)))
+    return reply.code(403).send({ error: 'admin only' });
+  const deviceId = String((req.body && req.body.deviceId) || '').trim();
+  if (!deviceId) return reply.code(400).send({ error: 'deviceId required' });
+  try {
+    const { rows, rowCount } = await pool.query(
+      `UPDATE sync_lease SET last_sync_at = NOW(), updated_at = NOW()
+        WHERE id = $1 AND holder = $2
+        RETURNING last_sync_at`,
+      [LEASE_ID, deviceId]
+    );
+    return { ok: rowCount === 1, lastSyncAt: rows[0]?.last_sync_at || null };
+  } catch (e) {
+    req.log.warn({ err: e.message }, 'sync-lease synced failed');
+    return reply.code(500).send({ error: 'lease synced failed' });
+  }
+});
+
+// release: give up the lease early (tab closing) so the next device needn't
+// wait for the TTL. Only clears it if we actually hold it.
+app.post('/api/sync-lease/release', async (req, reply) => {
+  const deviceId = String((req.body && req.body.deviceId) || '').trim();
+  if (!deviceId) return reply.code(400).send({ error: 'deviceId required' });
+  try {
+    await pool.query(
+      `UPDATE sync_lease SET holder = NULL, holder_email = NULL, expires_at = NULL, updated_at = NOW()
+        WHERE id = $1 AND holder = $2`,
+      [LEASE_ID, deviceId]
+    );
+    return { ok: true };
+  } catch (e) {
+    req.log.warn({ err: e.message }, 'sync-lease release failed');
+    return reply.code(500).send({ error: 'lease release failed' });
+  }
+});
+
 // ── Route registration ────────────────────────────────────
 await app.register(warehouseItems, { prefix: '/api/warehouse-items' });
 await app.register(makeEntityRoutes({ table: 'projects',    entityName: 'projects',    filters: [{ query: 'status', column: 'status' }] }), { prefix: '/api/projects' });

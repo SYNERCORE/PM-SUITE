@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.13';
-const APP_BUILD='20260916a';
+const APP_VERSION='2.14.14';
+const APP_BUILD='20260916b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='SharePoint sync no longer storms — a big catch-up now paces itself under SharePoint’s rate limit so off-site users get a full, up-to-date copy without 429 errors';
+const APP_RELEASE_NOTE='SharePoint now stays in sync automatically — an admin device on the LAN with internet keeps the SharePoint copy up to date for off-site users, with exactly one device syncing at a time and automatic hand-off if it goes offline';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.14',date:'2026-09-16',type:'feat',notes:[
+    'SharePoint sync is now automatic and self-coordinating. Previously an admin had to click "Back up to SharePoint now" for off-site users (who read the app through SharePoint) to see fresh data. Now any Admin device that runs Server-First mode, is on the local network, and has internet quietly keeps the SharePoint copy converged with the server on a ~15-minute cadence. A single-row "lease" on the local server guarantees exactly ONE device syncs at a time — no two admins ever storm SharePoint or fight each other’s writes — and if that device closes the tab, sleeps, or loses internet, the lease expires and the next eligible admin takes over automatically. Non-admins and off-site users never sync (they only read), and the manual "Back up to SharePoint now" button still works for an on-demand push. Requires a one-time server update (new sync-lease table + restart); until that is applied the app simply skips auto-sync and nothing else is affected.',
+  ]},
   {version:'2.14.13',date:'2026-09-16',type:'patch',notes:[
     'SharePoint sync: fixed the "429 Too Many Requests" storm when backing up a large dataset (the per-record warehouse/consumables/transaction lists). Three causes are addressed: (1) those lists were pushed all at once in parallel — they now push one at a time; (2) individual writes had no pacing — there is now a small gap between writes; (3) a rate-limit response (429) on an update was not retried — every write now honors SharePoint’s "Retry-After" signal and backs off, and one 429 slows all writes until it clears. A big one-time catch-up now grinds through cleanly instead of erroring out, and because unchanged records are skipped, day-to-day syncs stay small and fast. This keeps off-site users (who read via SharePoint) on an up-to-date copy.',
   ]},
