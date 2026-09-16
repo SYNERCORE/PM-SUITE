@@ -4343,10 +4343,19 @@ async function m365SetAdmin(uid, isAdmin) {
     const data = await res.json();
     const item = (data.value||[]).find(i => i.fields?.UserUID === uid);
     if (!item) { showToast('User not found in the SharePoint users list', 'error'); return false; }
+    // Keep the ROLE label honest about who's an admin, without clobbering a
+    // specific role. Turning admin ON promotes a plain 'User' (or blank) to
+    // 'Admin'; turning it OFF demotes an 'Admin' back to 'User'. Any other role
+    // (e.g. 'Manager') is left as-is — that person keeps their title and just
+    // gains/loses the admin privilege.
+    const curRole = String(item.fields?.Role || 'User').trim();
+    const fields = { IsAdmin: String(isAdmin) };
+    if (isAdmin && /^(user)?$/i.test(curRole)) fields.Role = 'Admin';
+    else if (!isAdmin && /^admin$/i.test(curRole)) fields.Role = 'User';
     const upd = await fetch(
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${item.id}`,
       { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields: { IsAdmin: String(isAdmin) }}) }
+        body: JSON.stringify({ fields }) }
     );
     if (!upd.ok) {
       const body = await upd.text().catch(() => '');

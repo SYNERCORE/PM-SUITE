@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.14';
-const APP_BUILD='20260916b';
+const APP_VERSION='2.14.15';
+const APP_BUILD='20260916c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='SharePoint now stays in sync automatically — an admin device on the LAN with internet keeps the SharePoint copy up to date for off-site users, with exactly one device syncing at a time and automatic hand-off if it goes offline';
+const APP_RELEASE_NOTE='User Management: toggling a user’s Admin switch now also updates their Role label to match, and the Department column shows correctly';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.15',date:'2026-09-16',type:'patch',notes:[
+    'User Management: the Admin toggle now keeps the ROLE label in sync. Before, switching a user to Admin only set the hidden admin flag — the "DEPT / ROLE" column kept showing "User", which was confusing even though the person really did have admin rights. Now turning Admin ON promotes a plain "User" to "Admin", and turning it OFF sets it back to "User". A specific role such as "Manager" is left untouched — that person keeps their title and simply gains or loses the admin privilege. Also fixed the Department half of that column, which was reading the wrong field name and always showed "—".',
+  ]},
   {version:'2.14.14',date:'2026-09-16',type:'feat',notes:[
     'SharePoint sync is now automatic and self-coordinating. Previously an admin had to click "Back up to SharePoint now" for off-site users (who read the app through SharePoint) to see fresh data. Now any Admin device that runs Server-First mode, is on the local network, and has internet quietly keeps the SharePoint copy converged with the server on a ~15-minute cadence. A single-row "lease" on the local server guarantees exactly ONE device syncs at a time — no two admins ever storm SharePoint or fight each other’s writes — and if that device closes the tab, sleeps, or loses internet, the lease expires and the next eligible admin takes over automatically. Non-admins and off-site users never sync (they only read), and the manual "Back up to SharePoint now" button still works for an on-demand push. Requires a one-time server update (new sync-lease table + restart); until that is applied the app simply skips auto-sync and nothing else is affected.',
   ]},

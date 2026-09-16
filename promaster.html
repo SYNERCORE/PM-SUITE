@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.14';
-const APP_BUILD='20260916b';
+const APP_VERSION='2.14.15';
+const APP_BUILD='20260916c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='SharePoint now stays in sync automatically — an admin device on the LAN with internet keeps the SharePoint copy up to date for off-site users, with exactly one device syncing at a time and automatic hand-off if it goes offline';
+const APP_RELEASE_NOTE='User Management: toggling a user’s Admin switch now also updates their Role label to match, and the Department column shows correctly';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.15',date:'2026-09-16',type:'patch',notes:[
+    'User Management: the Admin toggle now keeps the ROLE label in sync. Before, switching a user to Admin only set the hidden admin flag — the "DEPT / ROLE" column kept showing "User", which was confusing even though the person really did have admin rights. Now turning Admin ON promotes a plain "User" to "Admin", and turning it OFF sets it back to "User". A specific role such as "Manager" is left untouched — that person keeps their title and simply gains or loses the admin privilege. Also fixed the Department half of that column, which was reading the wrong field name and always showed "—".',
+  ]},
   {version:'2.14.14',date:'2026-09-16',type:'feat',notes:[
     'SharePoint sync is now automatic and self-coordinating. Previously an admin had to click "Back up to SharePoint now" for off-site users (who read the app through SharePoint) to see fresh data. Now any Admin device that runs Server-First mode, is on the local network, and has internet quietly keeps the SharePoint copy converged with the server on a ~15-minute cadence. A single-row "lease" on the local server guarantees exactly ONE device syncs at a time — no two admins ever storm SharePoint or fight each other’s writes — and if that device closes the tab, sleeps, or loses internet, the lease expires and the next eligible admin takes over automatically. Non-admins and off-site users never sync (they only read), and the manual "Back up to SharePoint now" button still works for an on-demand push. Requires a one-time server update (new sync-lease table + restart); until that is applied the app simply skips auto-sync and nothing else is affected.',
   ]},
@@ -4434,7 +4437,7 @@ function _renderUserTable(users){
           <div><div style="font-weight:600;font-size:12px">${u.name||'—'}${isMe?' <span class="badge badge-blue" style="font-size:8px">you</span>':''}</div></div>
         </div></td>
         <td style="font-size:11px">${u.email}</td>
-        <td style="font-size:11px;color:var(--text-secondary)">${u.dept||'—'} / ${u.role||'User'}</td>
+        <td style="font-size:11px;color:var(--text-secondary)">${u.department||u.dept||'—'} / ${u.role||'User'}</td>
         <td><span class="badge ${sb[u.status]||'badge-gray'}">${u.status}</span></td>
         <td style="font-size:10px;font-family:var(--font-mono)">${u.createdAt?new Date(u.createdAt).toLocaleDateString():'-'}</td>
         <td style="font-size:10px;color:var(--text-secondary)">${u.lastLogin?new Date(u.lastLogin).toLocaleDateString():'-'}</td>
@@ -9549,10 +9552,19 @@ async function m365SetAdmin(uid, isAdmin) {
     const data = await res.json();
     const item = (data.value||[]).find(i => i.fields?.UserUID === uid);
     if (!item) { showToast('User not found in the SharePoint users list', 'error'); return false; }
+    // Keep the ROLE label honest about who's an admin, without clobbering a
+    // specific role. Turning admin ON promotes a plain 'User' (or blank) to
+    // 'Admin'; turning it OFF demotes an 'Admin' back to 'User'. Any other role
+    // (e.g. 'Manager') is left as-is — that person keeps their title and just
+    // gains/loses the admin privilege.
+    const curRole = String(item.fields?.Role || 'User').trim();
+    const fields = { IsAdmin: String(isAdmin) };
+    if (isAdmin && /^(user)?$/i.test(curRole)) fields.Role = 'Admin';
+    else if (!isAdmin && /^admin$/i.test(curRole)) fields.Role = 'User';
     const upd = await fetch(
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${item.id}`,
       { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields: { IsAdmin: String(isAdmin) }}) }
+        body: JSON.stringify({ fields }) }
     );
     if (!upd.ok) {
       const body = await upd.text().catch(() => '');

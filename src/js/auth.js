@@ -556,7 +556,7 @@ function _renderUserTable(users){
           <div><div style="font-weight:600;font-size:12px">${u.name||'—'}${isMe?' <span class="badge badge-blue" style="font-size:8px">you</span>':''}</div></div>
         </div></td>
         <td style="font-size:11px">${u.email}</td>
-        <td style="font-size:11px;color:var(--text-secondary)">${u.dept||'—'} / ${u.role||'User'}</td>
+        <td style="font-size:11px;color:var(--text-secondary)">${u.department||u.dept||'—'} / ${u.role||'User'}</td>
         <td><span class="badge ${sb[u.status]||'badge-gray'}">${u.status}</span></td>
         <td style="font-size:10px;font-family:var(--font-mono)">${u.createdAt?new Date(u.createdAt).toLocaleDateString():'-'}</td>
         <td style="font-size:10px;color:var(--text-secondary)">${u.lastLogin?new Date(u.lastLogin).toLocaleDateString():'-'}</td>

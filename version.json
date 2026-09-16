@@ -1,1 +1,1 @@
-{"version":"2.14.14","note":"SharePoint now stays in sync automatically — an admin device on the LAN with internet keeps the SharePoint copy up to date for off-site users, with exactly one device syncing at a time and automatic hand-off if it goes offline","released":"2026-09-16 08:38"}
+{"version":"2.14.15","note":"User Management: toggling a user’s Admin switch now also updates their Role label to match, and the Department column shows correctly","released":"2026-09-16 09:08"}
