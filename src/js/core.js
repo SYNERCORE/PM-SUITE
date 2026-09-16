@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.12';
-const APP_BUILD='20260915f';
+const APP_VERSION='2.14.13';
+const APP_BUILD='20260916a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Fixes server-side deletes — deleting a record now actually removes it from the server (was silently rejected before, so deletions came back on the next sync)';
+const APP_RELEASE_NOTE='SharePoint sync no longer storms — a big catch-up now paces itself under SharePoint’s rate limit so off-site users get a full, up-to-date copy without 429 errors';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.13',date:'2026-09-16',type:'patch',notes:[
+    'SharePoint sync: fixed the "429 Too Many Requests" storm when backing up a large dataset (the per-record warehouse/consumables/transaction lists). Three causes are addressed: (1) those lists were pushed all at once in parallel — they now push one at a time; (2) individual writes had no pacing — there is now a small gap between writes; (3) a rate-limit response (429) on an update was not retried — every write now honors SharePoint’s "Retry-After" signal and backs off, and one 429 slows all writes until it clears. A big one-time catch-up now grinds through cleanly instead of erroring out, and because unchanged records are skipped, day-to-day syncs stay small and fast. This keeps off-site users (who read via SharePoint) on an up-to-date copy.',
+  ]},
   {version:'2.14.12',date:'2026-09-15',type:'patch',notes:[
     'Local Server: fixed server-side deletes returning "400 Bad Request". The API client sent every request — including bodyless DELETEs — with a JSON content-type header, and the server’s body parser rejects an empty body declared as JSON. The result was that deletions never reached the server: a deleted record stayed in the database and reappeared on the next sync. The client now sends the JSON content-type only when there is an actual body, so DELETE (and any future bodyless call) works. Reads and saves were never affected.',
   ]},

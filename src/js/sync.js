@@ -2464,6 +2464,38 @@ function _spParseListItems(items, idField) {
 
 // ── Push records to a sub-list (smart upsert) ───────────────
 // Compares with existing items, only writes changes
+// ── Adaptive SharePoint write pacing ──────────────────────────
+// SharePoint/Graph rate-limits sustained per-item writes. A big one-time catch-up
+// (thousands of records) storms it if we fire writes concurrently and unpaced. These
+// keep every sub-list write under the limit: a base gap between writes, plus a shared
+// "throttle window" that every write honors after any 429 — so one 429 slows all of them.
+let _spThrottleUntil = 0;
+const _SP_WRITE_GAP_MS = 120; // ~8 writes/sec steady-state — well under SP's ceiling
+async function _spPace() {
+  const now = Date.now();
+  if (_spThrottleUntil > now) await new Promise(r => setTimeout(r, _spThrottleUntil - now));
+  await new Promise(r => setTimeout(r, _SP_WRITE_GAP_MS));
+}
+// One Graph list-item write with 429 backoff that HONORS Retry-After. Returns the
+// Response (caller checks .ok/.status). On 429 it waits and retries in place, and
+// widens the shared throttle window so concurrent/subsequent writes back off too.
+async function _spGraphItemWrite(method, url, bodyStr, token, attempt = 0) {
+  const res = await fetch(url, {
+    method,
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: bodyStr,
+  });
+  if (res.status === 429 && attempt < 6) {
+    const ra = parseInt(res.headers.get('Retry-After') || '0', 10);
+    const backoff = Math.max(ra * 1000, Math.min(2000 * Math.pow(2, attempt), 30000)) + Math.random() * 500;
+    _spThrottleUntil = Math.max(_spThrottleUntil, Date.now() + backoff); // make peers pace too
+    if (typeof spSetStatus === 'function') spSetStatus('syncing', `SharePoint busy — pausing ${Math.round(backoff / 1000)}s…`);
+    await new Promise(r => setTimeout(r, backoff));
+    return _spGraphItemWrite(method, url, bodyStr, token, attempt + 1);
+  }
+  return res;
+}
+
 async function _spPushListData(token, listName, records, prevIdMap) {
   const config = Object.entries(SHIC_LIST_CONFIG).find(([n]) => n === listName);
   if (!config) throw new Error('Unknown list: ' + listName);
@@ -2515,37 +2547,22 @@ async function _spPushListData(token, listName, records, prevIdMap) {
       }
     }
 
+    await _spPace(); // stay under SharePoint's write rate limit (honors any active throttle window)
     try {
       let writeOk = false;
+      const itemsUrl = `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/items`;
+      const bodyStr = JSON.stringify(body);
       if (existingItemId) {
-        const r = await fetch(
-          `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/items/${existingItemId}`,
-          { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-        );
+        const r = await _spGraphItemWrite('PATCH', itemsUrl + '/' + existingItemId, bodyStr, token);
         if (r.ok) { updated++; writeOk = true; }
         else if (r.status === 404) {
           // Item was deleted remotely — re-create
-          const c = await fetch(
-            `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/items`,
-            { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-          );
+          const c = await _spGraphItemWrite('POST', itemsUrl, bodyStr, token);
           if (c.ok) { const created = await c.json(); prevIdMap[record.id] = created.id; added++; writeOk = true; }
         }
       } else {
-        const r = await fetch(
-          `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/items`,
-          { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-        );
+        const r = await _spGraphItemWrite('POST', itemsUrl, bodyStr, token);
         if (r.ok) { const created = await r.json(); prevIdMap[record.id] = created.id; added++; writeOk = true; }
-        else if (r.status === 429) {
-          await new Promise(r => setTimeout(r, 3000));
-          // simple retry once
-          const r2 = await fetch(
-            `https://graph.microsoft.com/v1.0/sites/${_spSiteId}/lists/${listId}/items`,
-            { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-          );
-          if (r2.ok) { const created = await r2.json(); prevIdMap[record.id] = created.id; added++; writeOk = true; }
-        }
       }
       // CRITICAL: only cache the hash when the write actually succeeded.
       // Caching on failure marks the record as "pushed" forever — it would never
@@ -2716,7 +2733,11 @@ let _spPushFailedKeys = new Set();
 async function _spPushAllSubLists(token) {
   const summary = { added: 0, updated: 0, deleted: 0, dupesRemoved: 0 };
   _spPushFailedKeys = new Set();
-  const tasks = Object.entries(SHIC_LIST_CONFIG).map(async ([listName, cfg]) => {
+  // Push lists ONE AT A TIME (not Promise.all): concurrent per-record bursts across
+  // every high-volume list are what tripped SharePoint's rate limit. Serial + paced
+  // writes grind through a big one-time catch-up cleanly; steady-state stays tiny
+  // because unchanged records are skipped by the hash cache above.
+  for (const [listName, cfg] of Object.entries(SHIC_LIST_CONFIG)) {
     try {
       const records = AppState.data[cfg.dataKey] || [];
       // ── CRITICAL: Always refresh idMap from SP before pushing ──
@@ -2738,7 +2759,7 @@ async function _spPushAllSubLists(token) {
           // The list will be retried on the next push cycle once SP is reachable.
           console.warn('[SP] Skipping push for ' + listName + ' — could not fetch existing items:', e.message);
           _spPushFailedKeys.add(cfg.dataKey); // keep _newlyCreated protection on these records
-          return; // skip this list entirely
+          continue; // skip this list, move to the next one
         }
       }
       const r = await _spPushListData(token, listName, records, _spListIdMaps[listName]);
@@ -2757,8 +2778,7 @@ async function _spPushAllSubLists(token) {
       _spPushFailedKeys.add(cfg.dataKey); // keep _newlyCreated protection on these records
       if (typeof _markListSyncFail === 'function') _markListSyncFail(listName, e.message);
     }
-  });
-  await Promise.all(tasks);
+  }
   return summary;
 }
 
