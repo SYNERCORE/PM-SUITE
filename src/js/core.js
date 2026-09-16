@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.15';
-const APP_BUILD='20260916c';
+const APP_VERSION='2.14.16';
+const APP_BUILD='20260916d';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='User Management: toggling a user’s Admin switch now also updates their Role label to match, and the Department column shows correctly';
+const APP_RELEASE_NOTE='Data safety: SharePoint sync now refuses to overwrite the shared copy from a device that has lost its local data — your SharePoint and server copies are protected from an empty-device wipe';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.16',date:'2026-09-16',type:'patch',notes:[
+    'Data safety (SharePoint): added a catastrophe guard so a device that has lost its local data can never blank the shared SharePoint copy. Background: the bulk of your data (projects, tasks, inventory, and 35+ other lists) was already protected — SharePoint deletions only ever remove records you explicitly deleted, never records simply missing from a device. But the small "main blob" that carries settings/dropdowns was still overwritten on every push, so in a rare case — a device whose local cache was cleared or didn’t load, that also happened to be the one that made the last SharePoint write — an automatic sync could have pushed empty settings over the good copy. Now, if a device holds zero records but has synced real data before, the whole push is held and SharePoint is left untouched; the device re-seeds from the server and syncs for real on the next cycle. This makes the new automatic reconciler safe on every admin device. No effect on normal syncing.',
+  ]},
   {version:'2.14.15',date:'2026-09-16',type:'patch',notes:[
     'User Management: the Admin toggle now keeps the ROLE label in sync. Before, switching a user to Admin only set the hidden admin flag — the "DEPT / ROLE" column kept showing "User", which was confusing even though the person really did have admin rights. Now turning Admin ON promotes a plain "User" to "Admin", and turning it OFF sets it back to "User". A specific role such as "Manager" is left untouched — that person keeps their title and simply gains or loses the admin privilege. Also fixed the Department half of that column, which was reading the wrong field name and always showed "—".',
   ]},

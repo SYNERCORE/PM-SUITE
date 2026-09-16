@@ -1,1 +1,1 @@
-{"version":"2.14.15","note":"User Management: toggling a user’s Admin switch now also updates their Role label to match, and the Department column shows correctly","released":"2026-09-16 09:08"}
+{"version":"2.14.16","note":"Data safety: SharePoint sync now refuses to overwrite the shared copy from a device that has lost its local data — your SharePoint and server copies are protected from an empty-device wipe","released":"2026-09-16 09:20"}

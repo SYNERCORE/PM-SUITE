@@ -3275,6 +3275,25 @@ async function spPushData(silent = false) {
       if (!silent) showToast('Merged remote changes before push', 'info', 2500);
     }
 
+    // ── Catastrophe guard: never overwrite SharePoint from an empty local ──
+    // If this device has synced real data before but local is now completely
+    // empty (lost/cleared cache, a boot that didn't seed, or an encrypted store
+    // not yet unlocked), pushing would blank the shared SharePoint copy. The
+    // bulk sub-lists are already safe (deletes are tombstone-gated and an empty
+    // local writes nothing), but the main blob (settings/dropdowns) is not — so
+    // hold the ENTIRE push and keep SharePoint intact. The next cycle re-seeds
+    // local from the server and pushes for real. Placed AFTER the remote-merge
+    // above, so a legitimate merge that refilled local never trips this.
+    const _spLive = (typeof _dataRecordCount === 'function') ? _dataRecordCount(AppState.data) : 1;
+    let _spHwm = 0; try { _spHwm = +localStorage.getItem('shic_sp_local_hwm') || 0; } catch (e) {}
+    if (_spHwm >= 20 && _spLive === 0) {
+      console.warn('[SP] Push ABORTED by catastrophe guard — local holds 0 records but this device has synced ' + _spHwm + '+ before. Keeping SharePoint intact (likely lost or unseeded local data); it will re-seed from the server and sync normally next cycle.');
+      if (!silent && typeof showToast === 'function') showToast('SharePoint sync paused — this device has no local data to push yet. Your SharePoint copy is safe; it will re-seed and sync automatically.', 'warning', 6000);
+      spSetStatus('connected', _spLastSync ? 'Last sync: ' + fmtSyncTime(_spLastSync) : 'Connected');
+      _ssm.transition('SYNCED');
+      return false;
+    }
+
     // ── Step 2: Push merged data ──────────────────────────
     spSetStatus('syncing', 'Uploading to SharePoint...');
     const nowTs = Date.now();
@@ -3308,6 +3327,10 @@ async function spPushData(silent = false) {
     await _spWriteRemote(token, siteId, listId, payload);
     _spLastWriteTs = nowTs;
     localStorage.setItem('shic_sp_lastwritets', String(_spLastWriteTs));
+    // Remember the largest dataset we've successfully pushed — the catastrophe
+    // guard above uses this to tell "never had data" (safe to push empty) from
+    // "had data, now empty" (lost cache — protect SharePoint).
+    try { localStorage.setItem('shic_sp_local_hwm', String(Math.max(_spHwm, _spLive))); } catch (e) {}
     _spDataHash = _spHash(AppState.data) + nowTs;
     _spLastSync = new Date().toISOString();
     localStorage.setItem('shic_sp_lastsync', _spLastSync);
