@@ -1,1 +1,1 @@
-{"version":"2.14.16","note":"Data safety: SharePoint sync now refuses to overwrite the shared copy from a device that has lost its local data — your SharePoint and server copies are protected from an empty-device wipe","released":"2026-09-16 09:20"}
+{"version":"2.14.17","note":"Data safety: the automatic SharePoint reconciler now sits out entirely when a device has no local data yet — it waits to seed from the server first, so an empty device can never even start a sync","released":"2026-09-19 07:47"}

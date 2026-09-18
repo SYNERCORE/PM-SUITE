@@ -225,6 +225,16 @@
     if (_reconciling) return;              // already working
     if (_editing()) return;                // never reconcile over an open form
 
+    // Never reconcile from an EMPTY local. A device that hasn't seeded yet (or
+    // lost its cache) has nothing useful to push, and pushing empty risks blanking
+    // SharePoint's small settings blob. Server-First seeds local from the server
+    // first; until it has, sit this out — don't even take the lease, so a genuinely
+    // populated admin device elsewhere can do the reconcile instead. (Bulk data is
+    // protected regardless by the spPushData catastrophe guard.)
+    let _localCount = 1;
+    try { _localCount = (typeof _dataRecordCount === 'function') ? _dataRecordCount(AppState.data) : 1; } catch (e) {}
+    if (_localCount === 0) { if (_leaseHeld) await _leaseRelease(); return; }
+
     const got = await _leaseAcquire();
     if (!got || !got.granted) return;      // another admin holds it, or no lease endpoint
     _leaseHeld = true;
@@ -345,7 +355,11 @@
       return {
         on: on(), apiReady: _apiReady(), started: _started,
         lastSharePointBackup: last ? new Date(last).toISOString() : null,
-        reconciler: { eligible: _reconcilerEligible(), holdingLease: _leaseHeld, reconciling: _reconciling, deviceId: _deviceId() }
+        reconciler: {
+          eligible: _reconcilerEligible(), holdingLease: _leaseHeld, reconciling: _reconciling, deviceId: _deviceId(),
+          localRecords: (() => { try { return (typeof _dataRecordCount === 'function') ? _dataRecordCount(AppState.data) : null; } catch (e) { return null; } })(),
+          spHwm: (() => { try { return +localStorage.getItem('shic_sp_local_hwm') || 0; } catch (e) { return null; } })()
+        }
       };
     }
   };

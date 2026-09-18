@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.16';
-const APP_BUILD='20260916d';
+const APP_VERSION='2.14.17';
+const APP_BUILD='20260919a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Data safety: SharePoint sync now refuses to overwrite the shared copy from a device that has lost its local data — your SharePoint and server copies are protected from an empty-device wipe';
+const APP_RELEASE_NOTE='Data safety: the automatic SharePoint reconciler now sits out entirely when a device has no local data yet — it waits to seed from the server first, so an empty device can never even start a sync';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.17',date:'2026-09-19',type:'patch',notes:[
+    'Data safety: the automatic SharePoint reconciler now refuses to run at all while a device has zero local records. A freshly opened device (or one whose cache didn’t load yet) briefly holds no data until Server-First seeds it from the server; previously the reconciler could take the sync lease and start a cycle during that window. It now sits out until the device actually has data, so a populated admin device elsewhere can do the reconcile instead, and an empty device never starts one. This complements the v2.14.16 guard (which already blocked an empty push from overwriting SharePoint) by not even beginning the attempt. ServerFirst.status() now also reports the reconciler’s live local record count and sync high-water mark for easy diagnosis.',
+  ]},
   {version:'2.14.16',date:'2026-09-16',type:'patch',notes:[
     'Data safety (SharePoint): added a catastrophe guard so a device that has lost its local data can never blank the shared SharePoint copy. Background: the bulk of your data (projects, tasks, inventory, and 35+ other lists) was already protected — SharePoint deletions only ever remove records you explicitly deleted, never records simply missing from a device. But the small "main blob" that carries settings/dropdowns was still overwritten on every push, so in a rare case — a device whose local cache was cleared or didn’t load, that also happened to be the one that made the last SharePoint write — an automatic sync could have pushed empty settings over the good copy. Now, if a device holds zero records but has synced real data before, the whole push is held and SharePoint is left untouched; the device re-seeds from the server and syncs for real on the next cycle. This makes the new automatic reconciler safe on every admin device. No effect on normal syncing.',
   ]},
