@@ -433,12 +433,19 @@ function _discardPendingChanges() {
 async function _doFullSync() {
   _syncState = 'syncing';
   updateSyncStatusButton();
+    // On a Server-First device the recurring SP poll (_spPollRemote) is gated off
+    // to save internet, so the header "Sync" used to push but never pull from
+    // SharePoint — online users' edits never came down. spPushData(silent, TRUE)
+    // forces the two-way: it pulls the latest SharePoint (incl. online edits) into
+    // local and pushes local up, then Server-First carries the pulled changes to
+    // the server. Off Server-First, _spPollRemote below still does the pull.
+    const _sfOn = (typeof _serverFirstOn === 'function' && _serverFirstOn());
   try {
-    // ── STEP 1: PUSH FIRST ──────────────────────────────
+    // ── STEP 1: PUSH FIRST (force two-way when Server-First) ──
     // Push local changes BEFORE pulling — protects against losing in-progress edits.
     // The push uses the latest local state; subsequent pull merges remote into local
     // without overwriting what we just pushed.
-    await spPushData(true);
+    await spPushData(true, _sfOn);
 
     // ── STEP 2: DETECT ID COLLISIONS ──────────────
     // After push, see if anyone else created the same IDs in parallel
@@ -446,13 +453,17 @@ async function _doFullSync() {
     _syncLastRenamed = renamed.length;
     if (renamed.length > 0) {
       // Push again with renumbered IDs
-      await spPushData(true);
+      await spPushData(true, _sfOn);
     }
 
     // ── STEP 3: PULL LATEST FROM REMOTE ──────────
-    // Now safe to pull — our changes are already in SharePoint.
-    // Smart-merge will preserve any in-progress edits via _editingRecords.
+    // Now safe to pull — our changes are already in SharePoint. On Server-First
+    // this returns immediately (the forced pull above already merged SharePoint);
+    // otherwise it does the smart-merge pull, preserving in-progress edits.
     await _spPollRemote();
+    // Server-First path did its pull inside spPushData — refresh so anything just
+    // pulled from SharePoint (online users' changes) shows immediately.
+    if (_sfOn) { try { if (typeof renderPage === 'function') renderPage(AppState.currentPage || 'dashboard'); } catch (e) {} }
 
     _clearNewlyCreatedFlags();
     _captureSyncedSnapshot(); // remember current state as the synced baseline

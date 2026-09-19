@@ -1,1 +1,1 @@
-{"version":"2.14.19","note":"SharePoint sync is faster and the manual button now does a real two-way sync — \"Sync with SharePoint now\" pulls online users’ latest changes down (not just uploads), with clear success feedback, and the automatic cycle now runs every 5 minutes","released":"2026-09-19 08:45"}
+{"version":"2.14.20","note":"The header \"Sync\" button now pulls online users’ latest changes down to LAN devices too (previously it only uploaded on Server-First devices) — so every sync path now brings SharePoint changes in","released":"2026-09-19 08:55"}

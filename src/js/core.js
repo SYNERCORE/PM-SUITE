@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.19';
-const APP_BUILD='20260919c';
+const APP_VERSION='2.14.20';
+const APP_BUILD='20260919d';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='SharePoint sync is faster and the manual button now does a real two-way sync — "Sync with SharePoint now" pulls online users’ latest changes down (not just uploads), with clear success feedback, and the automatic cycle now runs every 5 minutes';
+const APP_RELEASE_NOTE='The header "Sync" button now pulls online users’ latest changes down to LAN devices too (previously it only uploaded on Server-First devices) — so every sync path now brings SharePoint changes in';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.20',date:'2026-09-19',type:'fix',notes:[
+    'The header "Sync" button now pulls SharePoint changes down on LAN (Server-First) devices. It runs a full sync (push then pull), but its pull step — the recurring SharePoint poll — is intentionally switched off on Server-First devices to save internet, so on those machines the header sync was pushing your changes up but never bringing online users’ changes down. It now forces the two-way pull on Server-First devices (and refreshes the screen so pulled changes appear immediately). Combined with 2.14.19, all three ways to sync — the header button, the Settings "Sync with SharePoint now" button, and the automatic 5-minute reconciler — now reliably bring online users’ changes to the LAN.',
+  ]},
   {version:'2.14.19',date:'2026-09-19',type:'patch',notes:[
     'SharePoint sync — faster and the manual button now works as expected. Three changes: (1) The automatic reconcile interval dropped from 15 minutes to 5, so LAN users pick up online users’ changes sooner. (2) The Settings button — renamed "Sync with SharePoint now" — is now a real TWO-WAY sync: it pulls the latest from SharePoint (including online users’ edits) down into the local server AND pushes your changes up. Previously it only uploaded, so on the main admin device clicking it appeared to "do nothing" when you were expecting to pull online changes. (3) The button now gives clear feedback — a success toast and an immediate screen refresh so pulled changes show right away, or a plain message if a sync is already running.',
   ]},
