@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.21';
-const APP_BUILD='20260919e';
+const APP_VERSION='2.14.22';
+const APP_BUILD='20260919f';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Sync reliability: a brief login-token or network hiccup can no longer make a device think SharePoint has "0 projects" — sub-list fetches now retry and self-heal, so projects created online reliably reach the LAN. A stale/spurious deletion marker can also no longer permanently hide a project that still exists in SharePoint.';
+const APP_RELEASE_NOTE='Data safety: a single table collapsing to empty on one device (e.g. after a failed load) can no longer delete that whole table from the server. The delete guard now also checks each entity on its own, not just the device-wide total — so a bad load of one module keeps the server copy safe.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.22',date:'2026-09-19',type:'fix',notes:[
+    'Hardened the sync delete-guard so one broken module can no longer wipe its whole table from the server. Previously the guard that suppresses mass-deletes looked only at the device-wide total of records; if a single entity (e.g. Projects) collapsed to zero on a device after a failed load while every other table stayed full, the overall total still looked healthy, the guard did not trip, and the sync deleted every row of that one table from the server. The guard now ALSO checks each entity on its own: if a table that was previously synced with rows suddenly holds far fewer — or none — its deletions are held back for that cycle and the server copy is kept. Adds and edits still flow normally.',
+    'Note: client fix — devices pick it up on refresh once the LAN web app is redeployed. This is the safeguard behind the projects-table recovery on 2026-09-19.',
+  ]},
   {version:'2.14.21',date:'2026-09-19',type:'fix',notes:[
     'Fixed the real cause of "a project created online never showed up on the LAN." When a login token or the network briefly hiccups, a SharePoint sub-list fetch could come back empty; the sync then treated that as "SharePoint has 0 projects" and merged nothing, so online-created projects silently never reached the LAN. Sub-list fetches now retry up to 3 times with a fresh token, and a fetch that still fails is SKIPPED (local data is kept) rather than merged as if it were empty — so a momentary hiccup can no longer stall or shrink the online→LAN pull.',
     'A stale or spurious deletion marker (tombstone) can no longer permanently hide a project. If a record is still present in SharePoint with a modification time newer than its tombstone, it is treated as re-created and revived (and the stale tombstone is cleared). Deliberate deletions are still honored.',

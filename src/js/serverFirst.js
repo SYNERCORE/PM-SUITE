@@ -108,10 +108,27 @@
         catch (e) { ok = false; cur.set(id, prev.get(id)); if (/\b429\b/.test(e.message || '')) await _sfSleep(2500); } // keep old sig → retried next cycle
       }
     }
+    // ── Per-entity delete guard ─────────────────────────────────────────
+    // The cycle-wide guard in pushDirty() sums ALL entities, so a single entity
+    // collapsing to empty (e.g. projects 62→0 from a bad load) hides inside a
+    // still-large global total and slips through — that is exactly how the whole
+    // projects table got deleted while every other table stayed intact. Re-check
+    // THIS entity on its own: if a previously-synced set has lost the bulk of its
+    // rows, or collapsed to zero, suppress deletes for this entity too. Adds and
+    // updates already flowed above; only the destructive deletes are held.
+    const prevN = prev.size;
+    const liveN = cur.size; // ids present locally this cycle (recorded in the loop above)
+    let entAllowDeletes = allowDeletes;
+    if (entAllowDeletes &&
+        ((liveN === 0 && prevN >= 5) ||
+         (prevN >= DELETE_GUARD_MIN_PREV && liveN < prevN * DELETE_GUARD_MIN_RATIO))) {
+      entAllowDeletes = false;
+      try { console.warn(`[Server-First] Per-entity delete guard TRIPPED for "${ent}" — local holds ${liveN} of ${prevN} previously-synced rows. Keeping the server's rows (looks like a local load failure, not real deletes).`); } catch (e) {}
+    }
     // Deletions: ids we had synced before that are no longer present locally.
     for (const id of prev.keys()) {
       if (!cur.has(id)) {
-        if (!allowDeletes) { cur.set(id, prev.get(id)); continue; } // guard tripped — keep the server row, remember it
+        if (!entAllowDeletes) { cur.set(id, prev.get(id)); continue; } // guard tripped — keep the server row, remember it
         try { await Api.remove(ent, id); n++; await _sfSleep(PUSH_PACE_MS); }
         catch (e) { ok = false; cur.set(id, prev.get(id)); if (/\b429\b/.test(e.message || '')) await _sfSleep(2500); }
       }
