@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.20';
-const APP_BUILD='20260919d';
+const APP_VERSION='2.14.21';
+const APP_BUILD='20260919e';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='The header "Sync" button now pulls online users’ latest changes down to LAN devices too (previously it only uploaded on Server-First devices) — so every sync path now brings SharePoint changes in';
+const APP_RELEASE_NOTE='Sync reliability: a brief login-token or network hiccup can no longer make a device think SharePoint has "0 projects" — sub-list fetches now retry and self-heal, so projects created online reliably reach the LAN. A stale/spurious deletion marker can also no longer permanently hide a project that still exists in SharePoint.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.21',date:'2026-09-19',type:'fix',notes:[
+    'Fixed the real cause of "a project created online never showed up on the LAN." When a login token or the network briefly hiccups, a SharePoint sub-list fetch could come back empty; the sync then treated that as "SharePoint has 0 projects" and merged nothing, so online-created projects silently never reached the LAN. Sub-list fetches now retry up to 3 times with a fresh token, and a fetch that still fails is SKIPPED (local data is kept) rather than merged as if it were empty — so a momentary hiccup can no longer stall or shrink the online→LAN pull.',
+    'A stale or spurious deletion marker (tombstone) can no longer permanently hide a project. If a record is still present in SharePoint with a modification time newer than its tombstone, it is treated as re-created and revived (and the stale tombstone is cleared). Deliberate deletions are still honored.',
+    'Note: these are client fixes — every device picks them up on refresh once the LAN web app is redeployed.',
+  ]},
   {version:'2.14.20',date:'2026-09-19',type:'fix',notes:[
     'The header "Sync" button now pulls SharePoint changes down on LAN (Server-First) devices. It runs a full sync (push then pull), but its pull step — the recurring SharePoint poll — is intentionally switched off on Server-First devices to save internet, so on those machines the header sync was pushing your changes up but never bringing online users’ changes down. It now forces the two-way pull on Server-First devices (and refreshes the screen so pulled changes appear immediately). Combined with 2.14.19, all three ways to sync — the header button, the Settings "Sync with SharePoint now" button, and the automatic 5-minute reconciler — now reliably bring online users’ changes to the LAN.',
   ]},

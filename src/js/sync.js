@@ -2255,6 +2255,19 @@ function _spMergeArrays(localArr, remoteArr, localEdited, arrayKey) {
   return Merge.arrays(localArr, remoteArr, localEdited, {
     wasDeleted: id => arrayKey ? _spWasDeleted(arrayKey, id) : false,
     onConflict: ({ id, label }) => _spMergeConflicts.push({ arrayKey, id, label }),
+    // Tombstone-resurrection support: a record still present in SharePoint with a stamp
+    // newer than its tombstone was re-created after the delete — revive it and clear the
+    // stale tombstone so a spurious/late tombstone can't permanently hide a live project.
+    tombstoneAt: id => {
+      if (!arrayKey) return null;
+      try { const e = Deletions.get(arrayKey, id); return e && !e.restoredAt ? e.at : null; }
+      catch (e) { return null; }
+    },
+    onResurrect: id => {
+      if (!arrayKey) return;
+      try { Deletions.forget(arrayKey, id); } catch (e) {}
+      try { console.warn('[SP] Resurrected ' + arrayKey + ' ' + id + ' — present in SharePoint with a newer stamp than its tombstone; cleared the tombstone.'); } catch (e) {}
+    },
   });
 }
 function _spMergeAppendArrays(base, donor) {
@@ -2709,28 +2722,45 @@ const _spListIdMaps = {};       // { 'SHIC_Tasks': { 'TSK-001': 'sp-item-id', ..
 async function _spFetchAllSubLists(token) {
   const results = {};
   const tasks = Object.entries(SHIC_LIST_CONFIG).map(async ([listName, cfg]) => {
-    try {
-      const { items } = await _spFetchListItems(token, listName);
-      const { records, idMap } = _spParseListItems(items, cfg.idField);
-      _spListIdMaps[listName] = idMap;
-      results[cfg.dataKey] = records;
-      // Update hash cache
-      _spListRecordHashes[listName] = {};
-      items.forEach(item => {
-        try {
-          const raw = item.fields?.DataBlob;
-          if (!raw) return;
-          const rec = JSON.parse(raw);
-          if (rec && rec.id) {
-            _spListRecordHashes[listName][rec.id] = _quickHash(raw);
-          }
-        } catch(e) {}
-      });
-      console.log('[SP] Fetched ' + listName + ': ' + records.length + ' records');
-    } catch(e) {
-      console.warn('[SP] Could not fetch ' + listName + ':', e.message);
-      results[cfg.dataKey] = null; // signal: not available
+    // Retry transient failures (expired/half-dead token, network blip, 429). A single
+    // failed fetch here used to set the key to null, and the merge then saw "0 records"
+    // for that entity — which is exactly what stalled online→LAN pulls: an online-created
+    // project never merged in because a momentary token hiccup made the LAN think
+    // SharePoint had no projects. Retrying with a fresh token self-heals that.
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        // On a retry, fetch a fresh token in case the previous one expired mid-flight.
+        let tok = token;
+        if (attempt > 0) {
+          try { tok = (await getSpToken()) || token; } catch (te) { tok = token; }
+        }
+        const { items } = await _spFetchListItems(tok, listName);
+        const { records, idMap } = _spParseListItems(items, cfg.idField);
+        _spListIdMaps[listName] = idMap;
+        results[cfg.dataKey] = records;
+        // Update hash cache
+        _spListRecordHashes[listName] = {};
+        items.forEach(item => {
+          try {
+            const raw = item.fields?.DataBlob;
+            if (!raw) return;
+            const rec = JSON.parse(raw);
+            if (rec && rec.id) {
+              _spListRecordHashes[listName][rec.id] = _quickHash(raw);
+            }
+          } catch(e) {}
+        });
+        console.log('[SP] Fetched ' + listName + ': ' + records.length + ' records' + (attempt ? ' (attempt ' + (attempt + 1) + ')' : ''));
+        return; // success — stop retrying
+      } catch(e) {
+        lastErr = e;
+        // brief backoff before retrying (400ms, 800ms)
+        await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+      }
     }
+    console.warn('[SP] Could not fetch ' + listName + ' after 3 attempts:', lastErr && lastErr.message);
+    results[cfg.dataKey] = null; // signal: not available — merge SKIPS this key (keeps local), never treats it as "0 records"
   });
   await Promise.all(tasks);
   return results;
@@ -3277,9 +3307,19 @@ async function spPushData(silent = false, forcePull = false) {
         'warehouseLocations','businessUnits','dailyMeetingLogs','assetUtilization',
       ]));
       ARRAY_KEYS.forEach(key => {
+        const remoteArr = remoteData[key];
+        // A failed sub-list fetch leaves the key undefined/null (a real fetch always
+        // yields an array, even when empty). Merging a phantom "0 records" here is what
+        // let a flaky token stall online→LAN pulls — and if the key is absent from
+        // `merged`, the getDefaultData() spread below would blank it. So when the fetch
+        // didn't return an array, keep local untouched rather than merging emptiness.
+        if (!Array.isArray(remoteArr)) {
+          merged[key] = AppState.data[key] || [];
+          return;
+        }
         merged[key] = _spMergeArrays(
           AppState.data[key] || [],
-          remoteData[key] || [],
+          remoteArr,
           true, // local edits win for existing records
           key   // deletion tracking
         );

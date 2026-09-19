@@ -16,6 +16,17 @@
 
 const Merge = (function () {
 
+  // Best available modification/creation time of a record as a comparable number (ms),
+  // or null when the record carries no usable stamp. Used to decide last-write-wins
+  // tie-breaks and whether a tombstoned-but-present-in-remote record is a resurrection.
+  function _recTime(r) {
+    if (!r) return null;
+    const t = r._mAt || r._localCreatedAt || r.createdAt || r.updatedAt || r.uploadedAt;
+    if (!t) return null;
+    const n = typeof t === 'number' ? t : Date.parse(t);
+    return isNaN(n) ? null : n;
+  }
+
   // ── Project period-overlap rule ─────────────────────────
   // Used by every period-scoped view (Dashboard filter tabs, KPI Analytics,
   // Advanced Analytics, Reports). A project is in scope for the period when
@@ -82,12 +93,28 @@ const Merge = (function () {
     opts = opts || {};
     const wasDeleted = typeof opts.wasDeleted === 'function' ? opts.wasDeleted : () => false;
     const onConflict = typeof opts.onConflict === 'function' ? opts.onConflict : () => {};
+    // tombstoneAt(id) → the tombstone's timestamp (ms) or null. onResurrect(id) is
+    // called when a tombstoned record is revived because the authoritative remote
+    // still carries a NEWER copy (so the caller can clear the stale tombstone).
+    const tombstoneAt = typeof opts.tombstoneAt === 'function' ? opts.tombstoneAt : () => null;
+    const onResurrect = typeof opts.onResurrect === 'function' ? opts.onResurrect : () => {};
     if (!remoteArr.length && !localArr.length) return [];
     const remoteMap = new Map(remoteArr.map(r => [r.id, r]));
     const localMap = new Map(localArr.map(r => [r.id, r]));
     const result = [];
     remoteArr.forEach(remoteRec => {
-      if (wasDeleted(remoteRec.id)) return;
+      if (wasDeleted(remoteRec.id)) {
+        // A tombstoned id that STILL exists in the authoritative remote was re-created
+        // or edited after the delete. The delete flow removes a record from its remote
+        // sub-list, so a record present here with a stamp NEWER than the tombstone is a
+        // genuine resurrection, not a not-yet-purged straggler. Reviving it (and clearing
+        // the stale tombstone) stops a spurious tombstone from permanently hiding a live
+        // project. Timestamp-strict on purpose: without a newer stamp we honor the delete.
+        const tAt = tombstoneAt(remoteRec.id);
+        const rt = _recTime(remoteRec);
+        if (!(tAt != null && rt != null && rt > tAt)) return; // honor the tombstone
+        try { onResurrect(remoteRec.id); } catch (e) {}
+      }
       const localRec = localMap.get(remoteRec.id);
       if (localRec) {
         let localWins;
