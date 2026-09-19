@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.18';
-const APP_BUILD='20260919b';
+const APP_VERSION='2.14.19';
+const APP_BUILD='20260919c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Two-way sync: LAN users now reliably receive online users’ changes — the reconciler always pulls the latest from SharePoint (all record types) and carries it into the local server before pushing';
+const APP_RELEASE_NOTE='SharePoint sync is faster and the manual button now does a real two-way sync — "Sync with SharePoint now" pulls online users’ latest changes down (not just uploads), with clear success feedback, and the automatic cycle now runs every 5 minutes';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.19',date:'2026-09-19',type:'patch',notes:[
+    'SharePoint sync — faster and the manual button now works as expected. Three changes: (1) The automatic reconcile interval dropped from 15 minutes to 5, so LAN users pick up online users’ changes sooner. (2) The Settings button — renamed "Sync with SharePoint now" — is now a real TWO-WAY sync: it pulls the latest from SharePoint (including online users’ edits) down into the local server AND pushes your changes up. Previously it only uploaded, so on the main admin device clicking it appeared to "do nothing" when you were expecting to pull online changes. (3) The button now gives clear feedback — a success toast and an immediate screen refresh so pulled changes show right away, or a plain message if a sync is already running.',
+  ]},
   {version:'2.14.18',date:'2026-09-19',type:'fix',notes:[
     'Two-way sync: LAN users now reliably receive changes made by online (SharePoint-only) users. The automatic reconciler was effectively push-only: it uploaded LAN changes to SharePoint but pulled SharePoint changes back down only when SharePoint was "newer" than this device’s last write — which, on a single-admin setup where the same device always reconciles, meant online users’ edits were rarely pulled into the local server, so the LAN project count drifted behind the online one. The reconciler now ALWAYS pulls the latest SharePoint data (a safe, timestamp-based, tombstone-aware merge) into local before pushing, and immediately persists it so Server-First carries those changes into the server and out to every LAN user. Also widened the set of record types merged from SharePoint — Library Docs, Warehouse Locations, Business Units, Daily Meeting Logs, and Asset Utilization were previously left out. Note: for a LAN device to receive an online user’s edit, that edit must actually be pushed to SharePoint first — an online app still showing "changes pending" hasn’t uploaded them yet.',
   ]},
@@ -9931,7 +9934,7 @@ async function spDeleteFormTemplate(spId) {
   // A single-row server lease (deploy/sql/010-sync-lease.sql) guarantees exactly
   // one device reconciles at a time, with automatic failover when a holder goes
   // away. See /api/sync-lease/* in deploy/server/server.js.
-  const RECONCILE_MS   = 15 * 60 * 1000;    // reconcile SP at most this often (last_sync_at is global)
+  const RECONCILE_MS   = 5 * 60 * 1000;     // reconcile SP at most this often (last_sync_at is global)
   const LEASE_TTL_SEC  = 90;                // how long the server grants the lease
   const LEASE_RENEW_MS = 30 * 1000;         // renew mid-sync so a long push can't outlive the lease
   let _reconciling = false;                 // this device is mid-reconcile
@@ -10147,12 +10150,17 @@ async function spDeleteFormTemplate(spId) {
     }
   }
 
-  // Manual "Back up to SharePoint now" (Settings button) — bypasses the lease and
-  // the due-gate. A deliberate admin action; shows the normal (non-silent) UI.
+  // Manual "Sync with SharePoint now" (Settings button) — a deliberate admin
+  // action that bypasses the lease and the due-gate. forcePull=true makes it a
+  // full TWO-WAY sync: pull the latest from SharePoint (incl. online users' edits)
+  // down into local AND push local up — so clicking it actually brings online
+  // changes to the LAN, not just uploads. Returns the promise so the caller can
+  // report success/failure (spPushData resolves false if a sync is already
+  // running, e.g. the auto-reconciler holds it).
   function backupToSharePointNow() {
-    if (typeof spPushData !== 'function') { if (typeof showToast === 'function') showToast('SharePoint not available', 'error'); return; }
+    if (typeof spPushData !== 'function') { if (typeof showToast === 'function') showToast('SharePoint not available', 'error'); return Promise.resolve(false); }
     try { localStorage.setItem(LS_LAST_SP, String(Date.now())); } catch (e) {}
-    Promise.resolve(spPushData(false)).catch(() => {});
+    return Promise.resolve(spPushData(false, true)).catch(() => false);
   }
 
   function _scheduleRerender() {
@@ -25794,7 +25802,7 @@ ${renderSpPanel()}
         several users. Sign-in still needs internet; a new device should <strong>Pull</strong> once first (below).
       </div>
       <div style="margin:10px 0 0 26px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <button class="btn btn-secondary btn-sm" onclick="_sfBackupNow()" title="Push a full copy to SharePoint now (bypasses the once-a-day throttle)"><i class="fas fa-cloud-upload-alt"></i> Back up to SharePoint now</button>
+        <button class="btn btn-secondary btn-sm" onclick="_sfBackupNow()" title="Two-way sync with SharePoint now: pull online users' latest changes down AND push your local changes up"><i class="fas fa-cloud-upload-alt"></i> Sync with SharePoint now</button>
         ${(typeof isAdminUser==='function'&&isAdminUser())?`<button class="btn btn-secondary btn-sm" onclick="_adminIssuePass()" title="Generate an offline pass for another user so a brand-new device can work through an outage without signing in online first"><i class="fas fa-id-badge"></i> Issue offline pass…</button>`:''}
         <span id="sfStatus" style="font-size:10px;color:var(--text-muted)">${(()=>{try{const t=+localStorage.getItem('pm_sf_last_sp_backup')||0;return (_dev.serverFirst?'On':'Off')+' · last SharePoint backup: '+(t?new Date(t).toLocaleString():'never');}catch(e){return '';}})()}</span>
       </div>
@@ -26882,11 +26890,20 @@ async function _adminIssuePass() {
     showToast('Pass issued for ' + email, 'success', 4000);
   } catch (e) { showToast('Could not issue pass: ' + e.message, 'error', 6000); }
 }
-function _sfBackupNow() {
+async function _sfBackupNow() {
   if (typeof ServerFirst === 'undefined') { showToast('Server-First engine not loaded', 'error'); return; }
-  ServerFirst.backupToSharePointNow();
-  showToast('Backing up to SharePoint…', 'info', 2500);
-  setTimeout(_sfRefreshStatus, 1500);
+  showToast('Syncing with SharePoint (two-way)…', 'info', 2500);
+  let ok = false;
+  try { ok = await ServerFirst.backupToSharePointNow(); }
+  catch (e) { showToast('SharePoint sync failed: ' + (e && e.message || e), 'error', 6000); _sfRefreshStatus(); return; }
+  if (ok) {
+    showToast('SharePoint sync complete ✓ — pulled the latest and pushed your changes', 'success', 3500);
+    // Show anything just pulled from SharePoint (online users' edits).
+    try { if (typeof renderPage === 'function') renderPage(AppState.currentPage || 'dashboard'); } catch (e) {}
+  } else {
+    showToast('Sync didn’t run — a sync is already in progress (the automatic reconciler may be running). Try again in a moment.', 'warning', 6000);
+  }
+  _sfRefreshStatus();
 }
 function _sfRefreshStatus() {
   const el = document.getElementById('sfStatus'); if (!el) return;

@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.18';
-const APP_BUILD='20260919b';
+const APP_VERSION='2.14.19';
+const APP_BUILD='20260919c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Two-way sync: LAN users now reliably receive online users’ changes — the reconciler always pulls the latest from SharePoint (all record types) and carries it into the local server before pushing';
+const APP_RELEASE_NOTE='SharePoint sync is faster and the manual button now does a real two-way sync — "Sync with SharePoint now" pulls online users’ latest changes down (not just uploads), with clear success feedback, and the automatic cycle now runs every 5 minutes';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.19',date:'2026-09-19',type:'patch',notes:[
+    'SharePoint sync — faster and the manual button now works as expected. Three changes: (1) The automatic reconcile interval dropped from 15 minutes to 5, so LAN users pick up online users’ changes sooner. (2) The Settings button — renamed "Sync with SharePoint now" — is now a real TWO-WAY sync: it pulls the latest from SharePoint (including online users’ edits) down into the local server AND pushes your changes up. Previously it only uploaded, so on the main admin device clicking it appeared to "do nothing" when you were expecting to pull online changes. (3) The button now gives clear feedback — a success toast and an immediate screen refresh so pulled changes show right away, or a plain message if a sync is already running.',
+  ]},
   {version:'2.14.18',date:'2026-09-19',type:'fix',notes:[
     'Two-way sync: LAN users now reliably receive changes made by online (SharePoint-only) users. The automatic reconciler was effectively push-only: it uploaded LAN changes to SharePoint but pulled SharePoint changes back down only when SharePoint was "newer" than this device’s last write — which, on a single-admin setup where the same device always reconciles, meant online users’ edits were rarely pulled into the local server, so the LAN project count drifted behind the online one. The reconciler now ALWAYS pulls the latest SharePoint data (a safe, timestamp-based, tombstone-aware merge) into local before pushing, and immediately persists it so Server-First carries those changes into the server and out to every LAN user. Also widened the set of record types merged from SharePoint — Library Docs, Warehouse Locations, Business Units, Daily Meeting Logs, and Asset Utilization were previously left out. Note: for a LAN device to receive an online user’s edit, that edit must actually be pushed to SharePoint first — an online app still showing "changes pending" hasn’t uploaded them yet.',
   ]},

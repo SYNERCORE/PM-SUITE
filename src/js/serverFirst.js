@@ -43,7 +43,7 @@
   // A single-row server lease (deploy/sql/010-sync-lease.sql) guarantees exactly
   // one device reconciles at a time, with automatic failover when a holder goes
   // away. See /api/sync-lease/* in deploy/server/server.js.
-  const RECONCILE_MS   = 15 * 60 * 1000;    // reconcile SP at most this often (last_sync_at is global)
+  const RECONCILE_MS   = 5 * 60 * 1000;     // reconcile SP at most this often (last_sync_at is global)
   const LEASE_TTL_SEC  = 90;                // how long the server grants the lease
   const LEASE_RENEW_MS = 30 * 1000;         // renew mid-sync so a long push can't outlive the lease
   let _reconciling = false;                 // this device is mid-reconcile
@@ -259,12 +259,17 @@
     }
   }
 
-  // Manual "Back up to SharePoint now" (Settings button) — bypasses the lease and
-  // the due-gate. A deliberate admin action; shows the normal (non-silent) UI.
+  // Manual "Sync with SharePoint now" (Settings button) — a deliberate admin
+  // action that bypasses the lease and the due-gate. forcePull=true makes it a
+  // full TWO-WAY sync: pull the latest from SharePoint (incl. online users' edits)
+  // down into local AND push local up — so clicking it actually brings online
+  // changes to the LAN, not just uploads. Returns the promise so the caller can
+  // report success/failure (spPushData resolves false if a sync is already
+  // running, e.g. the auto-reconciler holds it).
   function backupToSharePointNow() {
-    if (typeof spPushData !== 'function') { if (typeof showToast === 'function') showToast('SharePoint not available', 'error'); return; }
+    if (typeof spPushData !== 'function') { if (typeof showToast === 'function') showToast('SharePoint not available', 'error'); return Promise.resolve(false); }
     try { localStorage.setItem(LS_LAST_SP, String(Date.now())); } catch (e) {}
-    Promise.resolve(spPushData(false)).catch(() => {});
+    return Promise.resolve(spPushData(false, true)).catch(() => false);
   }
 
   function _scheduleRerender() {

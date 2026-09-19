@@ -287,7 +287,7 @@ ${renderSpPanel()}
         several users. Sign-in still needs internet; a new device should <strong>Pull</strong> once first (below).
       </div>
       <div style="margin:10px 0 0 26px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <button class="btn btn-secondary btn-sm" onclick="_sfBackupNow()" title="Push a full copy to SharePoint now (bypasses the once-a-day throttle)"><i class="fas fa-cloud-upload-alt"></i> Back up to SharePoint now</button>
+        <button class="btn btn-secondary btn-sm" onclick="_sfBackupNow()" title="Two-way sync with SharePoint now: pull online users' latest changes down AND push your local changes up"><i class="fas fa-cloud-upload-alt"></i> Sync with SharePoint now</button>
         ${(typeof isAdminUser==='function'&&isAdminUser())?`<button class="btn btn-secondary btn-sm" onclick="_adminIssuePass()" title="Generate an offline pass for another user so a brand-new device can work through an outage without signing in online first"><i class="fas fa-id-badge"></i> Issue offline pass…</button>`:''}
         <span id="sfStatus" style="font-size:10px;color:var(--text-muted)">${(()=>{try{const t=+localStorage.getItem('pm_sf_last_sp_backup')||0;return (_dev.serverFirst?'On':'Off')+' · last SharePoint backup: '+(t?new Date(t).toLocaleString():'never');}catch(e){return '';}})()}</span>
       </div>
@@ -1375,11 +1375,20 @@ async function _adminIssuePass() {
     showToast('Pass issued for ' + email, 'success', 4000);
   } catch (e) { showToast('Could not issue pass: ' + e.message, 'error', 6000); }
 }
-function _sfBackupNow() {
+async function _sfBackupNow() {
   if (typeof ServerFirst === 'undefined') { showToast('Server-First engine not loaded', 'error'); return; }
-  ServerFirst.backupToSharePointNow();
-  showToast('Backing up to SharePoint…', 'info', 2500);
-  setTimeout(_sfRefreshStatus, 1500);
+  showToast('Syncing with SharePoint (two-way)…', 'info', 2500);
+  let ok = false;
+  try { ok = await ServerFirst.backupToSharePointNow(); }
+  catch (e) { showToast('SharePoint sync failed: ' + (e && e.message || e), 'error', 6000); _sfRefreshStatus(); return; }
+  if (ok) {
+    showToast('SharePoint sync complete ✓ — pulled the latest and pushed your changes', 'success', 3500);
+    // Show anything just pulled from SharePoint (online users' edits).
+    try { if (typeof renderPage === 'function') renderPage(AppState.currentPage || 'dashboard'); } catch (e) {}
+  } else {
+    showToast('Sync didn’t run — a sync is already in progress (the automatic reconciler may be running). Try again in a moment.', 'warning', 6000);
+  }
+  _sfRefreshStatus();
 }
 function _sfRefreshStatus() {
   const el = document.getElementById('sfStatus'); if (!el) return;
