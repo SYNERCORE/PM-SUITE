@@ -3220,7 +3220,7 @@ function _spBuildMainBlobPayload(subListsOk) {
   return dataForPush;
 }
 
-async function spPushData(silent = false) {
+async function spPushData(silent = false, forcePull = false) {
   if (_spSyncing) return false;
   // Don't push mid-migration — SP would race the local API and confuse the counters.
   if (typeof Store !== 'undefined' && Store.migrating && Store.migrating()) {
@@ -3238,18 +3238,33 @@ async function spPushData(silent = false) {
 
     // ── Step 1: Fetch remote first to detect conflicts ────
     const remote = await _spFetchRemote(token, siteId, listId);
-    if (remote && remote._ts && remote._ts > _spLastWriteTs) {
+    // Absorb SharePoint into local before pushing. Normally gated on "remote is
+    // newer than our last write", but the reconciler passes forcePull=true so it
+    // ALWAYS merges: on a single-admin setup the reconciler is usually the last
+    // writer, so the plain gate would skip pulling online users' edits down and
+    // the LAN/server copy would drift behind SharePoint. The remote fetch above
+    // already happened, so forcing the merge is nearly free — and the merge is a
+    // tombstone-aware union, so re-merging our own data is a safe no-op.
+    if (remote && remote._ts && (forcePull || remote._ts > _spLastWriteTs)) {
       // Remote is newer — merge remote arrays into local before pushing
       // Strategy: remote wins for records that exist in remote but not local
       // Local wins for records added locally since last sync
       const { _ts, _by, ...remoteData } = remote;
       const merged = Object.assign({}, remoteData);
-      const ARRAY_KEYS = ['projects','tasks','resources','equipment','tools','vehicles',
+      // Every offloaded sub-list plus the main-blob arrays — derived so a newly
+      // offloaded entity is never silently left out of the SharePoint→local merge
+      // (previously hardcoded and missing libraryDocs, warehouseLocations,
+      // businessUnits, dailyMeetingLogs, assetUtilization).
+      const ARRAY_KEYS = Array.from(new Set([
+        ...(typeof SHIC_OFFLOADED_KEYS !== 'undefined' ? SHIC_OFFLOADED_KEYS : []),
+        'projects','tasks','resources','equipment','tools','vehicles',
         'consumables','materials','manpower','procurement','procurementLogs',
         'resourceAllocations','resourceUsageLogs','costs','qaqc','risks',
         'actions','documents','progress','kpiData','assetHistory',
         'thirdParties','thirdParty','projectTeam','calendar','activities','notifications','trades',
-        'warehouseItems','stockTransactions','issuanceRequests'];
+        'warehouseItems','stockTransactions','issuanceRequests','libraryDocs',
+        'warehouseLocations','businessUnits','dailyMeetingLogs','assetUtilization',
+      ]));
       ARRAY_KEYS.forEach(key => {
         merged[key] = _spMergeArrays(
           AppState.data[key] || [],
@@ -3272,6 +3287,11 @@ async function spPushData(silent = false) {
     try { _spFlushMergeConflicts(); } catch(e) {}
       _spLastWriteTs = _ts;
       _spDataHash = _spHash(remoteData) + _ts;
+      // Persist the absorbed remote changes locally. This is what carries online
+      // users' edits onward to the LAN server: AppState.save() triggers the
+      // Server-First debounced push, so anything merged from SharePoint here flows
+      // into Postgres and out to every other LAN user on their next delta pull.
+      try { AppState.save(); } catch (e) {}
       if (!silent) showToast('Merged remote changes before push', 'info', 2500);
     }
 

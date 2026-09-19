@@ -248,7 +248,7 @@
     clearInterval(_leaseRenewTimer);
     _leaseRenewTimer = setInterval(() => { _leaseAcquire().catch(() => {}); }, LEASE_RENEW_MS);
     try {
-      await Promise.resolve(spPushData(true));   // silent, paced, two-way (v2.14.13)
+      await Promise.resolve(spPushData(true, true)); // silent, paced, FORCE two-way: always pull SharePoint (incl. online users' edits) down before pushing, then Server-First carries them to the server
       try { await Api.post('/api/sync-lease/synced', { deviceId: _deviceId() }); } catch (e) {}
       try { localStorage.setItem(LS_LAST_SP, String(Date.now())); } catch (e) {}
     } catch (e) {

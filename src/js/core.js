@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.17';
-const APP_BUILD='20260919a';
+const APP_VERSION='2.14.18';
+const APP_BUILD='20260919b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Data safety: the automatic SharePoint reconciler now sits out entirely when a device has no local data yet — it waits to seed from the server first, so an empty device can never even start a sync';
+const APP_RELEASE_NOTE='Two-way sync: LAN users now reliably receive online users’ changes — the reconciler always pulls the latest from SharePoint (all record types) and carries it into the local server before pushing';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.18',date:'2026-09-19',type:'fix',notes:[
+    'Two-way sync: LAN users now reliably receive changes made by online (SharePoint-only) users. The automatic reconciler was effectively push-only: it uploaded LAN changes to SharePoint but pulled SharePoint changes back down only when SharePoint was "newer" than this device’s last write — which, on a single-admin setup where the same device always reconciles, meant online users’ edits were rarely pulled into the local server, so the LAN project count drifted behind the online one. The reconciler now ALWAYS pulls the latest SharePoint data (a safe, timestamp-based, tombstone-aware merge) into local before pushing, and immediately persists it so Server-First carries those changes into the server and out to every LAN user. Also widened the set of record types merged from SharePoint — Library Docs, Warehouse Locations, Business Units, Daily Meeting Logs, and Asset Utilization were previously left out. Note: for a LAN device to receive an online user’s edit, that edit must actually be pushed to SharePoint first — an online app still showing "changes pending" hasn’t uploaded them yet.',
+  ]},
   {version:'2.14.17',date:'2026-09-19',type:'patch',notes:[
     'Data safety: the automatic SharePoint reconciler now refuses to run at all while a device has zero local records. A freshly opened device (or one whose cache didn’t load yet) briefly holds no data until Server-First seeds it from the server; previously the reconciler could take the sync lease and start a cycle during that window. It now sits out until the device actually has data, so a populated admin device elsewhere can do the reconcile instead, and an empty device never starts one. This complements the v2.14.16 guard (which already blocked an empty push from overwriting SharePoint) by not even beginning the attempt. ServerFirst.status() now also reports the reconciler’s live local record count and sync high-water mark for easy diagnosis.',
   ]},

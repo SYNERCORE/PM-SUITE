@@ -1,1 +1,1 @@
-{"version":"2.14.17","note":"Data safety: the automatic SharePoint reconciler now sits out entirely when a device has no local data yet — it waits to seed from the server first, so an empty device can never even start a sync","released":"2026-09-19 07:47"}
+{"version":"2.14.18","note":"Two-way sync: LAN users now reliably receive online users’ changes — the reconciler always pulls the latest from SharePoint (all record types) and carries it into the local server before pushing","released":"2026-09-19 08:04"}
