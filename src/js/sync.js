@@ -2721,14 +2721,17 @@ const _spListIdMaps = {};       // { 'SHIC_Tasks': { 'TSK-001': 'sp-item-id', ..
 // ── Fetch all sub-lists in parallel and merge into AppState.data ──
 async function _spFetchAllSubLists(token) {
   const results = {};
-  const tasks = Object.entries(SHIC_LIST_CONFIG).map(async ([listName, cfg]) => {
+  // Fetch ONE list, with retry/backoff. A still-failed list is set to null, which the
+  // merge SKIPS (keeps local) rather than treating as "0 records".
+  async function _fetchOneList(listName, cfg) {
     // Retry transient failures (expired/half-dead token, network blip, 429). A single
     // failed fetch here used to set the key to null, and the merge then saw "0 records"
     // for that entity — which is exactly what stalled online→LAN pulls: an online-created
-    // project never merged in because a momentary token hiccup made the LAN think
-    // SharePoint had no projects. Retrying with a fresh token self-heals that.
+    // project never merged in because a momentary token hiccup (or a throttled burst)
+    // made the LAN think SharePoint had no projects. Retrying with a fresh token, plus
+    // the concurrency cap below, self-heals that.
     let lastErr = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       try {
         // On a retry, fetch a fresh token in case the previous one expired mid-flight.
         let tok = token;
@@ -2755,14 +2758,31 @@ async function _spFetchAllSubLists(token) {
         return; // success — stop retrying
       } catch(e) {
         lastErr = e;
-        // brief backoff before retrying (400ms, 800ms)
-        await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+        // Back off before retrying; wait much longer on a throttle (429) since
+        // SharePoint punishes bursts and a short retry just gets throttled again.
+        const is429 = /\b429\b/.test((e && e.message) || '');
+        await new Promise(r => setTimeout(r, (is429 ? 1500 : 400) * (attempt + 1)));
       }
     }
-    console.warn('[SP] Could not fetch ' + listName + ' after 3 attempts:', lastErr && lastErr.message);
+    console.warn('[SP] Could not fetch ' + listName + ' after 4 attempts:', lastErr && lastErr.message);
     results[cfg.dataKey] = null; // signal: not available — merge SKIPS this key (keeps local), never treats it as "0 records"
-  });
-  await Promise.all(tasks);
+  }
+  // Cap concurrency. Firing all ~40 list reads at once (the old Promise.all-over-everything)
+  // trips SharePoint's rate limit; a throttled list then fails every retry, comes back null,
+  // and the merge silently keeps local — which is exactly how online-created records (e.g. a
+  // new project/prospect) never reached the LAN. The PUSH side already writes serially for
+  // this same reason; mirror it here with a small fetch pool so retries actually have room
+  // to succeed.
+  const entries = Object.entries(SHIC_LIST_CONFIG);
+  const CONCURRENCY = 5;
+  let _idx = 0;
+  async function _worker() {
+    while (_idx < entries.length) {
+      const [listName, cfg] = entries[_idx++];
+      await _fetchOneList(listName, cfg);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, entries.length) }, _worker));
   return results;
 }
 

@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.22';
-const APP_BUILD='20260919f';
+const APP_VERSION='2.14.23';
+const APP_BUILD='20260921a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Data safety: a single table collapsing to empty on one device (e.g. after a failed load) can no longer delete that whole table from the server. The delete guard now also checks each entity on its own, not just the device-wide total — so a bad load of one module keeps the server copy safe.';
+const APP_RELEASE_NOTE='Reliability: records created online now reach the LAN dependably. The SharePoint fetch used to request all ~40 lists at once, which SharePoint throttled — a throttled list came back empty and its new records (e.g. a project created online) were silently skipped. Fetches are now paced in small batches with stronger retry, so online→LAN pulls stop dropping records.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.23',date:'2026-09-21',type:'fix',notes:[
+    'Fixed the real reason projects/prospects created online did not appear on the LAN. The SharePoint pull fetched all ~40 lists in parallel; SharePoint rate-limited the burst, and a throttled list exhausted its retries and returned null. The merge treats null as "list unavailable" and keeps the local copy — so any record that existed ONLY online (a newly created project) was silently skipped and never carried down to the LAN/server. Confirmed live: a new prospect was present in SharePoint and in a direct fetch, but the sync\'s own fetch returned the projects list as null every time.',
+    'The sub-list fetch is now paced with a small concurrency cap (5 at a time) instead of firing everything at once — the push side already wrote serially for this exact rate-limit reason. Retries increased to 4 with a much longer back-off on 429 (throttle) responses. Together these let each list fetch actually succeed, so online→LAN pulls stop dropping records.',
+    'Note: client fix — devices pick it up on refresh once the LAN web app is redeployed. No server/DB change.',
+  ]},
   {version:'2.14.22',date:'2026-09-19',type:'fix',notes:[
     'Hardened the sync delete-guard so one broken module can no longer wipe its whole table from the server. Previously the guard that suppresses mass-deletes looked only at the device-wide total of records; if a single entity (e.g. Projects) collapsed to zero on a device after a failed load while every other table stayed full, the overall total still looked healthy, the guard did not trip, and the sync deleted every row of that one table from the server. The guard now ALSO checks each entity on its own: if a table that was previously synced with rows suddenly holds far fewer — or none — its deletions are held back for that cycle and the server copy is kept. Adds and edits still flow normally.',
     'Note: client fix — devices pick it up on refresh once the LAN web app is redeployed. This is the safeguard behind the projects-table recovery on 2026-09-19.',
