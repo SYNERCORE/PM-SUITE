@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.23';
-const APP_BUILD='20260921a';
+const APP_VERSION='2.14.24';
+const APP_BUILD='20260921b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Reliability: records created online now reach the LAN dependably. The SharePoint fetch used to request all ~40 lists at once, which SharePoint throttled — a throttled list came back empty and its new records (e.g. a project created online) were silently skipped. Fetches are now paced in small batches with stronger retry, so online→LAN pulls stop dropping records.';
+const APP_RELEASE_NOTE='Fixes the real cause of records created online not appearing on the LAN. The fast SharePoint fetch (used on every sync once cached) returned only the small main record and skipped the separate lists that hold projects, tasks, resources and the rest — so anything created online in those lists was invisible to the pull and never came down. Both fetch paths now load those lists, so online→LAN sync brings everything down.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.24',date:'2026-09-21',type:'fix',notes:[
+    'THE real fix for "records created online never reach the LAN." The SharePoint read (_spFetchRemote) has two paths: a fast path that fetches one cached record directly, and a slower search path. Only the slow path went on to fetch the offloaded lists (projects, tasks, resources, costs, warehouse, etc.) that are stored separately from the small main record. Once a device caches the record id — which happens after its first sync — every read takes the FAST path, which returned the main record WITHOUT those lists. So the merge saw projects/tasks/etc. as "not present," kept the local copy, and silently dropped anything that existed only online. Confirmed live: a direct fetch of the projects list returned all 63 rows incl. the new prospect, but the sync\'s own read returned the projects list as undefined.',
+    'Fix: the offloaded-list fetch now runs for BOTH read paths, so the fast path also brings projects/tasks/resources/etc. down. This is what actually carries online-created records to the LAN.',
+    'Also kept from 2.14.23: the offloaded-list fetch is paced (5 at a time) with stronger retry/back-off, so a busy SharePoint is less likely to drop a list.',
+    'Note: client fix — devices pick it up on refresh once the LAN web app is redeployed. No server/DB change.',
+  ]},
   {version:'2.14.23',date:'2026-09-21',type:'fix',notes:[
     'Fixed the real reason projects/prospects created online did not appear on the LAN. The SharePoint pull fetched all ~40 lists in parallel; SharePoint rate-limited the burst, and a throttled list exhausted its retries and returned null. The merge treats null as "list unavailable" and keeps the local copy — so any record that existed ONLY online (a newly created project) was silently skipped and never carried down to the LAN/server. Confirmed live: a new prospect was present in SharePoint and in a direct fetch, but the sync\'s own fetch returned the projects list as null every time.',
     'The sub-list fetch is now paced with a small concurrency cap (5 at a time) instead of firing everything at once — the push side already wrote serially for this exact rate-limit reason. Retries increased to 4 with a much longer back-off on 429 (throttle) responses. Together these let each list fetch actually succeed, so online→LAN pulls stop dropping records.',

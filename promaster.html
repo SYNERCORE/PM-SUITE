@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.23';
-const APP_BUILD='20260921a';
+const APP_VERSION='2.14.24';
+const APP_BUILD='20260921b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Reliability: records created online now reach the LAN dependably. The SharePoint fetch used to request all ~40 lists at once, which SharePoint throttled — a throttled list came back empty and its new records (e.g. a project created online) were silently skipped. Fetches are now paced in small batches with stronger retry, so online→LAN pulls stop dropping records.';
+const APP_RELEASE_NOTE='Fixes the real cause of records created online not appearing on the LAN. The fast SharePoint fetch (used on every sync once cached) returned only the small main record and skipped the separate lists that hold projects, tasks, resources and the rest — so anything created online in those lists was invisible to the pull and never came down. Both fetch paths now load those lists, so online→LAN sync brings everything down.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.24',date:'2026-09-21',type:'fix',notes:[
+    'THE real fix for "records created online never reach the LAN." The SharePoint read (_spFetchRemote) has two paths: a fast path that fetches one cached record directly, and a slower search path. Only the slow path went on to fetch the offloaded lists (projects, tasks, resources, costs, warehouse, etc.) that are stored separately from the small main record. Once a device caches the record id — which happens after its first sync — every read takes the FAST path, which returned the main record WITHOUT those lists. So the merge saw projects/tasks/etc. as "not present," kept the local copy, and silently dropped anything that existed only online. Confirmed live: a direct fetch of the projects list returned all 63 rows incl. the new prospect, but the sync\'s own read returned the projects list as undefined.',
+    'Fix: the offloaded-list fetch now runs for BOTH read paths, so the fast path also brings projects/tasks/resources/etc. down. This is what actually carries online-created records to the LAN.',
+    'Also kept from 2.14.23: the offloaded-list fetch is paced (5 at a time) with stronger retry/back-off, so a busy SharePoint is less likely to drop a list.',
+    'Note: client fix — devices pick it up on refresh once the LAN web app is redeployed. No server/DB change.',
+  ]},
   {version:'2.14.23',date:'2026-09-21',type:'fix',notes:[
     'Fixed the real reason projects/prospects created online did not appear on the LAN. The SharePoint pull fetched all ~40 lists in parallel; SharePoint rate-limited the burst, and a throttled list exhausted its retries and returned null. The merge treats null as "list unavailable" and keeps the local copy — so any record that existed ONLY online (a newly created project) was silently skipped and never carried down to the LAN/server. Confirmed live: a new prospect was present in SharePoint and in a direct fetch, but the sync\'s own fetch returned the projects list as null every time.',
     'The sub-list fetch is now paced with a small concurrency cap (5 at a time) instead of firing everything at once — the push side already wrote serially for this exact rate-limit reason. Retries increased to 4 with a much longer back-off on 429 (throttle) responses. Together these let each list fetch actually succeed, so online→LAN pulls stop dropping records.',
@@ -7344,6 +7350,8 @@ function _spHash(data) {
 
 // ── Fetch the raw item from SharePoint (no side effects) ──
 async function _spFetchRemote(token, siteId, listId) {
+  let parsed = null;
+
   // Strategy 1: fetch by cached item ID directly (fastest, no filter needed)
   if (_spItemId) {
     const res = await fetch(
@@ -7354,43 +7362,54 @@ async function _spFetchRemote(token, siteId, listId) {
       const item = await res.json();
       const raw = item.fields?.DataBlob || '';
       if (!raw) return null;
-      return JSON.parse(raw);
-    }
-    if (res.status === 404) {
+      parsed = JSON.parse(raw);
+      // NOTE: do NOT return here. The offloaded sub-lists (projects, tasks, …) are
+      // stripped from this main blob, so returning now hands back a remote with those
+      // entities undefined — and the merge then keeps local and silently drops every
+      // online-created record in an offloaded list. Fall through to PHASE 2 below,
+      // which runs for BOTH strategies. (This fast path is the one that runs on every
+      // sync once the item id is cached, so this was the real online→LAN stall.)
+    } else if (res.status === 404) {
       // Item was deleted — clear cache and fall through to search
       _spItemId = ''; localStorage.removeItem('shic_sp_itemid');
     } else {
       throw new Error('Fetch failed: ' + res.status);
     }
   }
-  // Strategy 2: fetch all items (list should only have 1 item) — no filter needed
-  const res = await fetch(
-    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=10`,
-    { headers: { Authorization: 'Bearer ' + token } }
-  );
-  if (!res.ok) throw new Error('Fetch failed: ' + res.status);
-  const result = await res.json();
-  if (!result.value || result.value.length === 0) return null;
-  // Sort by UpdatedAt descending — pick the newest, auto-delete any duplicates
-  const allItems = result.value.filter(i => i.fields?.Title === 'SHIC_Main' || i.fields?.DataKey === 'main');
-  allItems.sort((a, b) => new Date(b.fields?.UpdatedAt || 0) - new Date(a.fields?.UpdatedAt || 0));
-  const item = allItems[0];
-  if (allItems.length > 1) {
-    // Delete the older duplicates silently
-    for (let di = 1; di < allItems.length; di++) {
-      fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${allItems[di].id}`,
-        { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } }).catch(() => {});
+
+  // Strategy 2: fetch all items (list should only have 1 item) — no filter needed.
+  // Only needed when the cached-id fast path didn't already resolve the main blob.
+  if (parsed === null) {
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=10`,
+      { headers: { Authorization: 'Bearer ' + token } }
+    );
+    if (!res.ok) throw new Error('Fetch failed: ' + res.status);
+    const result = await res.json();
+    if (!result.value || result.value.length === 0) return null;
+    // Sort by UpdatedAt descending — pick the newest, auto-delete any duplicates
+    const allItems = result.value.filter(i => i.fields?.Title === 'SHIC_Main' || i.fields?.DataKey === 'main');
+    allItems.sort((a, b) => new Date(b.fields?.UpdatedAt || 0) - new Date(a.fields?.UpdatedAt || 0));
+    const item = allItems[0];
+    if (allItems.length > 1) {
+      // Delete the older duplicates silently
+      for (let di = 1; di < allItems.length; di++) {
+        fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${allItems[di].id}`,
+          { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } }).catch(() => {});
+      }
+      console.warn('[SP] Auto-deleted ' + (allItems.length - 1) + ' duplicate SHIC_Main row(s)');
     }
-    console.warn('[SP] Auto-deleted ' + (allItems.length - 1) + ' duplicate SHIC_Main row(s)');
+    if (item.id) { _spItemId = item.id; localStorage.setItem('shic_sp_itemid', _spItemId); }
+    const raw = item.fields?.DataBlob || '';
+    if (!raw) return null;
+    parsed = JSON.parse(raw);
   }
-  if (item.id) { _spItemId = item.id; localStorage.setItem('shic_sp_itemid', _spItemId); }
-  const raw = item.fields?.DataBlob || '';
-  if (!raw) return null;
-  const parsed = JSON.parse(raw);
 
   // ── PHASE 2: Fetch offloaded high-volume data from sub-lists ──
-  // These were stripped from the main blob to keep it small.
-  // Fetch them and merge back into the data structure for the app.
+  // These were stripped from the main blob to keep it small. Fetch them and merge
+  // back into the data structure for the app. This MUST run for both strategies —
+  // otherwise the cached-id fast path returns the main blob without projects/tasks/…
+  // and online-created records in those lists never reach this device.
   try {
     const subResults = await _spFetchAllSubLists(token);
     Object.entries(subResults).forEach(([dataKey, records]) => {

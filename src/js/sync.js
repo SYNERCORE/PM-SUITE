@@ -2079,6 +2079,8 @@ function _spHash(data) {
 
 // ── Fetch the raw item from SharePoint (no side effects) ──
 async function _spFetchRemote(token, siteId, listId) {
+  let parsed = null;
+
   // Strategy 1: fetch by cached item ID directly (fastest, no filter needed)
   if (_spItemId) {
     const res = await fetch(
@@ -2089,43 +2091,54 @@ async function _spFetchRemote(token, siteId, listId) {
       const item = await res.json();
       const raw = item.fields?.DataBlob || '';
       if (!raw) return null;
-      return JSON.parse(raw);
-    }
-    if (res.status === 404) {
+      parsed = JSON.parse(raw);
+      // NOTE: do NOT return here. The offloaded sub-lists (projects, tasks, …) are
+      // stripped from this main blob, so returning now hands back a remote with those
+      // entities undefined — and the merge then keeps local and silently drops every
+      // online-created record in an offloaded list. Fall through to PHASE 2 below,
+      // which runs for BOTH strategies. (This fast path is the one that runs on every
+      // sync once the item id is cached, so this was the real online→LAN stall.)
+    } else if (res.status === 404) {
       // Item was deleted — clear cache and fall through to search
       _spItemId = ''; localStorage.removeItem('shic_sp_itemid');
     } else {
       throw new Error('Fetch failed: ' + res.status);
     }
   }
-  // Strategy 2: fetch all items (list should only have 1 item) — no filter needed
-  const res = await fetch(
-    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=10`,
-    { headers: { Authorization: 'Bearer ' + token } }
-  );
-  if (!res.ok) throw new Error('Fetch failed: ' + res.status);
-  const result = await res.json();
-  if (!result.value || result.value.length === 0) return null;
-  // Sort by UpdatedAt descending — pick the newest, auto-delete any duplicates
-  const allItems = result.value.filter(i => i.fields?.Title === 'SHIC_Main' || i.fields?.DataKey === 'main');
-  allItems.sort((a, b) => new Date(b.fields?.UpdatedAt || 0) - new Date(a.fields?.UpdatedAt || 0));
-  const item = allItems[0];
-  if (allItems.length > 1) {
-    // Delete the older duplicates silently
-    for (let di = 1; di < allItems.length; di++) {
-      fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${allItems[di].id}`,
-        { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } }).catch(() => {});
+
+  // Strategy 2: fetch all items (list should only have 1 item) — no filter needed.
+  // Only needed when the cached-id fast path didn't already resolve the main blob.
+  if (parsed === null) {
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=10`,
+      { headers: { Authorization: 'Bearer ' + token } }
+    );
+    if (!res.ok) throw new Error('Fetch failed: ' + res.status);
+    const result = await res.json();
+    if (!result.value || result.value.length === 0) return null;
+    // Sort by UpdatedAt descending — pick the newest, auto-delete any duplicates
+    const allItems = result.value.filter(i => i.fields?.Title === 'SHIC_Main' || i.fields?.DataKey === 'main');
+    allItems.sort((a, b) => new Date(b.fields?.UpdatedAt || 0) - new Date(a.fields?.UpdatedAt || 0));
+    const item = allItems[0];
+    if (allItems.length > 1) {
+      // Delete the older duplicates silently
+      for (let di = 1; di < allItems.length; di++) {
+        fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${allItems[di].id}`,
+          { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } }).catch(() => {});
+      }
+      console.warn('[SP] Auto-deleted ' + (allItems.length - 1) + ' duplicate SHIC_Main row(s)');
     }
-    console.warn('[SP] Auto-deleted ' + (allItems.length - 1) + ' duplicate SHIC_Main row(s)');
+    if (item.id) { _spItemId = item.id; localStorage.setItem('shic_sp_itemid', _spItemId); }
+    const raw = item.fields?.DataBlob || '';
+    if (!raw) return null;
+    parsed = JSON.parse(raw);
   }
-  if (item.id) { _spItemId = item.id; localStorage.setItem('shic_sp_itemid', _spItemId); }
-  const raw = item.fields?.DataBlob || '';
-  if (!raw) return null;
-  const parsed = JSON.parse(raw);
 
   // ── PHASE 2: Fetch offloaded high-volume data from sub-lists ──
-  // These were stripped from the main blob to keep it small.
-  // Fetch them and merge back into the data structure for the app.
+  // These were stripped from the main blob to keep it small. Fetch them and merge
+  // back into the data structure for the app. This MUST run for both strategies —
+  // otherwise the cached-id fast path returns the main blob without projects/tasks/…
+  // and online-created records in those lists never reach this device.
   try {
     const subResults = await _spFetchAllSubLists(token);
     Object.entries(subResults).forEach(([dataKey, records]) => {
