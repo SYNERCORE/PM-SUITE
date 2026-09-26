@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.24';
-const APP_BUILD='20260921b';
+const APP_VERSION='2.14.25';
+const APP_BUILD='20260926a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Fixes the real cause of records created online not appearing on the LAN. The fast SharePoint fetch (used on every sync once cached) returned only the small main record and skipped the separate lists that hold projects, tasks, resources and the rest — so anything created online in those lists was invisible to the pull and never came down. Both fetch paths now load those lists, so online→LAN sync brings everything down.';
+const APP_RELEASE_NOTE='Resource Allocation import now uses the same columns as the export, so Export → edit in Excel → re-import is a clean round-trip. The import "Download Template" button was handing out the Usage-Log template by mistake — it asked for TransactionType/Quantity/UnitCost (which allocation import ignores) and left out Role, Allocated Qty, Planned/Actual Cost, Status and the dates, so imported rows came in blank. The template now matches the export exactly.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.25',date:'2026-09-26',type:'fix',notes:[
+    'Resource Allocation import template now matches the export. The Import dialog\'s "Download Template" button was giving out the Usage-Log template by mistake (an old copy-paste): it asked for LogID/AllocationID/TransactionType/Date/Quantity/UnitCost/IssuedTo/ApprovedBy — none of which the allocation importer reads — and omitted Role, AllocatedQty, PlannedCost, ActualCost, Status, StartDate and EndDate. Filling it in produced rows with zero quantity, zero cost, no dates and status "active".',
+    'The template now offers exactly the columns the Export writes (ID, ProjectID, ResourceID, ResourceName, ResourceType, Unit, Role, AllocatedQty, PlannedCost, ActualCost, Status, StartDate, EndDate, Notes), so Export → edit → re-import is a clean round-trip. The importer already accepted these fields; only the template button was wrong.',
+    'Note: client fix — devices pick it up on refresh once the LAN web app is redeployed. No server/DB change.',
+  ]},
   {version:'2.14.24',date:'2026-09-21',type:'fix',notes:[
     'THE real fix for "records created online never reach the LAN." The SharePoint read (_spFetchRemote) has two paths: a fast path that fetches one cached record directly, and a slower search path. Only the slow path went on to fetch the offloaded lists (projects, tasks, resources, costs, warehouse, etc.) that are stored separately from the small main record. Once a device caches the record id — which happens after its first sync — every read takes the FAST path, which returned the main record WITHOUT those lists. So the merge saw projects/tasks/etc. as "not present," kept the local copy, and silently dropped anything that existed only online. Confirmed live: a direct fetch of the projects list returned all 63 rows incl. the new prospect, but the sync\'s own read returned the projects list as undefined.',
     'Fix: the offloaded-list fetch now runs for BOTH read paths, so the fast path also brings projects/tasks/resources/etc. down. This is what actually carries online-created records to the LAN.',
@@ -14901,7 +14906,11 @@ function exportUsageLogCSV(pid){exportUsageLogExcel(pid);}
 
 // ── RESOURCE ALLOCATION IMPORT ────────────────────────────
 function importAllocExcel(pid){
-  const template='LogID,ProjectID,AllocationID,ResourceID,ResourceName,ResourceType,Category,TransactionType,Date,Quantity,Unit,UnitCost,IssuedTo,ApprovedBy,Reference,Notes';
+  // Template MUST mirror exportAllocExcel's columns so export → edit → re-import is a
+  // clean round-trip. (This used to be a copy of the Usage-Log template, which asked
+  // for TransactionType/Quantity/UnitCost — fields the allocation importer ignores —
+  // and omitted Role/AllocatedQty/PlannedCost/ActualCost/Status/dates.)
+  const template='ID,ProjectID,ResourceID,ResourceName,ResourceType,Unit,Role,AllocatedQty,PlannedCost,ActualCost,Status,StartDate,EndDate,Notes';
   $('#genericModalTitle').textContent='Import Resource Allocations — '+pid;
   $('#genericModalBody').innerHTML=`
   <div style="padding:12px;background:rgba(56,139,253,.08);border-radius:8px;margin-bottom:14px;border-left:3px solid var(--accent-blue)">

@@ -3379,7 +3379,11 @@ function exportUsageLogCSV(pid){exportUsageLogExcel(pid);}
 
 // ── RESOURCE ALLOCATION IMPORT ────────────────────────────
 function importAllocExcel(pid){
-  const template='LogID,ProjectID,AllocationID,ResourceID,ResourceName,ResourceType,Category,TransactionType,Date,Quantity,Unit,UnitCost,IssuedTo,ApprovedBy,Reference,Notes';
+  // Template MUST mirror exportAllocExcel's columns so export → edit → re-import is a
+  // clean round-trip. (This used to be a copy of the Usage-Log template, which asked
+  // for TransactionType/Quantity/UnitCost — fields the allocation importer ignores —
+  // and omitted Role/AllocatedQty/PlannedCost/ActualCost/Status/dates.)
+  const template='ID,ProjectID,ResourceID,ResourceName,ResourceType,Unit,Role,AllocatedQty,PlannedCost,ActualCost,Status,StartDate,EndDate,Notes';
   $('#genericModalTitle').textContent='Import Resource Allocations — '+pid;
   $('#genericModalBody').innerHTML=`
   <div style="padding:12px;background:rgba(56,139,253,.08);border-radius:8px;margin-bottom:14px;border-left:3px solid var(--accent-blue)">
