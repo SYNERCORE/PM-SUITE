@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.26';
-const APP_BUILD='20260928a';
+const APP_VERSION='2.14.27';
+const APP_BUILD='20260928b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Resources are now auto-tagged Warehouse or PR. Each resource is matched by name against the warehouse registry: if it is stocked, it shows a green WAREHOUSE badge (withdraw from stock); if it is not registered, it shows an amber PR badge (needs a Purchase Requisition). The tags appear in the allocation import preview (with a "N in warehouse / N need PR" summary before you import), on every allocation row, and on the Transaction Log — so you can tell at a glance what to withdraw vs what to buy.';
+const APP_RELEASE_NOTE='Printed PDFs now carry the Business Unit and an editable letterhead. Project Summary and Gantt PDFs show which BU each project belongs to, and the Gantt is grouped by Business Unit. A new Settings → Report Letterhead lets you upload a company logo (shown on the left of every PDF) and set the address and contact line once, plus the document & version control number separately for each output (Gantt, Project Summary, Daily Meeting) since each is its own controlled form. Nothing changes until you set them — the Gantt keeps its SY3-F-EPD-002 default.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.27',date:'2026-09-28',type:'feature',notes:[
+    'Printed PDFs are now aligned to Business Units. The Project Summary PDF shows the project\'s BU in its header; the Gantt PDF (both the jsPDF export and the browser print) is now grouped by Business Unit with a colored BU band/heading, and its projects are ordered so each BU stays together (main company first).',
+    'New editable letterhead — Settings → Report Letterhead. Upload a company logo (drawn on the LEFT of the Gantt letterhead and shown on the Project Summary and Daily Meeting headers), and set the address + contact line once. Previously the Gantt letterhead was hardcoded (blank left box, fixed SY3 address) and could not be changed without a code edit.',
+    'Document & version control is now per output. Because each printed form is its own controlled document, the Doc Control No. and Revision are set separately for the Gantt Chart, Project Summary, and Daily Meeting Minutes. The Gantt keeps SY3-F-EPD-002 / REV.01/04-10-2022 as its default until you change it; the others start blank.',
+    'Note: client-only change; devices pick it up on refresh once the LAN web app is redeployed. The logo and text live in the synced settings, so they apply everywhere after one save. No server/DB change.',
+  ]},
   {version:'2.14.26',date:'2026-09-28',type:'feature',notes:[
     'Resources are now auto-tagged Warehouse vs PR so you can tell at a glance whether an item should be withdrawn from stock or purchased. Each resource name is matched against the warehouse registry (by name, and also code/barcode when present, case-insensitive). A match shows a green WAREHOUSE badge; no match shows an amber PR (Purchase Requisition) badge. This is computed live, so it always reflects the current registry.',
     'The allocation Import preview now shows a Source column and a "N in warehouse / N need PR" summary BEFORE you import — useful because source files usually have no warehouse code, so the app detects it for you by name.',
@@ -12156,6 +12162,10 @@ function printProjectDetail(pid){
   const cur=(AppState.data.settings?.currency)||'PHP';
   const sym={PHP:'₱',USD:'$',EUR:'€',SAR:'﷼',GBP:'£',SGD:'S$'}[cur]||cur+' ';
   const fmt=n=>Number(n||0).toLocaleString();
+  // Business Unit + shared letterhead (logo/address) + this output's doc control
+  const _bu=(()=>{ if(!p.businessUnit)return null; const b=(AppState.data.businessUnits||[]).find(x=>x.id===p.businessUnit); return b?{name:b.name,color:b.color||'#1a237e'}:null; })();
+  const _lh=(typeof _pdfLetterhead==='function')?_pdfLetterhead():{logoDataUrl:'',addressLine:'',contactLine:''};
+  const _dc=(typeof _pdfDocCtrl==='function')?_pdfDocCtrl('projectSummary'):{docNo:'',rev:''};
   const usageMap={};
   logs.forEach(l=>{
     if(!usageMap[l.allocationId])usageMap[l.allocationId]={issued:0,returned:0};
@@ -12176,8 +12186,17 @@ function printProjectDetail(pid){
     .kpi-lbl{font-size:9px;color:#666}
     @media print{body{padding:10px}}
   </style></head><body>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:2px solid #1a237e;padding-bottom:8px;margin-bottom:10px">
+    <div style="min-width:60px">${_lh.logoDataUrl?`<img src="${_lh.logoDataUrl}" style="max-height:46px;max-width:150px;object-fit:contain">`:''}</div>
+    <div style="text-align:right;font-size:8.5px;color:#666;line-height:1.5">
+      ${_dc.docNo?`<div style="font-size:10px;font-weight:700;color:#1a237e">${esc(_dc.docNo)}</div>`:''}
+      ${_dc.rev?`<div>${esc(_dc.rev)}</div>`:''}
+      ${_lh.addressLine?`<div>${esc(_lh.addressLine)}</div>`:''}
+      ${_lh.contactLine?`<div>${esc(_lh.contactLine)}</div>`:''}
+    </div>
+  </div>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-    <div><h1>${esc(p.name)}</h1><div style="font-size:11px;color:#555">${p.id} · ${esc(p.client)} · PM: ${esc(p.pm||'—')}</div></div>
+    <div><h1>${esc(p.name)}</h1><div style="font-size:11px;color:#555">${p.id} · ${esc(p.client)} · PM: ${esc(p.pm||'—')}${_bu?` · <span style="color:${_bu.color};font-weight:700">BU: ${esc(_bu.name)}</span>`:''}</div></div>
     <div style="font-size:10px;color:#777;text-align:right">Printed: ${new Date().toLocaleString()}<br>Status: ${p.status} · Priority: ${p.priority}</div>
   </div>
   <div class="grid">
@@ -18991,6 +19010,20 @@ function _durDays(startDate,endDate,durationHrs,hpd){
   return 1;
 }
 
+// BU info for a project (name + color), for grouping/labelling the export.
+function _ganttProjBU(p){
+  const company=(AppState.data.settings&&AppState.data.settings.companyName)||'Main';
+  if(!p||!p.businessUnit)return{id:'_main',name:company+' — Main',color:'#8b949e'};
+  const bu=(AppState.data.businessUnits||[]).find(b=>b.id===p.businessUnit);
+  return bu?{id:bu.id,name:bu.name||'Business Unit',color:bu.color||'#388bfd'}:{id:'_unknown',name:'Unknown BU',color:'#8b949e'};
+}
+function _hexRgb(h){
+  h=String(h||'').replace('#','');
+  if(h.length===3)h=h.split('').map(c=>c+c).join('');
+  const n=parseInt(h,16); if(isNaN(n))return[139,148,158];
+  return[(n>>16)&255,(n>>8)&255,n&255];
+}
+
 function _loadJsPDF(){
   return new Promise((res,rej)=>{
     if(window.jspdf){res();return;}
@@ -19011,8 +19044,17 @@ async function exportGanttPDF(projectId){
   const allTasks=AppState.data.tasks||[];
 
   const filter=projectId||(typeof ganttProjFilter!=='undefined'?ganttProjFilter:'all');
-  const targets=filter==='all'?allProjects:allProjects.filter(p=>p.id===filter);
+  const targets=(filter==='all'?allProjects.slice():allProjects.filter(p=>p.id===filter));
   if(!targets.length){showToast('No projects to export','error');return;}
+  // Group by Business Unit — keep each BU's projects consecutive, main company first.
+  targets.sort((a,b)=>{
+    const ba=_ganttProjBU(a),bb=_ganttProjBU(b);
+    if(ba.id==='_main'&&bb.id!=='_main')return -1;
+    if(bb.id==='_main'&&ba.id!=='_main')return 1;
+    return ba.name.localeCompare(bb.name)||(a.id||'').localeCompare(b.id||'');
+  });
+  const lh=_pdfLetterhead();
+  const gDoc=_pdfDocCtrl('gantt');
 
   // ── Page constants (landscape A4) ─────────────────────────
   const PW=297,PH=210;
@@ -19026,11 +19068,12 @@ async function exportGanttPDF(projectId){
   const GANTT_W=CW-TABLE_W-1;
 
   const DOC_H=20;   // letterhead height
+  const BU_H=4.8;   // business-unit band under the letterhead
   const MH_H=6;     // month header row
   const WK_H=5;     // week header row
   const ROW_H=5.8;
   const FOOTER_H=10;
-  const USABLE=PH-MT-MB-DOC_H-MH_H-WK_H-FOOTER_H;
+  const USABLE=PH-MT-MB-DOC_H-BU_H-MH_H-WK_H-FOOTER_H;
   const RPP=Math.floor(USABLE/ROW_H);
 
   // Colours
@@ -19094,9 +19137,20 @@ async function exportGanttPDF(projectId){
 
       const Y0=MT;
 
-      // ── Letterhead (no logo) ───────────────────────────────
+      // ── Letterhead ─────────────────────────────────────────
       doc.setFillColor(...WHITE);
       doc.rect(ML,Y0,CW,DOC_H,'F');
+
+      // Left: company logo (from Settings → Report Letterhead), if set
+      if(lh.logoDataUrl){
+        try{
+          const props=doc.getImageProperties(lh.logoDataUrl);
+          const maxW=38,maxH=DOC_H-5;
+          const r=Math.min(maxW/props.width,maxH/props.height);
+          const w=props.width*r,h=props.height*r;
+          doc.addImage(lh.logoDataUrl,(props.fileType||'PNG'),ML+3,Y0+(DOC_H-h)/2,w,h);
+        }catch(e){}
+      }
 
       // Center: JO # + title
       doc.setFont('helvetica','bold');doc.setFontSize(9);
@@ -19107,23 +19161,31 @@ async function exportGanttPDF(projectId){
       doc.text(titleLines[0]||'',PW/2,Y0+13,{align:'center'});
       if(titleLines[1])doc.text(titleLines[1],PW/2,Y0+18,{align:'center'});
 
-      // Right: form ref + address
-      const rx=ML+CW;
-      doc.setFont('helvetica','bold');doc.setFontSize(7.5);
-      doc.setTextColor(...NAVY);
-      doc.text('SY3-F-EPD-002',rx,Y0+5,{align:'right'});
-      doc.setFont('helvetica','normal');doc.setFontSize(6);
-      doc.text('REV.01/04-10-2022',rx,Y0+9,{align:'right'});
-      doc.setFontSize(5.8);doc.setTextColor(...TMUT);
-      doc.text('153 Arnaldo Highway, Barangay Santiago, General Trias, Cavite, Philippines',rx,Y0+13.5,{align:'right'});
-      doc.text('Tel. No.: (046) 683-7580 • (046) 683-7581  TeleFax No.: 046 412-5513',rx,Y0+17.5,{align:'right'});
+      // Right: per-output doc/version control + shared address + contact
+      const rx=ML+CW-2;
+      if(gDoc.docNo){ doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(...NAVY);
+        doc.text(gDoc.docNo,rx,Y0+5,{align:'right'}); }
+      if(gDoc.rev){ doc.setFont('helvetica','normal');doc.setFontSize(6);doc.setTextColor(...NAVY);
+        doc.text(gDoc.rev,rx,Y0+9,{align:'right'}); }
+      doc.setFont('helvetica','normal');doc.setFontSize(5.8);doc.setTextColor(...TMUT);
+      if(lh.addressLine)doc.splitTextToSize(lh.addressLine,120).slice(0,1).forEach(t=>doc.text(t,rx,Y0+13.5,{align:'right'}));
+      if(lh.contactLine)doc.splitTextToSize(lh.contactLine,120).slice(0,1).forEach(t=>doc.text(t,rx,Y0+17.5,{align:'right'}));
 
       // Letterhead border
       doc.setDrawColor(...BORDER);doc.setLineWidth(0.3);
       doc.rect(ML,Y0,CW,DOC_H,'S');
 
+      // ── Business-Unit band ─────────────────────────────────
+      const buInfo=_ganttProjBU(project);
+      const buRGB=_hexRgb(buInfo.color);
+      const BUY=Y0+DOC_H;
+      doc.setFillColor(...buRGB);
+      doc.rect(ML,BUY,CW,BU_H,'F');
+      doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(...WHITE);
+      doc.text('BUSINESS UNIT: '+String(buInfo.name).toUpperCase(),ML+3,BUY+BU_H-1.4);
+
       // ── Column + Timeline Headers ──────────────────────────
-      const CHY=Y0+DOC_H;
+      const CHY=BUY+BU_H;
 
       doc.setFillColor(...HBGD);
       doc.rect(ML,CHY,TABLE_W,MH_H+WK_H,'F');
@@ -19368,15 +19430,28 @@ function buildGanttPrintHTML(projectId,opts){
   const esc=_ganttPrintEsc;
   const projects=(AppState.data.projects)||[];
   const tasks=(AppState.data.tasks)||[];
-  const targets=(projectId&&projectId!=='all')?projects.filter(p=>p.id===projectId):projects.filter(p=>p.status!=='prospect');
+  const targets=(projectId&&projectId!=='all')?projects.filter(p=>p.id===projectId):projects.filter(p=>p.status!=='prospect').slice();
   if(!targets.length) return '';
+  // Group by Business Unit — main company first, then BUs by name.
+  targets.sort((a,b)=>{
+    const ba=_ganttProjBU(a),bb=_ganttProjBU(b);
+    if(ba.id==='_main'&&bb.id!=='_main')return -1;
+    if(bb.id==='_main'&&ba.id!=='_main')return 1;
+    return ba.name.localeCompare(bb.name)||(a.id||'').localeCompare(b.id||'');
+  });
+  const lh=_pdfLetterhead(), gDoc=_pdfDocCtrl('gantt');
   const company=(AppState.data.settings&&AppState.data.settings.companyName)||'ProMaster';
   const fmt=d=>d?d:'—';
   const varText=t=>{ if(!t.actualEnd||!t.endDate) return ''; const d=Math.round((Date.parse(t.actualEnd)-Date.parse(t.endDate))/86400000); if(isNaN(d))return ''; return d===0?'on&nbsp;time':(d>0?('+'+d+'d&nbsp;late'):(d+'d&nbsp;early')); };
   const varCls=t=>{ if(!t.actualEnd||!t.endDate) return ''; const d=Math.round((Date.parse(t.actualEnd)-Date.parse(t.endDate))/86400000); return isNaN(d)?'':(d>0?'late':'early'); };
 
   let body='';
+  let _lastBU=null;
   targets.forEach(p=>{
+    const _bu=_ganttProjBU(p);
+    if(_bu.id!==_lastBU){ _lastBU=_bu.id;
+      body+=`<div class="buhead" style="background:${_bu.color}">BUSINESS UNIT — ${esc(_bu.name)}</div>`;
+    }
     const pts=(typeof _orderTasksHier==='function')
       ? _orderTasksHier(tasks.filter(t=>t.projectId===p.id&&!t._deleted))
       : tasks.filter(t=>t.projectId===p.id&&!t._deleted).map(t=>({t,depth:0}));
@@ -19434,9 +19509,14 @@ function buildGanttPrintHTML(projectId,opts){
     *{box-sizing:border-box}
     html,body{background:#fff}
     body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0;padding:14px;font-size:11px}
-    .hdr{border-bottom:2px solid #1a253a;padding-bottom:8px;margin-bottom:12px}
+    .hdr{border-bottom:2px solid #1a253a;padding-bottom:8px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .hdr .logo img{max-height:46px;max-width:150px;object-fit:contain}
+    .hdr .mid{flex:1;text-align:center}
     .hdr h1{margin:0;font-size:17px;color:#1a253a}
     .hdr .sub{color:#555;font-size:11px;margin-top:2px}
+    .hdr .ref{text-align:right;font-size:8.5px;color:#555;white-space:nowrap}
+    .hdr .ref b{color:#1a253a;font-size:10px}
+    .buhead{margin:14px 0 8px;padding:4px 10px;color:#fff;font-weight:800;font-size:11px;letter-spacing:.6px;border-radius:3px;page-break-after:avoid}
     section.proj{margin-bottom:18px;page-break-inside:auto}
     section.proj h2{font-size:13px;margin:0 0 6px;color:#1a253a;border-left:4px solid #c2650f;padding-left:8px}
     table{border-collapse:collapse;width:100%}
@@ -19459,8 +19539,12 @@ function buildGanttPrintHTML(projectId,opts){
     .foot{margin-top:10px;border-top:1px solid #ddd;padding-top:6px;color:#888;font-size:9px}
     @media print{ .noprint{display:none} }
   </style></head><body>
-    <div class="hdr"><h1>Project Gantt — Planned vs Actual</h1>
-      <div class="sub">${esc(company)} &middot; ${targets.length} project(s) &middot; printed ${esc(new Date().toLocaleString())}</div></div>
+    <div class="hdr">
+      <div class="logo">${lh.logoDataUrl?`<img src="${lh.logoDataUrl}" alt="logo">`:''}</div>
+      <div class="mid"><h1>Project Gantt — Planned vs Actual</h1>
+        <div class="sub">${esc(company)} &middot; ${targets.length} project(s) &middot; printed ${esc(new Date().toLocaleString())}</div></div>
+      <div class="ref">${gDoc.docNo?`<b>${esc(gDoc.docNo)}</b><br>`:''}${gDoc.rev?esc(gDoc.rev)+'<br>':''}${lh.addressLine?esc(lh.addressLine)+'<br>':''}${lh.contactLine?esc(lh.contactLine):''}</div>
+    </div>
     ${body}
     <div class="foot">Grey bar = planned schedule · Blue bar = actual (to date). Generated by ProMaster.</div>
   </body></html>`;
@@ -24327,6 +24411,8 @@ function dmPrintMeeting(opts) {
   opts = opts || { includeActions: true, includeCompleted: false, includeUpdates: true, includeProjectHistory: false, projectIds: null };
   const companyName = AppState.data.settings?.companyName || 'SHIC';
   const BUs = AppState.data.businessUnits || [];
+  const _lh = (typeof _pdfLetterhead==='function') ? _pdfLetterhead() : {logoDataUrl:'',addressLine:'',contactLine:''};
+  const _dc = (typeof _pdfDocCtrl==='function') ? _pdfDocCtrl('meeting') : {docNo:'',rev:''};
   const logs = AppState.data.dailyMeetingLogs || [];
   const dateLogs = logs.filter(l => l.date === _dmViewDate);
   const dateLogMap = {}; dateLogs.forEach(l => dateLogMap[l.projectId] = l);
@@ -24483,10 +24569,19 @@ function dmPrintMeeting(opts) {
       @media print { body { margin: 10mm; } .no-print { display: none; } }
     </style>
   </head><body>
-    <div style="text-align:center;margin-bottom:20px;border-bottom:2px solid #1565c0;padding-bottom:12px">
-      <div style="font-size:18px;font-weight:900;letter-spacing:1px">${companyName.toUpperCase()}</div>
-      <div style="font-size:14px;font-weight:700;margin-top:4px">DAILY PROJECT STATUS MEETING</div>
-      <div style="font-size:12px;color:#555;margin-top:4px">${dateStr}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px;border-bottom:2px solid #1565c0;padding-bottom:12px">
+      <div style="min-width:60px">${_lh.logoDataUrl?`<img src="${_lh.logoDataUrl}" style="max-height:46px;max-width:150px;object-fit:contain">`:''}</div>
+      <div style="text-align:center;flex:1">
+        <div style="font-size:18px;font-weight:900;letter-spacing:1px">${companyName.toUpperCase()}</div>
+        <div style="font-size:14px;font-weight:700;margin-top:4px">DAILY PROJECT STATUS MEETING</div>
+        <div style="font-size:12px;color:#555;margin-top:4px">${dateStr}</div>
+      </div>
+      <div style="text-align:right;font-size:8.5px;color:#666;line-height:1.5;white-space:nowrap">
+        ${_dc.docNo?`<div style="font-size:10px;font-weight:700;color:#1565c0">${_dc.docNo}</div>`:''}
+        ${_dc.rev?`<div>${_dc.rev}</div>`:''}
+        ${_lh.addressLine?`<div>${_lh.addressLine}</div>`:''}
+        ${_lh.contactLine?`<div>${_lh.contactLine}</div>`:''}
+      </div>
     </div>
     ${opts.includeActions && totalActionsShown === 0 ? `<div style="margin-bottom:14px;padding:10px 12px;background:#fff3cd;border:1px solid #ffc107;border-radius:4px;font-size:11px;color:#856404">
       <strong>⚠ No action items found</strong> for the selected project(s).${!opts.includeCompleted ? ' Try checking <em>"Also include closed actions"</em> to see them.' : ' Action items can be added from the Daily Meeting or the Actions module.'}
@@ -25729,6 +25824,7 @@ AppState.ensureData();
     }
   },100);
 const settings=AppState.data.settings||{companyName:'SHIC',currency:'PHP',timezone:'Asia/Manila'};
+const lh=_pdfLetterhead();
 // Server URL and entity routing are per-device and live outside the synced
 // settings blob, so a SharePoint sync can never clear them.
 const _dev=typeof getDeviceSettings==='function'?getDeviceSettings():{};
@@ -25930,6 +26026,41 @@ ${renderSpPanel()}
       <button class="btn btn-secondary btn-sm" onclick="applyPalette('dark')"><i class="fas fa-undo"></i> Reset to Default</button>
     </div>
     <div id="palettePicker" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+  </div>
+  <div class="card" style="grid-column:1/-1">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-size:14px;font-weight:600"><i class="fas fa-file-invoice" style="color:var(--accent-blue);margin-right:7px"></i>Report Letterhead (PDF Outputs)</div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Logo, address and contact appear on every printed PDF. The document &amp; version control number is set separately for each output.</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="saveSettings()"><i class="fas fa-save"></i> Save Letterhead</button>
+    </div>
+    <div class="grid grid-2" style="gap:18px;margin-top:10px">
+      <div>
+        <div class="form-group">
+          <label class="form-label">Company Logo <span style="font-weight:400;color:var(--text-muted)">— left of letterhead</span></label>
+          ${lh.logoDataUrl?`<div style="margin-bottom:8px;display:flex;align-items:center;gap:10px"><img src="${lh.logoDataUrl}" style="max-height:56px;max-width:170px;border:1px solid var(--border);border-radius:4px;padding:4px;background:#fff"><button class="btn btn-secondary btn-sm" onclick="_lhRemoveLogo()"><i class="fas fa-trash"></i> Remove</button></div>`:'<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">No logo set — the letterhead left box stays blank.</div>'}
+          <input type="file" class="form-input" accept="image/png,image/jpeg" style="padding:4px" onchange="_lhUploadLogo(this)">
+          <div style="font-size:10px;color:var(--text-muted);margin-top:4px">PNG or JPG, under ~1 MB. Saved immediately on upload.</div>
+        </div>
+        <div class="form-group"><label class="form-label">Address Line</label><input class="form-input" id="sLhAddress" value="${(lh.addressLine||'').replace(/"/g,'&quot;')}"></div>
+        <div class="form-group"><label class="form-label">Contact Line (Tel / Fax)</label><input class="form-input" id="sLhContact" value="${(lh.contactLine||'').replace(/"/g,'&quot;')}"></div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:600;margin-bottom:8px">Document &amp; Version Control <span style="font-weight:400;color:var(--text-muted)">— per output</span></div>
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="text-align:left;color:var(--text-secondary)"><th style="padding:4px 6px;font-size:11px">Output</th><th style="padding:4px 6px;font-size:11px">Doc Control No.</th><th style="padding:4px 6px;font-size:11px">Revision / Version</th></tr></thead>
+          <tbody>
+          ${_PDF_DOC_OUTPUTS.map(([key,label])=>{const dc=_pdfDocCtrl(key);return `<tr>
+            <td style="padding:4px 6px;white-space:nowrap;font-size:12px">${label}</td>
+            <td style="padding:4px 6px"><input class="form-input" id="sLhDoc_${key}" value="${(dc.docNo||'').replace(/"/g,'&quot;')}" placeholder="—" style="font-size:11px;font-family:var(--font-mono)"></td>
+            <td style="padding:4px 6px"><input class="form-input" id="sLhRev_${key}" value="${(dc.rev||'').replace(/"/g,'&quot;')}" placeholder="—" style="font-size:11px;font-family:var(--font-mono)"></td>
+          </tr>`;}).join('')}
+          </tbody>
+        </table>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:8px">Shown on the right side of each PDF's letterhead. The Gantt keeps its SY3-F-EPD-002 default until you change it.</div>
+      </div>
+    </div>
   </div>
   <div class="card">
     <div style="font-size:14px;font-weight:600;margin-bottom:14px">Local Data Management</div>
@@ -26326,7 +26457,78 @@ function _dmResetToDefault(key){
   showToast('Reset to defaults','success',2000);
 }
 
+// ── SHARED PDF LETTERHEAD CONFIG ──────────────────────────
+// Logo + address + contact are shared across all printed PDFs. The document &
+// version control number differs PER output (each is its own controlled form),
+// so those are stored per output key under docs{}.
+const _PDF_DOC_OUTPUTS=[
+  ['gantt','Gantt Chart PDF'],
+  ['projectSummary','Project Summary PDF'],
+  ['meeting','Daily Meeting Minutes'],
+];
+function _pdfLetterheadDefaults(){
+  return {
+    logoDataUrl:'',
+    addressLine:'153 Arnaldo Highway, Barangay Santiago, General Trias, Cavite, Philippines',
+    contactLine:'Tel. No.: (046) 683-7580 • (046) 683-7581  TeleFax No.: 046 412-5513',
+    docs:{
+      gantt:{docNo:'SY3-F-EPD-002',rev:'REV.01/04-10-2022'},
+      projectSummary:{docNo:'',rev:''},
+      meeting:{docNo:'',rev:''},
+    },
+  };
+}
+function _pdfLetterhead(){
+  const def=_pdfLetterheadDefaults();
+  const s=(AppState.data.settings&&AppState.data.settings.reportLetterhead)||{};
+  return {
+    logoDataUrl:s.logoDataUrl||'',
+    addressLine:(s.addressLine!=null&&s.addressLine!=='')?s.addressLine:def.addressLine,
+    contactLine:(s.contactLine!=null&&s.contactLine!=='')?s.contactLine:def.contactLine,
+    docs:Object.assign({},def.docs,s.docs||{}),
+  };
+}
+// {docNo,rev} for one output key, falling back to that output's default.
+function _pdfDocCtrl(key){
+  const def=(_pdfLetterheadDefaults().docs[key])||{docNo:'',rev:''};
+  const d=(_pdfLetterhead().docs||{})[key]||{};
+  return {
+    docNo:(d.docNo!=null&&d.docNo!=='')?d.docNo:def.docNo,
+    rev:(d.rev!=null&&d.rev!=='')?d.rev:def.rev,
+  };
+}
+function _lhUploadLogo(input){
+  const file=input.files&&input.files[0]; if(!file)return;
+  if(file.size>1200000){showToast('Logo too large — use an image under ~1 MB','warning',4000);input.value='';return;}
+  const reader=new FileReader();
+  reader.onload=e=>{
+    if(!AppState.data.settings)AppState.data.settings={};
+    if(!AppState.data.settings.reportLetterhead)AppState.data.settings.reportLetterhead={};
+    AppState.data.settings.reportLetterhead.logoDataUrl=e.target.result;
+    AppState.save();
+    showToast('Letterhead logo saved','success',2500);
+    if(typeof renderSettings==='function')renderSettings();
+  };
+  reader.readAsDataURL(file);
+}
+function _lhRemoveLogo(){
+  if(!AppState.data.settings||!AppState.data.settings.reportLetterhead)return;
+  AppState.data.settings.reportLetterhead.logoDataUrl='';
+  AppState.save(); showToast('Logo removed','info',2000);
+  if(typeof renderSettings==='function')renderSettings();
+}
+
 function saveSettings(){
+// Persist the shared letterhead + per-output doc/version control
+if(!AppState.data.settings.reportLetterhead)AppState.data.settings.reportLetterhead={};
+const _lh=AppState.data.settings.reportLetterhead;
+const _addr=document.getElementById('sLhAddress'); if(_addr)_lh.addressLine=_addr.value.trim();
+const _cont=document.getElementById('sLhContact'); if(_cont)_lh.contactLine=_cont.value.trim();
+if(!_lh.docs)_lh.docs={};
+_PDF_DOC_OUTPUTS.forEach(([key])=>{
+  const dn=document.getElementById('sLhDoc_'+key), rv=document.getElementById('sLhRev_'+key);
+  if(dn||rv){ _lh.docs[key]=_lh.docs[key]||{}; if(dn)_lh.docs[key].docNo=dn.value.trim(); if(rv)_lh.docs[key].rev=rv.value.trim(); }
+});
 AppState.data.settings.companyName=$('#sCompany').value;
 AppState.data.settings.currency=$('#sCurrency').value;
 AppState.data.settings.autoBackup=!!document.getElementById('sAutoBackup')?.checked;

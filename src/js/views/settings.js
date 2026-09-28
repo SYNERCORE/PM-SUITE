@@ -15,6 +15,7 @@ AppState.ensureData();
     }
   },100);
 const settings=AppState.data.settings||{companyName:'SHIC',currency:'PHP',timezone:'Asia/Manila'};
+const lh=_pdfLetterhead();
 // Server URL and entity routing are per-device and live outside the synced
 // settings blob, so a SharePoint sync can never clear them.
 const _dev=typeof getDeviceSettings==='function'?getDeviceSettings():{};
@@ -216,6 +217,41 @@ ${renderSpPanel()}
       <button class="btn btn-secondary btn-sm" onclick="applyPalette('dark')"><i class="fas fa-undo"></i> Reset to Default</button>
     </div>
     <div id="palettePicker" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+  </div>
+  <div class="card" style="grid-column:1/-1">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-size:14px;font-weight:600"><i class="fas fa-file-invoice" style="color:var(--accent-blue);margin-right:7px"></i>Report Letterhead (PDF Outputs)</div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Logo, address and contact appear on every printed PDF. The document &amp; version control number is set separately for each output.</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="saveSettings()"><i class="fas fa-save"></i> Save Letterhead</button>
+    </div>
+    <div class="grid grid-2" style="gap:18px;margin-top:10px">
+      <div>
+        <div class="form-group">
+          <label class="form-label">Company Logo <span style="font-weight:400;color:var(--text-muted)">— left of letterhead</span></label>
+          ${lh.logoDataUrl?`<div style="margin-bottom:8px;display:flex;align-items:center;gap:10px"><img src="${lh.logoDataUrl}" style="max-height:56px;max-width:170px;border:1px solid var(--border);border-radius:4px;padding:4px;background:#fff"><button class="btn btn-secondary btn-sm" onclick="_lhRemoveLogo()"><i class="fas fa-trash"></i> Remove</button></div>`:'<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">No logo set — the letterhead left box stays blank.</div>'}
+          <input type="file" class="form-input" accept="image/png,image/jpeg" style="padding:4px" onchange="_lhUploadLogo(this)">
+          <div style="font-size:10px;color:var(--text-muted);margin-top:4px">PNG or JPG, under ~1 MB. Saved immediately on upload.</div>
+        </div>
+        <div class="form-group"><label class="form-label">Address Line</label><input class="form-input" id="sLhAddress" value="${(lh.addressLine||'').replace(/"/g,'&quot;')}"></div>
+        <div class="form-group"><label class="form-label">Contact Line (Tel / Fax)</label><input class="form-input" id="sLhContact" value="${(lh.contactLine||'').replace(/"/g,'&quot;')}"></div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:600;margin-bottom:8px">Document &amp; Version Control <span style="font-weight:400;color:var(--text-muted)">— per output</span></div>
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="text-align:left;color:var(--text-secondary)"><th style="padding:4px 6px;font-size:11px">Output</th><th style="padding:4px 6px;font-size:11px">Doc Control No.</th><th style="padding:4px 6px;font-size:11px">Revision / Version</th></tr></thead>
+          <tbody>
+          ${_PDF_DOC_OUTPUTS.map(([key,label])=>{const dc=_pdfDocCtrl(key);return `<tr>
+            <td style="padding:4px 6px;white-space:nowrap;font-size:12px">${label}</td>
+            <td style="padding:4px 6px"><input class="form-input" id="sLhDoc_${key}" value="${(dc.docNo||'').replace(/"/g,'&quot;')}" placeholder="—" style="font-size:11px;font-family:var(--font-mono)"></td>
+            <td style="padding:4px 6px"><input class="form-input" id="sLhRev_${key}" value="${(dc.rev||'').replace(/"/g,'&quot;')}" placeholder="—" style="font-size:11px;font-family:var(--font-mono)"></td>
+          </tr>`;}).join('')}
+          </tbody>
+        </table>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:8px">Shown on the right side of each PDF's letterhead. The Gantt keeps its SY3-F-EPD-002 default until you change it.</div>
+      </div>
+    </div>
   </div>
   <div class="card">
     <div style="font-size:14px;font-weight:600;margin-bottom:14px">Local Data Management</div>
@@ -612,7 +648,78 @@ function _dmResetToDefault(key){
   showToast('Reset to defaults','success',2000);
 }
 
+// ── SHARED PDF LETTERHEAD CONFIG ──────────────────────────
+// Logo + address + contact are shared across all printed PDFs. The document &
+// version control number differs PER output (each is its own controlled form),
+// so those are stored per output key under docs{}.
+const _PDF_DOC_OUTPUTS=[
+  ['gantt','Gantt Chart PDF'],
+  ['projectSummary','Project Summary PDF'],
+  ['meeting','Daily Meeting Minutes'],
+];
+function _pdfLetterheadDefaults(){
+  return {
+    logoDataUrl:'',
+    addressLine:'153 Arnaldo Highway, Barangay Santiago, General Trias, Cavite, Philippines',
+    contactLine:'Tel. No.: (046) 683-7580 • (046) 683-7581  TeleFax No.: 046 412-5513',
+    docs:{
+      gantt:{docNo:'SY3-F-EPD-002',rev:'REV.01/04-10-2022'},
+      projectSummary:{docNo:'',rev:''},
+      meeting:{docNo:'',rev:''},
+    },
+  };
+}
+function _pdfLetterhead(){
+  const def=_pdfLetterheadDefaults();
+  const s=(AppState.data.settings&&AppState.data.settings.reportLetterhead)||{};
+  return {
+    logoDataUrl:s.logoDataUrl||'',
+    addressLine:(s.addressLine!=null&&s.addressLine!=='')?s.addressLine:def.addressLine,
+    contactLine:(s.contactLine!=null&&s.contactLine!=='')?s.contactLine:def.contactLine,
+    docs:Object.assign({},def.docs,s.docs||{}),
+  };
+}
+// {docNo,rev} for one output key, falling back to that output's default.
+function _pdfDocCtrl(key){
+  const def=(_pdfLetterheadDefaults().docs[key])||{docNo:'',rev:''};
+  const d=(_pdfLetterhead().docs||{})[key]||{};
+  return {
+    docNo:(d.docNo!=null&&d.docNo!=='')?d.docNo:def.docNo,
+    rev:(d.rev!=null&&d.rev!=='')?d.rev:def.rev,
+  };
+}
+function _lhUploadLogo(input){
+  const file=input.files&&input.files[0]; if(!file)return;
+  if(file.size>1200000){showToast('Logo too large — use an image under ~1 MB','warning',4000);input.value='';return;}
+  const reader=new FileReader();
+  reader.onload=e=>{
+    if(!AppState.data.settings)AppState.data.settings={};
+    if(!AppState.data.settings.reportLetterhead)AppState.data.settings.reportLetterhead={};
+    AppState.data.settings.reportLetterhead.logoDataUrl=e.target.result;
+    AppState.save();
+    showToast('Letterhead logo saved','success',2500);
+    if(typeof renderSettings==='function')renderSettings();
+  };
+  reader.readAsDataURL(file);
+}
+function _lhRemoveLogo(){
+  if(!AppState.data.settings||!AppState.data.settings.reportLetterhead)return;
+  AppState.data.settings.reportLetterhead.logoDataUrl='';
+  AppState.save(); showToast('Logo removed','info',2000);
+  if(typeof renderSettings==='function')renderSettings();
+}
+
 function saveSettings(){
+// Persist the shared letterhead + per-output doc/version control
+if(!AppState.data.settings.reportLetterhead)AppState.data.settings.reportLetterhead={};
+const _lh=AppState.data.settings.reportLetterhead;
+const _addr=document.getElementById('sLhAddress'); if(_addr)_lh.addressLine=_addr.value.trim();
+const _cont=document.getElementById('sLhContact'); if(_cont)_lh.contactLine=_cont.value.trim();
+if(!_lh.docs)_lh.docs={};
+_PDF_DOC_OUTPUTS.forEach(([key])=>{
+  const dn=document.getElementById('sLhDoc_'+key), rv=document.getElementById('sLhRev_'+key);
+  if(dn||rv){ _lh.docs[key]=_lh.docs[key]||{}; if(dn)_lh.docs[key].docNo=dn.value.trim(); if(rv)_lh.docs[key].rev=rv.value.trim(); }
+});
 AppState.data.settings.companyName=$('#sCompany').value;
 AppState.data.settings.currency=$('#sCurrency').value;
 AppState.data.settings.autoBackup=!!document.getElementById('sAutoBackup')?.checked;

@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.26';
-const APP_BUILD='20260928a';
+const APP_VERSION='2.14.27';
+const APP_BUILD='20260928b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Resources are now auto-tagged Warehouse or PR. Each resource is matched by name against the warehouse registry: if it is stocked, it shows a green WAREHOUSE badge (withdraw from stock); if it is not registered, it shows an amber PR badge (needs a Purchase Requisition). The tags appear in the allocation import preview (with a "N in warehouse / N need PR" summary before you import), on every allocation row, and on the Transaction Log — so you can tell at a glance what to withdraw vs what to buy.';
+const APP_RELEASE_NOTE='Printed PDFs now carry the Business Unit and an editable letterhead. Project Summary and Gantt PDFs show which BU each project belongs to, and the Gantt is grouped by Business Unit. A new Settings → Report Letterhead lets you upload a company logo (shown on the left of every PDF) and set the address and contact line once, plus the document & version control number separately for each output (Gantt, Project Summary, Daily Meeting) since each is its own controlled form. Nothing changes until you set them — the Gantt keeps its SY3-F-EPD-002 default.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.27',date:'2026-09-28',type:'feature',notes:[
+    'Printed PDFs are now aligned to Business Units. The Project Summary PDF shows the project\'s BU in its header; the Gantt PDF (both the jsPDF export and the browser print) is now grouped by Business Unit with a colored BU band/heading, and its projects are ordered so each BU stays together (main company first).',
+    'New editable letterhead — Settings → Report Letterhead. Upload a company logo (drawn on the LEFT of the Gantt letterhead and shown on the Project Summary and Daily Meeting headers), and set the address + contact line once. Previously the Gantt letterhead was hardcoded (blank left box, fixed SY3 address) and could not be changed without a code edit.',
+    'Document & version control is now per output. Because each printed form is its own controlled document, the Doc Control No. and Revision are set separately for the Gantt Chart, Project Summary, and Daily Meeting Minutes. The Gantt keeps SY3-F-EPD-002 / REV.01/04-10-2022 as its default until you change it; the others start blank.',
+    'Note: client-only change; devices pick it up on refresh once the LAN web app is redeployed. The logo and text live in the synced settings, so they apply everywhere after one save. No server/DB change.',
+  ]},
   {version:'2.14.26',date:'2026-09-28',type:'feature',notes:[
     'Resources are now auto-tagged Warehouse vs PR so you can tell at a glance whether an item should be withdrawn from stock or purchased. Each resource name is matched against the warehouse registry (by name, and also code/barcode when present, case-insensitive). A match shows a green WAREHOUSE badge; no match shows an amber PR (Purchase Requisition) badge. This is computed live, so it always reflects the current registry.',
     'The allocation Import preview now shows a Source column and a "N in warehouse / N need PR" summary BEFORE you import — useful because source files usually have no warehouse code, so the app detects it for you by name.',

@@ -1013,6 +1013,8 @@ function dmPrintMeeting(opts) {
   opts = opts || { includeActions: true, includeCompleted: false, includeUpdates: true, includeProjectHistory: false, projectIds: null };
   const companyName = AppState.data.settings?.companyName || 'SHIC';
   const BUs = AppState.data.businessUnits || [];
+  const _lh = (typeof _pdfLetterhead==='function') ? _pdfLetterhead() : {logoDataUrl:'',addressLine:'',contactLine:''};
+  const _dc = (typeof _pdfDocCtrl==='function') ? _pdfDocCtrl('meeting') : {docNo:'',rev:''};
   const logs = AppState.data.dailyMeetingLogs || [];
   const dateLogs = logs.filter(l => l.date === _dmViewDate);
   const dateLogMap = {}; dateLogs.forEach(l => dateLogMap[l.projectId] = l);
@@ -1169,10 +1171,19 @@ function dmPrintMeeting(opts) {
       @media print { body { margin: 10mm; } .no-print { display: none; } }
     </style>
   </head><body>
-    <div style="text-align:center;margin-bottom:20px;border-bottom:2px solid #1565c0;padding-bottom:12px">
-      <div style="font-size:18px;font-weight:900;letter-spacing:1px">${companyName.toUpperCase()}</div>
-      <div style="font-size:14px;font-weight:700;margin-top:4px">DAILY PROJECT STATUS MEETING</div>
-      <div style="font-size:12px;color:#555;margin-top:4px">${dateStr}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px;border-bottom:2px solid #1565c0;padding-bottom:12px">
+      <div style="min-width:60px">${_lh.logoDataUrl?`<img src="${_lh.logoDataUrl}" style="max-height:46px;max-width:150px;object-fit:contain">`:''}</div>
+      <div style="text-align:center;flex:1">
+        <div style="font-size:18px;font-weight:900;letter-spacing:1px">${companyName.toUpperCase()}</div>
+        <div style="font-size:14px;font-weight:700;margin-top:4px">DAILY PROJECT STATUS MEETING</div>
+        <div style="font-size:12px;color:#555;margin-top:4px">${dateStr}</div>
+      </div>
+      <div style="text-align:right;font-size:8.5px;color:#666;line-height:1.5;white-space:nowrap">
+        ${_dc.docNo?`<div style="font-size:10px;font-weight:700;color:#1565c0">${_dc.docNo}</div>`:''}
+        ${_dc.rev?`<div>${_dc.rev}</div>`:''}
+        ${_lh.addressLine?`<div>${_lh.addressLine}</div>`:''}
+        ${_lh.contactLine?`<div>${_lh.contactLine}</div>`:''}
+      </div>
     </div>
     ${opts.includeActions && totalActionsShown === 0 ? `<div style="margin-bottom:14px;padding:10px 12px;background:#fff3cd;border:1px solid #ffc107;border-radius:4px;font-size:11px;color:#856404">
       <strong>⚠ No action items found</strong> for the selected project(s).${!opts.includeCompleted ? ' Try checking <em>"Also include closed actions"</em> to see them.' : ' Action items can be added from the Daily Meeting or the Actions module.'}

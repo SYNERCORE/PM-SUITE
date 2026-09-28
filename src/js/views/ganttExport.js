@@ -17,6 +17,20 @@ function _durDays(startDate,endDate,durationHrs,hpd){
   return 1;
 }
 
+// BU info for a project (name + color), for grouping/labelling the export.
+function _ganttProjBU(p){
+  const company=(AppState.data.settings&&AppState.data.settings.companyName)||'Main';
+  if(!p||!p.businessUnit)return{id:'_main',name:company+' — Main',color:'#8b949e'};
+  const bu=(AppState.data.businessUnits||[]).find(b=>b.id===p.businessUnit);
+  return bu?{id:bu.id,name:bu.name||'Business Unit',color:bu.color||'#388bfd'}:{id:'_unknown',name:'Unknown BU',color:'#8b949e'};
+}
+function _hexRgb(h){
+  h=String(h||'').replace('#','');
+  if(h.length===3)h=h.split('').map(c=>c+c).join('');
+  const n=parseInt(h,16); if(isNaN(n))return[139,148,158];
+  return[(n>>16)&255,(n>>8)&255,n&255];
+}
+
 function _loadJsPDF(){
   return new Promise((res,rej)=>{
     if(window.jspdf){res();return;}
@@ -37,8 +51,17 @@ async function exportGanttPDF(projectId){
   const allTasks=AppState.data.tasks||[];
 
   const filter=projectId||(typeof ganttProjFilter!=='undefined'?ganttProjFilter:'all');
-  const targets=filter==='all'?allProjects:allProjects.filter(p=>p.id===filter);
+  const targets=(filter==='all'?allProjects.slice():allProjects.filter(p=>p.id===filter));
   if(!targets.length){showToast('No projects to export','error');return;}
+  // Group by Business Unit — keep each BU's projects consecutive, main company first.
+  targets.sort((a,b)=>{
+    const ba=_ganttProjBU(a),bb=_ganttProjBU(b);
+    if(ba.id==='_main'&&bb.id!=='_main')return -1;
+    if(bb.id==='_main'&&ba.id!=='_main')return 1;
+    return ba.name.localeCompare(bb.name)||(a.id||'').localeCompare(b.id||'');
+  });
+  const lh=_pdfLetterhead();
+  const gDoc=_pdfDocCtrl('gantt');
 
   // ── Page constants (landscape A4) ─────────────────────────
   const PW=297,PH=210;
@@ -52,11 +75,12 @@ async function exportGanttPDF(projectId){
   const GANTT_W=CW-TABLE_W-1;
 
   const DOC_H=20;   // letterhead height
+  const BU_H=4.8;   // business-unit band under the letterhead
   const MH_H=6;     // month header row
   const WK_H=5;     // week header row
   const ROW_H=5.8;
   const FOOTER_H=10;
-  const USABLE=PH-MT-MB-DOC_H-MH_H-WK_H-FOOTER_H;
+  const USABLE=PH-MT-MB-DOC_H-BU_H-MH_H-WK_H-FOOTER_H;
   const RPP=Math.floor(USABLE/ROW_H);
 
   // Colours
@@ -120,9 +144,20 @@ async function exportGanttPDF(projectId){
 
       const Y0=MT;
 
-      // ── Letterhead (no logo) ───────────────────────────────
+      // ── Letterhead ─────────────────────────────────────────
       doc.setFillColor(...WHITE);
       doc.rect(ML,Y0,CW,DOC_H,'F');
+
+      // Left: company logo (from Settings → Report Letterhead), if set
+      if(lh.logoDataUrl){
+        try{
+          const props=doc.getImageProperties(lh.logoDataUrl);
+          const maxW=38,maxH=DOC_H-5;
+          const r=Math.min(maxW/props.width,maxH/props.height);
+          const w=props.width*r,h=props.height*r;
+          doc.addImage(lh.logoDataUrl,(props.fileType||'PNG'),ML+3,Y0+(DOC_H-h)/2,w,h);
+        }catch(e){}
+      }
 
       // Center: JO # + title
       doc.setFont('helvetica','bold');doc.setFontSize(9);
@@ -133,23 +168,31 @@ async function exportGanttPDF(projectId){
       doc.text(titleLines[0]||'',PW/2,Y0+13,{align:'center'});
       if(titleLines[1])doc.text(titleLines[1],PW/2,Y0+18,{align:'center'});
 
-      // Right: form ref + address
-      const rx=ML+CW;
-      doc.setFont('helvetica','bold');doc.setFontSize(7.5);
-      doc.setTextColor(...NAVY);
-      doc.text('SY3-F-EPD-002',rx,Y0+5,{align:'right'});
-      doc.setFont('helvetica','normal');doc.setFontSize(6);
-      doc.text('REV.01/04-10-2022',rx,Y0+9,{align:'right'});
-      doc.setFontSize(5.8);doc.setTextColor(...TMUT);
-      doc.text('153 Arnaldo Highway, Barangay Santiago, General Trias, Cavite, Philippines',rx,Y0+13.5,{align:'right'});
-      doc.text('Tel. No.: (046) 683-7580 • (046) 683-7581  TeleFax No.: 046 412-5513',rx,Y0+17.5,{align:'right'});
+      // Right: per-output doc/version control + shared address + contact
+      const rx=ML+CW-2;
+      if(gDoc.docNo){ doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(...NAVY);
+        doc.text(gDoc.docNo,rx,Y0+5,{align:'right'}); }
+      if(gDoc.rev){ doc.setFont('helvetica','normal');doc.setFontSize(6);doc.setTextColor(...NAVY);
+        doc.text(gDoc.rev,rx,Y0+9,{align:'right'}); }
+      doc.setFont('helvetica','normal');doc.setFontSize(5.8);doc.setTextColor(...TMUT);
+      if(lh.addressLine)doc.splitTextToSize(lh.addressLine,120).slice(0,1).forEach(t=>doc.text(t,rx,Y0+13.5,{align:'right'}));
+      if(lh.contactLine)doc.splitTextToSize(lh.contactLine,120).slice(0,1).forEach(t=>doc.text(t,rx,Y0+17.5,{align:'right'}));
 
       // Letterhead border
       doc.setDrawColor(...BORDER);doc.setLineWidth(0.3);
       doc.rect(ML,Y0,CW,DOC_H,'S');
 
+      // ── Business-Unit band ─────────────────────────────────
+      const buInfo=_ganttProjBU(project);
+      const buRGB=_hexRgb(buInfo.color);
+      const BUY=Y0+DOC_H;
+      doc.setFillColor(...buRGB);
+      doc.rect(ML,BUY,CW,BU_H,'F');
+      doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(...WHITE);
+      doc.text('BUSINESS UNIT: '+String(buInfo.name).toUpperCase(),ML+3,BUY+BU_H-1.4);
+
       // ── Column + Timeline Headers ──────────────────────────
-      const CHY=Y0+DOC_H;
+      const CHY=BUY+BU_H;
 
       doc.setFillColor(...HBGD);
       doc.rect(ML,CHY,TABLE_W,MH_H+WK_H,'F');
@@ -394,15 +437,28 @@ function buildGanttPrintHTML(projectId,opts){
   const esc=_ganttPrintEsc;
   const projects=(AppState.data.projects)||[];
   const tasks=(AppState.data.tasks)||[];
-  const targets=(projectId&&projectId!=='all')?projects.filter(p=>p.id===projectId):projects.filter(p=>p.status!=='prospect');
+  const targets=(projectId&&projectId!=='all')?projects.filter(p=>p.id===projectId):projects.filter(p=>p.status!=='prospect').slice();
   if(!targets.length) return '';
+  // Group by Business Unit — main company first, then BUs by name.
+  targets.sort((a,b)=>{
+    const ba=_ganttProjBU(a),bb=_ganttProjBU(b);
+    if(ba.id==='_main'&&bb.id!=='_main')return -1;
+    if(bb.id==='_main'&&ba.id!=='_main')return 1;
+    return ba.name.localeCompare(bb.name)||(a.id||'').localeCompare(b.id||'');
+  });
+  const lh=_pdfLetterhead(), gDoc=_pdfDocCtrl('gantt');
   const company=(AppState.data.settings&&AppState.data.settings.companyName)||'ProMaster';
   const fmt=d=>d?d:'—';
   const varText=t=>{ if(!t.actualEnd||!t.endDate) return ''; const d=Math.round((Date.parse(t.actualEnd)-Date.parse(t.endDate))/86400000); if(isNaN(d))return ''; return d===0?'on&nbsp;time':(d>0?('+'+d+'d&nbsp;late'):(d+'d&nbsp;early')); };
   const varCls=t=>{ if(!t.actualEnd||!t.endDate) return ''; const d=Math.round((Date.parse(t.actualEnd)-Date.parse(t.endDate))/86400000); return isNaN(d)?'':(d>0?'late':'early'); };
 
   let body='';
+  let _lastBU=null;
   targets.forEach(p=>{
+    const _bu=_ganttProjBU(p);
+    if(_bu.id!==_lastBU){ _lastBU=_bu.id;
+      body+=`<div class="buhead" style="background:${_bu.color}">BUSINESS UNIT — ${esc(_bu.name)}</div>`;
+    }
     const pts=(typeof _orderTasksHier==='function')
       ? _orderTasksHier(tasks.filter(t=>t.projectId===p.id&&!t._deleted))
       : tasks.filter(t=>t.projectId===p.id&&!t._deleted).map(t=>({t,depth:0}));
@@ -460,9 +516,14 @@ function buildGanttPrintHTML(projectId,opts){
     *{box-sizing:border-box}
     html,body{background:#fff}
     body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0;padding:14px;font-size:11px}
-    .hdr{border-bottom:2px solid #1a253a;padding-bottom:8px;margin-bottom:12px}
+    .hdr{border-bottom:2px solid #1a253a;padding-bottom:8px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .hdr .logo img{max-height:46px;max-width:150px;object-fit:contain}
+    .hdr .mid{flex:1;text-align:center}
     .hdr h1{margin:0;font-size:17px;color:#1a253a}
     .hdr .sub{color:#555;font-size:11px;margin-top:2px}
+    .hdr .ref{text-align:right;font-size:8.5px;color:#555;white-space:nowrap}
+    .hdr .ref b{color:#1a253a;font-size:10px}
+    .buhead{margin:14px 0 8px;padding:4px 10px;color:#fff;font-weight:800;font-size:11px;letter-spacing:.6px;border-radius:3px;page-break-after:avoid}
     section.proj{margin-bottom:18px;page-break-inside:auto}
     section.proj h2{font-size:13px;margin:0 0 6px;color:#1a253a;border-left:4px solid #c2650f;padding-left:8px}
     table{border-collapse:collapse;width:100%}
@@ -485,8 +546,12 @@ function buildGanttPrintHTML(projectId,opts){
     .foot{margin-top:10px;border-top:1px solid #ddd;padding-top:6px;color:#888;font-size:9px}
     @media print{ .noprint{display:none} }
   </style></head><body>
-    <div class="hdr"><h1>Project Gantt — Planned vs Actual</h1>
-      <div class="sub">${esc(company)} &middot; ${targets.length} project(s) &middot; printed ${esc(new Date().toLocaleString())}</div></div>
+    <div class="hdr">
+      <div class="logo">${lh.logoDataUrl?`<img src="${lh.logoDataUrl}" alt="logo">`:''}</div>
+      <div class="mid"><h1>Project Gantt — Planned vs Actual</h1>
+        <div class="sub">${esc(company)} &middot; ${targets.length} project(s) &middot; printed ${esc(new Date().toLocaleString())}</div></div>
+      <div class="ref">${gDoc.docNo?`<b>${esc(gDoc.docNo)}</b><br>`:''}${gDoc.rev?esc(gDoc.rev)+'<br>':''}${lh.addressLine?esc(lh.addressLine)+'<br>':''}${lh.contactLine?esc(lh.contactLine):''}</div>
+    </div>
     ${body}
     <div class="foot">Grey bar = planned schedule · Blue bar = actual (to date). Generated by ProMaster.</div>
   </body></html>`;

@@ -623,6 +623,10 @@ function printProjectDetail(pid){
   const cur=(AppState.data.settings?.currency)||'PHP';
   const sym={PHP:'₱',USD:'$',EUR:'€',SAR:'﷼',GBP:'£',SGD:'S$'}[cur]||cur+' ';
   const fmt=n=>Number(n||0).toLocaleString();
+  // Business Unit + shared letterhead (logo/address) + this output's doc control
+  const _bu=(()=>{ if(!p.businessUnit)return null; const b=(AppState.data.businessUnits||[]).find(x=>x.id===p.businessUnit); return b?{name:b.name,color:b.color||'#1a237e'}:null; })();
+  const _lh=(typeof _pdfLetterhead==='function')?_pdfLetterhead():{logoDataUrl:'',addressLine:'',contactLine:''};
+  const _dc=(typeof _pdfDocCtrl==='function')?_pdfDocCtrl('projectSummary'):{docNo:'',rev:''};
   const usageMap={};
   logs.forEach(l=>{
     if(!usageMap[l.allocationId])usageMap[l.allocationId]={issued:0,returned:0};
@@ -643,8 +647,17 @@ function printProjectDetail(pid){
     .kpi-lbl{font-size:9px;color:#666}
     @media print{body{padding:10px}}
   </style></head><body>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:2px solid #1a237e;padding-bottom:8px;margin-bottom:10px">
+    <div style="min-width:60px">${_lh.logoDataUrl?`<img src="${_lh.logoDataUrl}" style="max-height:46px;max-width:150px;object-fit:contain">`:''}</div>
+    <div style="text-align:right;font-size:8.5px;color:#666;line-height:1.5">
+      ${_dc.docNo?`<div style="font-size:10px;font-weight:700;color:#1a237e">${esc(_dc.docNo)}</div>`:''}
+      ${_dc.rev?`<div>${esc(_dc.rev)}</div>`:''}
+      ${_lh.addressLine?`<div>${esc(_lh.addressLine)}</div>`:''}
+      ${_lh.contactLine?`<div>${esc(_lh.contactLine)}</div>`:''}
+    </div>
+  </div>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-    <div><h1>${esc(p.name)}</h1><div style="font-size:11px;color:#555">${p.id} · ${esc(p.client)} · PM: ${esc(p.pm||'—')}</div></div>
+    <div><h1>${esc(p.name)}</h1><div style="font-size:11px;color:#555">${p.id} · ${esc(p.client)} · PM: ${esc(p.pm||'—')}${_bu?` · <span style="color:${_bu.color};font-weight:700">BU: ${esc(_bu.name)}</span>`:''}</div></div>
     <div style="font-size:10px;color:#777;text-align:right">Printed: ${new Date().toLocaleString()}<br>Status: ${p.status} · Priority: ${p.priority}</div>
   </div>
   <div class="grid">
