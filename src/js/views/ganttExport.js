@@ -60,8 +60,7 @@ async function exportGanttPDF(projectId){
     if(bb.id==='_main'&&ba.id!=='_main')return 1;
     return ba.name.localeCompare(bb.name)||(a.id||'').localeCompare(b.id||'');
   });
-  const lh=_pdfLetterhead();
-  const gDoc=_pdfDocCtrl('gantt');
+  // Letterhead is resolved PER PROJECT (per BU) inside the loop below.
 
   // ── Page constants (landscape A4) ─────────────────────────
   const PW=297,PH=210;
@@ -104,6 +103,10 @@ async function exportGanttPDF(projectId){
   targets.forEach(project=>{
     const tasks=allTasks.filter(t=>t.projectId===project.id&&!t._deleted);
     const hpd=project.calendar?.hoursPerDay||8;
+    // Per-BU letterhead + this output's doc control
+    const _buObj=_buForProject(project);
+    const lh=_pdfLetterheadFor(_buObj);
+    const gDoc=_pdfDocCtrlFor(_buObj,'gantt');
 
     // Build rows
     const rows=[];
@@ -189,7 +192,8 @@ async function exportGanttPDF(projectId){
       doc.setFillColor(...buRGB);
       doc.rect(ML,BUY,CW,BU_H,'F');
       doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(...WHITE);
-      doc.text('BUSINESS UNIT: '+String(buInfo.name).toUpperCase(),ML+3,BUY+BU_H-1.4);
+      const bandTxt=(lh.companyName?String(lh.companyName).toUpperCase()+'  •  ':'')+'BU: '+String(buInfo.name).toUpperCase();
+      doc.text(bandTxt,ML+3,BUY+BU_H-1.4);
 
       // ── Column + Timeline Headers ──────────────────────────
       const CHY=BUY+BU_H;
@@ -446,7 +450,7 @@ function buildGanttPrintHTML(projectId,opts){
     if(bb.id==='_main'&&ba.id!=='_main')return 1;
     return ba.name.localeCompare(bb.name)||(a.id||'').localeCompare(b.id||'');
   });
-  const lh=_pdfLetterhead(), gDoc=_pdfDocCtrl('gantt');
+  // Letterhead is resolved PER BU below (each BU heading carries its own).
   const company=(AppState.data.settings&&AppState.data.settings.companyName)||'ProMaster';
   const fmt=d=>d?d:'—';
   const varText=t=>{ if(!t.actualEnd||!t.endDate) return ''; const d=Math.round((Date.parse(t.actualEnd)-Date.parse(t.endDate))/86400000); if(isNaN(d))return ''; return d===0?'on&nbsp;time':(d>0?('+'+d+'d&nbsp;late'):(d+'d&nbsp;early')); };
@@ -457,7 +461,12 @@ function buildGanttPrintHTML(projectId,opts){
   targets.forEach(p=>{
     const _bu=_ganttProjBU(p);
     if(_bu.id!==_lastBU){ _lastBU=_bu.id;
-      body+=`<div class="buhead" style="background:${_bu.color}">BUSINESS UNIT — ${esc(_bu.name)}</div>`;
+      const _lhb=_pdfLetterheadForProject(p), _dcb=_pdfDocCtrlForProject(p,'gantt');
+      body+=`<div class="buband" style="border-top:3px solid ${_bu.color}">
+        <div class="bl">${_lhb.logoDataUrl?`<img src="${_lhb.logoDataUrl}" alt="logo">`:''}</div>
+        <div class="bc"><div class="bco">${esc(_lhb.companyName||'')}</div><div class="bbu" style="color:${_bu.color}">BUSINESS UNIT — ${esc(_bu.name)}</div></div>
+        <div class="br">${_dcb.docNo?`<b>${esc(_dcb.docNo)}</b><br>`:''}${_dcb.rev?esc(_dcb.rev)+'<br>':''}${_lhb.addressLine?esc(_lhb.addressLine)+'<br>':''}${_lhb.contactLine?esc(_lhb.contactLine):''}</div>
+      </div>`;
     }
     const pts=(typeof _orderTasksHier==='function')
       ? _orderTasksHier(tasks.filter(t=>t.projectId===p.id&&!t._deleted))
@@ -516,14 +525,17 @@ function buildGanttPrintHTML(projectId,opts){
     *{box-sizing:border-box}
     html,body{background:#fff}
     body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0;padding:14px;font-size:11px}
-    .hdr{border-bottom:2px solid #1a253a;padding-bottom:8px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:12px}
-    .hdr .logo img{max-height:46px;max-width:150px;object-fit:contain}
-    .hdr .mid{flex:1;text-align:center}
+    .hdr{border-bottom:2px solid #1a253a;padding-bottom:8px;margin-bottom:12px;text-align:center}
     .hdr h1{margin:0;font-size:17px;color:#1a253a}
     .hdr .sub{color:#555;font-size:11px;margin-top:2px}
-    .hdr .ref{text-align:right;font-size:8.5px;color:#555;white-space:nowrap}
-    .hdr .ref b{color:#1a253a;font-size:10px}
-    .buhead{margin:14px 0 8px;padding:4px 10px;color:#fff;font-weight:800;font-size:11px;letter-spacing:.6px;border-radius:3px;page-break-after:avoid}
+    .buband{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0 8px;padding:6px 10px;background:#f4f6f9;border-radius:4px;page-break-after:avoid;page-break-inside:avoid}
+    .buband .bl{min-width:60px}
+    .buband .bl img{max-height:42px;max-width:140px;object-fit:contain}
+    .buband .bc{flex:1;text-align:center}
+    .buband .bco{font-size:13px;font-weight:800;color:#1a253a;letter-spacing:.3px}
+    .buband .bbu{font-size:10px;font-weight:800;letter-spacing:.6px;margin-top:1px}
+    .buband .br{text-align:right;font-size:8px;color:#555;line-height:1.4;white-space:nowrap}
+    .buband .br b{color:#1a253a;font-size:9.5px}
     section.proj{margin-bottom:18px;page-break-inside:auto}
     section.proj h2{font-size:13px;margin:0 0 6px;color:#1a253a;border-left:4px solid #c2650f;padding-left:8px}
     table{border-collapse:collapse;width:100%}
@@ -547,10 +559,8 @@ function buildGanttPrintHTML(projectId,opts){
     @media print{ .noprint{display:none} }
   </style></head><body>
     <div class="hdr">
-      <div class="logo">${lh.logoDataUrl?`<img src="${lh.logoDataUrl}" alt="logo">`:''}</div>
-      <div class="mid"><h1>Project Gantt — Planned vs Actual</h1>
-        <div class="sub">${esc(company)} &middot; ${targets.length} project(s) &middot; printed ${esc(new Date().toLocaleString())}</div></div>
-      <div class="ref">${gDoc.docNo?`<b>${esc(gDoc.docNo)}</b><br>`:''}${gDoc.rev?esc(gDoc.rev)+'<br>':''}${lh.addressLine?esc(lh.addressLine)+'<br>':''}${lh.contactLine?esc(lh.contactLine):''}</div>
+      <h1>Project Gantt — Planned vs Actual</h1>
+      <div class="sub">${esc(company)} &middot; ${targets.length} project(s) &middot; printed ${esc(new Date().toLocaleString())}</div>
     </div>
     ${body}
     <div class="foot">Grey bar = planned schedule · Blue bar = actual (to date). Generated by ProMaster.</div>

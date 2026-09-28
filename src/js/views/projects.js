@@ -625,8 +625,8 @@ function printProjectDetail(pid){
   const fmt=n=>Number(n||0).toLocaleString();
   // Business Unit + shared letterhead (logo/address) + this output's doc control
   const _bu=(()=>{ if(!p.businessUnit)return null; const b=(AppState.data.businessUnits||[]).find(x=>x.id===p.businessUnit); return b?{name:b.name,color:b.color||'#1a237e'}:null; })();
-  const _lh=(typeof _pdfLetterhead==='function')?_pdfLetterhead():{logoDataUrl:'',addressLine:'',contactLine:''};
-  const _dc=(typeof _pdfDocCtrl==='function')?_pdfDocCtrl('projectSummary'):{docNo:'',rev:''};
+  const _lh=(typeof _pdfLetterheadForProject==='function')?_pdfLetterheadForProject(p):{logoDataUrl:'',companyName:'',addressLine:'',contactLine:''};
+  const _dc=(typeof _pdfDocCtrlForProject==='function')?_pdfDocCtrlForProject(p,'projectSummary'):{docNo:'',rev:''};
   const usageMap={};
   logs.forEach(l=>{
     if(!usageMap[l.allocationId])usageMap[l.allocationId]={issued:0,returned:0};
@@ -648,7 +648,7 @@ function printProjectDetail(pid){
     @media print{body{padding:10px}}
   </style></head><body>
   <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:2px solid #1a237e;padding-bottom:8px;margin-bottom:10px">
-    <div style="min-width:60px">${_lh.logoDataUrl?`<img src="${_lh.logoDataUrl}" style="max-height:46px;max-width:150px;object-fit:contain">`:''}</div>
+    <div style="min-width:60px">${_lh.logoDataUrl?`<img src="${_lh.logoDataUrl}" style="max-height:46px;max-width:150px;object-fit:contain">`:''}${_lh.companyName?`<div style="font-size:11px;font-weight:700;color:#1a237e;margin-top:3px">${esc(_lh.companyName)}</div>`:''}</div>
     <div style="text-align:right;font-size:8.5px;color:#666;line-height:1.5">
       ${_dc.docNo?`<div style="font-size:10px;font-weight:700;color:#1a237e">${esc(_dc.docNo)}</div>`:''}
       ${_dc.rev?`<div>${esc(_dc.rev)}</div>`:''}

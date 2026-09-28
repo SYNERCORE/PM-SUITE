@@ -221,8 +221,8 @@ ${renderSpPanel()}
   <div class="card" style="grid-column:1/-1">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:8px">
       <div>
-        <div style="font-size:14px;font-weight:600"><i class="fas fa-file-invoice" style="color:var(--accent-blue);margin-right:7px"></i>Report Letterhead (PDF Outputs)</div>
-        <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Logo, address and contact appear on every printed PDF. The document &amp; version control number is set separately for each output.</div>
+        <div style="font-size:14px;font-weight:600"><i class="fas fa-file-invoice" style="color:var(--accent-blue);margin-right:7px"></i>Report Letterhead — Main Company / Default</div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Used for projects with no Business Unit, and as the fallback for any BU field left blank. Each Business Unit can set its own logo, address, contact and doc numbers in <strong>Business Units</strong> above.</div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="saveSettings()"><i class="fas fa-save"></i> Save Letterhead</button>
     </div>
@@ -709,6 +709,94 @@ function _lhRemoveLogo(){
   if(typeof renderSettings==='function')renderSettings();
 }
 
+// ── PER-BU LETTERHEAD RESOLUTION ──────────────────────────
+// Each businessUnit may carry a .letterhead override
+// {logoDataUrl, companyName, addressLine, contactLine, docs:{<key>:{docNo,rev}}}.
+// Any blank field falls back to the shared (Main Company) letterhead.
+function _buForProject(p){
+  if(!p||!p.businessUnit)return null;
+  return (AppState.data.businessUnits||[]).find(b=>b.id===p.businessUnit)||null;
+}
+function _pdfLetterheadFor(bu){
+  const def=_pdfLetterhead();
+  const l=(bu&&bu.letterhead)||{};
+  const globalCo=(AppState.data.settings&&AppState.data.settings.companyName)||'';
+  return {
+    logoDataUrl:l.logoDataUrl||def.logoDataUrl,
+    companyName:(l.companyName&&l.companyName.trim())||(bu&&bu.name)||globalCo,
+    addressLine:(l.addressLine!=null&&l.addressLine!=='')?l.addressLine:def.addressLine,
+    contactLine:(l.contactLine!=null&&l.contactLine!=='')?l.contactLine:def.contactLine,
+  };
+}
+function _pdfDocCtrlFor(bu,key){
+  const def=_pdfDocCtrl(key);
+  const d=(((bu&&bu.letterhead&&bu.letterhead.docs)||{})[key])||{};
+  return {
+    docNo:(d.docNo!=null&&d.docNo!=='')?d.docNo:def.docNo,
+    rev:(d.rev!=null&&d.rev!=='')?d.rev:def.rev,
+  };
+}
+function _pdfLetterheadForProject(p){ return _pdfLetterheadFor(_buForProject(p)); }
+function _pdfDocCtrlForProject(p,key){ return _pdfDocCtrlFor(_buForProject(p),key); }
+
+// BU-editor letterhead form (shared by Add/Edit) + its logo picker.
+// _buLogoTmp: undefined = keep existing, '' = cleared, string = new data URL.
+function _buLogoPick(input){
+  const file=input.files&&input.files[0]; if(!file)return;
+  if(file.size>1200000){showToast('Logo too large — use an image under ~1 MB','warning',4000);input.value='';return;}
+  const reader=new FileReader();
+  reader.onload=e=>{ window._buLogoTmp=e.target.result;
+    const pv=document.getElementById('buLogoPreview');
+    if(pv)pv.innerHTML=`<img src="${window._buLogoTmp}" style="max-height:48px;max-width:150px;object-fit:contain;border:1px solid var(--border);border-radius:4px;padding:3px;background:#fff">`;
+  };
+  reader.readAsDataURL(file);
+}
+function _buLogoClear(){ window._buLogoTmp=''; const pv=document.getElementById('buLogoPreview'); if(pv)pv.innerHTML='<span style="font-size:11px;color:var(--text-muted)">No logo</span>'; }
+function _buLetterheadFormHTML(bu){
+  const l=(bu&&bu.letterhead)||{};
+  const docs=l.docs||{};
+  const cur=l.logoDataUrl||'';
+  return `
+  <div class="form-group" style="grid-column:1/-1;border-top:1px dashed var(--border);margin-top:6px;padding-top:12px">
+    <div style="font-size:12px;font-weight:700;margin-bottom:2px"><i class="fas fa-file-invoice" style="color:var(--accent-blue);margin-right:6px"></i>Letterhead for this Business Unit</div>
+    <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Used on the PDFs of this BU's projects. Leave a field blank to fall back to the Main Company default.</div>
+    <label class="form-label">BU Logo</label>
+    <div id="buLogoPreview" style="margin-bottom:6px">${cur?`<img src="${cur}" style="max-height:48px;max-width:150px;object-fit:contain;border:1px solid var(--border);border-radius:4px;padding:3px;background:#fff">`:'<span style="font-size:11px;color:var(--text-muted)">No logo</span>'}</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input type="file" class="form-input" accept="image/png,image/jpeg" style="padding:4px;flex:1" onchange="_buLogoPick(this)">
+      <button type="button" class="btn btn-secondary btn-sm" onclick="_buLogoClear()"><i class="fas fa-trash"></i></button>
+    </div>
+  </div>
+  <div class="form-group" style="grid-column:1/-1"><label class="form-label">Company Name (letterhead)</label><input class="form-input" id="buLhCompany" value="${(l.companyName||'').replace(/"/g,'&quot;')}" placeholder="e.g. SYNERCORE HEAVY INDUSTRIES CORP."></div>
+  <div class="form-group" style="grid-column:1/-1"><label class="form-label">Address Line</label><input class="form-input" id="buLhAddress" value="${(l.addressLine||'').replace(/"/g,'&quot;')}" placeholder="Blank = Main Company address"></div>
+  <div class="form-group" style="grid-column:1/-1"><label class="form-label">Contact Line (Tel / Fax)</label><input class="form-input" id="buLhContact" value="${(l.contactLine||'').replace(/"/g,'&quot;')}" placeholder="Blank = Main Company contact"></div>
+  <div class="form-group" style="grid-column:1/-1">
+    <label class="form-label">Document &amp; Version Control — per output <span style="font-weight:400;color:var(--text-muted)">(blank = default)</span></label>
+    <table style="width:100%;border-collapse:collapse;margin-top:4px">
+      <thead><tr style="text-align:left;color:var(--text-secondary)"><th style="padding:3px 5px;font-size:10px">Output</th><th style="padding:3px 5px;font-size:10px">Doc Control No.</th><th style="padding:3px 5px;font-size:10px">Revision</th></tr></thead>
+      <tbody>${_PDF_DOC_OUTPUTS.map(([key,label])=>{const d=docs[key]||{};return `<tr>
+        <td style="padding:3px 5px;font-size:11px;white-space:nowrap">${label}</td>
+        <td style="padding:3px 5px"><input class="form-input" id="buLhDoc_${key}" value="${(d.docNo||'').replace(/"/g,'&quot;')}" style="font-size:11px;font-family:var(--font-mono)"></td>
+        <td style="padding:3px 5px"><input class="form-input" id="buLhRev_${key}" value="${(d.rev||'').replace(/"/g,'&quot;')}" style="font-size:11px;font-family:var(--font-mono)"></td>
+      </tr>`;}).join('')}</tbody>
+    </table>
+  </div>`;
+}
+// Collects the BU letterhead object from the open modal (or undefined if empty).
+function _buCollectLetterhead(prevLh){
+  const _t=v=>(v==null?'':String(v).trim());
+  const o={};
+  const co=_t($('#buLhCompany')?.value), ad=_t($('#buLhAddress')?.value), ct=_t($('#buLhContact')?.value);
+  if(co)o.companyName=co; if(ad)o.addressLine=ad; if(ct)o.contactLine=ct;
+  const docs={};
+  _PDF_DOC_OUTPUTS.forEach(([key])=>{ const dn=_t($('#buLhDoc_'+key)?.value), rv=_t($('#buLhRev_'+key)?.value); if(dn||rv){docs[key]={}; if(dn)docs[key].docNo=dn; if(rv)docs[key].rev=rv;} });
+  if(Object.keys(docs).length)o.docs=docs;
+  let logo=(prevLh&&prevLh.logoDataUrl)||'';
+  if(window._buLogoTmp!==undefined)logo=window._buLogoTmp; // '' clears, string sets
+  if(logo)o.logoDataUrl=logo;
+  return Object.keys(o).length?o:undefined;
+}
+
 function saveSettings(){
 // Persist the shared letterhead + per-output doc/version control
 if(!AppState.data.settings.reportLetterhead)AppState.data.settings.reportLetterhead={};
@@ -796,7 +884,9 @@ function showAddBU(){
         <input type="color" id="buColor" value="${nextColor}" style="width:24px;height:24px;border:none;border-radius:50%;cursor:pointer;padding:0;background:none">
       </div>
     </div>
+    ${_buLetterheadFormHTML(null)}
   </div>`;
+  window._buLogoTmp=undefined;
   $('#genericModalFooter').innerHTML=`
     <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
     <button class="btn btn-primary" onclick="saveBU()"><i class="fas fa-save"></i> Add</button>`;
@@ -826,7 +916,9 @@ function showEditBU(id){
         <input type="color" id="buColor" value="${bu.color||'#388bfd'}" style="width:24px;height:24px;border:none;border-radius:50%;cursor:pointer;padding:0;background:none">
       </div>
     </div>
+    ${_buLetterheadFormHTML(bu)}
   </div>`;
+  window._buLogoTmp=undefined;
   $('#genericModalFooter').innerHTML=`
     <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
     <button class="btn btn-primary" onclick="saveBU('${id}')"><i class="fas fa-save"></i> Update</button>`;
@@ -840,15 +932,22 @@ function saveBU(id){
   if(id){
     const idx=AppState.data.businessUnits.findIndex(b=>b.id===id);
     if(idx>=0){
-      AppState.data.businessUnits[idx]={...AppState.data.businessUnits[idx],
-        name,description:$('#buDesc').value?.trim()||'',color:$('#buColor').value};
+      const prev=AppState.data.businessUnits[idx];
+      const letterhead=_buCollectLetterhead(prev.letterhead);
+      const rec={...prev,name,description:$('#buDesc').value?.trim()||'',color:$('#buColor').value};
+      if(letterhead)rec.letterhead=letterhead; else delete rec.letterhead;
+      AppState.data.businessUnits[idx]=rec;
       showToast('Business unit updated','success');
     }
   }else{
     const newId='BU-'+Date.now().toString(36).toUpperCase();
-    AppState.data.businessUnits.push({id:newId,name,description:$('#buDesc').value?.trim()||'',color:$('#buColor').value});
+    const rec={id:newId,name,description:$('#buDesc').value?.trim()||'',color:$('#buColor').value};
+    const letterhead=_buCollectLetterhead(null);
+    if(letterhead)rec.letterhead=letterhead;
+    AppState.data.businessUnits.push(rec);
     showToast('Business unit added','success');
   }
+  window._buLogoTmp=undefined;
   AppState.save();
   closeModal('genericModal');
   const buListEl=$('#buList');

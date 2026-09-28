@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.27';
-const APP_BUILD='20260928b';
+const APP_VERSION='2.14.28';
+const APP_BUILD='20260928c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,18 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Printed PDFs now carry the Business Unit and an editable letterhead. Project Summary and Gantt PDFs show which BU each project belongs to, and the Gantt is grouped by Business Unit. A new Settings → Report Letterhead lets you upload a company logo (shown on the left of every PDF) and set the address and contact line once, plus the document & version control number separately for each output (Gantt, Project Summary, Daily Meeting) since each is its own controlled form. Nothing changes until you set them — the Gantt keeps its SY3-F-EPD-002 default.';
+const APP_RELEASE_NOTE='Each Business Unit can now have its own letterhead. In Settings → Business Units, edit a BU to set its own logo, company name, address, contact line, and per-output document/version control numbers. A project\'s PDFs (Gantt, Project Summary) automatically use its BU\'s letterhead, and the Gantt — grouped by BU — shows each unit\'s own logo and details per section. Anything left blank on a BU falls back to the Main Company default under Settings → Report Letterhead. Projects with no BU use that default.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.28',date:'2026-09-28',type:'feature',notes:[
+    'Per-Business-Unit letterheads. Each BU can now carry its own logo, company name, address, contact line, and per-output document/version control numbers — set them in Settings → Business Units → edit a BU. Multiple BUs with different branding are now supported.',
+    'PDFs resolve the letterhead from the project\'s BU: the Project Summary and Gantt use that BU\'s logo/company/address/doc numbers. The Gantt (both the jsPDF export and the browser print) is grouped by BU and now shows each unit\'s own logo and controlled-document details per section band.',
+    'Full fallback chain — any field left blank on a BU falls back to the shared Main Company / Default letterhead (Settings → Report Letterhead); a BU with no company name shows its BU name; projects with no BU use the default. So nothing needs to be filled twice.',
+    'The old shared letterhead panel is relabeled "Main Company / Default" to make the fallback clear. The Daily Meeting minutes (a consolidated, all-BU document) keep the Main Company letterhead.',
+    'Note: client-only change; devices pick it up on refresh once the LAN web app is redeployed. Letterheads live in synced settings/business units, so they apply everywhere after one save. No server/DB change.',
+  ]},
   {version:'2.14.27',date:'2026-09-28',type:'feature',notes:[
     'Printed PDFs are now aligned to Business Units. The Project Summary PDF shows the project\'s BU in its header; the Gantt PDF (both the jsPDF export and the browser print) is now grouped by Business Unit with a colored BU band/heading, and its projects are ordered so each BU stays together (main company first).',
     'New editable letterhead — Settings → Report Letterhead. Upload a company logo (drawn on the LEFT of the Gantt letterhead and shown on the Project Summary and Daily Meeting headers), and set the address + contact line once. Previously the Gantt letterhead was hardcoded (blank left box, fixed SY3 address) and could not be changed without a code edit.',
