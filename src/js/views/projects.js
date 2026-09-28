@@ -2485,7 +2485,7 @@ function renderAllocBody(pid){
         const nm=String(a.resourceName||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         html+=`<tr style="border-top:1px solid var(--border);background:${ri%2?'rgba(255,255,255,.02)':'transparent'}">
 <td style="padding:4px 8px;font-size:10px;font-family:var(--font-mono)">${a.id}</td>
-<td style="padding:4px 8px;max-width:160px"><div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${nm}">${a.resourceName}</div>${a.resourceId?`<div style="font-size:9px;color:var(--text-muted)">${a.resourceId}</div>`:''}</td>
+<td style="padding:4px 8px;max-width:160px"><div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${nm}">${a.resourceName}</div><div style="margin-top:2px">${_resSourceBadge(a.resourceName)}</div>${a.resourceId?`<div style="font-size:9px;color:var(--text-muted)">${a.resourceId}</div>`:''}</td>
 <td style="padding:4px 8px"><span style="background:${c.color}22;color:${c.color};font-size:9px;padding:1px 6px;border-radius:4px;white-space:nowrap">${c.label}</span></td>
 <td style="padding:4px 8px"><input class="form-input" value="${String(a.unit||'unit').replace(/"/g,'&quot;')}" style="width:58px;height:24px;font-size:11px;text-align:center" onchange="updateAlloc('${a.id}','unit',this.value)"></td>
 <td style="padding:4px 8px"><input class="form-input" value="${String(a.role||'').replace(/"/g,'&quot;')}" style="min-width:90px;height:24px;font-size:11px" onchange="updateAlloc('${a.id}','role',this.value)"></td>
@@ -2507,6 +2507,31 @@ function renderAllocBody(pid){
   }
   const tb=document.getElementById('allocBodyRows');if(tb)tb.innerHTML=html;
   const fc=document.getElementById('allocFootCount');if(fc)fc.textContent=`SHOWING ${filtered.length} of ${allocs.length}`;
+}
+
+// ── WAREHOUSE-vs-PR SOURCE DETECTOR ───────────────────────
+// Answers "is this resource stocked in the warehouse (withdraw) or does it
+// need a Purchase Requisition (buy)?" by matching the resource NAME against
+// the warehouse registry (code / barcode / name, case-insensitive). Source
+// files rarely carry a warehouse code, so name is the working key. Computed
+// live at render, so it stays correct as the registry changes.
+function _whMatchByName(name){
+  const n=String(name||'').trim().toLowerCase();
+  if(!n)return null;
+  return (AppState.data.warehouseItems||[]).find(i=>i&&!i._deleted&&(
+    String(i.name||'').trim().toLowerCase()===n||
+    String(i.code||'').trim().toLowerCase()===n||
+    String(i.barcode||'').trim().toLowerCase()===n
+  ))||null;
+}
+// Returns an HTML badge: green WAREHOUSE (in registry) or amber PR (not found).
+function _resSourceBadge(name){
+  const wh=_whMatchByName(name);
+  if(wh){
+    const code=String(wh.code||wh.id||'').replace(/"/g,'&quot;');
+    return `<span title="In warehouse registry${code?' ('+code+')':''} — withdraw from stock" style="background:rgba(63,185,80,.15);color:var(--accent-green);font-size:8px;padding:1px 5px;border-radius:4px;white-space:nowrap;font-weight:700"><i class="fas fa-warehouse" style="margin-right:3px;font-size:8px"></i>WAREHOUSE</span>`;
+  }
+  return `<span title="Not in the warehouse registry — needs a Purchase Requisition (PR)" style="background:rgba(240,164,80,.15);color:var(--accent-amber);font-size:8px;padding:1px 5px;border-radius:4px;white-space:nowrap;font-weight:700"><i class="fas fa-file-invoice" style="margin-right:3px;font-size:8px"></i>PR</span>`;
 }
 
 // Value of one usage log. Logs written before unit costs existed carry no
@@ -2539,7 +2564,7 @@ function renderLogBody(){
 <td style="padding:4px 8px;font-size:11px;font-family:var(--font-mono);white-space:nowrap">${l.date}</td>
 <td style="padding:4px 8px"><span class="badge ${l.transactionType==='Return'?'badge-amber':'badge-green'}" style="font-size:10px"><i class="fas ${l.transactionType==='Return'?'fa-undo':'fa-sign-out-alt'}" style="margin-right:3px"></i>${l.transactionType}</span></td>
 <td style="padding:4px 8px">${(()=>{const cat=l.category||'Budgeted';const catMap={'Budgeted':['var(--accent-green)','fa-check-circle'],'Variation - Alternative':['var(--accent-amber)','fa-exchange-alt'],'Variation - Unbudgeted':['var(--accent-red)','fa-exclamation-triangle']};const[col,ico]=catMap[cat]||catMap['Budgeted'];const tip=cat!=='Budgeted'&&l.variationReason?`title="${(l.variationCode||'')+': '+(l.variationReason||'').replace(/"/g,'&quot;')}"`:'' ;return`<span ${tip} style="background:${col}22;color:${col};font-size:9px;padding:2px 7px;border-radius:10px;white-space:nowrap;font-weight:600;cursor:${cat!=='Budgeted'?'help':'default'}"><i class="fas ${ico}" style="margin-right:3px;font-size:8px"></i>${cat==='Budgeted'?'Budgeted':cat==='Variation - Alternative'?'Var-Alt':'Var-Unbud'}</span>`;})()}</td>
-<td style="padding:4px 8px;font-weight:500;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(l.resourceName||'').replace(/"/g,'&quot;')}">${l.resourceName}</td>
+<td style="padding:4px 8px;font-weight:500;max-width:150px" title="${String(l.resourceName||'').replace(/"/g,'&quot;')}"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.resourceName}</div><div style="margin-top:2px">${_resSourceBadge(l.resourceName)}</div></td>
 <td style="padding:4px 8px"><span style="background:${c.color}22;color:${c.color};font-size:9px;padding:1px 6px;border-radius:4px;white-space:nowrap">${c.label}</span></td>
 <td style="padding:4px 8px;text-align:center;font-family:var(--font-mono);font-weight:700;font-size:12px;color:${l.transactionType==='Return'?'var(--accent-amber)':'var(--accent-green)'}">
 ${l.transactionType==='Return'?'-':'+'}${l.quantity}</td>
@@ -3451,20 +3476,28 @@ function showAllocImportPreview(rows,pid,fromExcel=false){
   const existing=(AppState.data.resourceAllocations||[]).filter(a=>a.projectId===pid).map(a=>a.id);
   const willAdd=rows.filter(r=>!existing.includes(r.ID||r.id||'')).length;
   const willUpdate=rows.filter(r=>existing.includes(r.ID||r.id||'')).length;
+  // Warehouse-vs-PR source detection (matches each row's resource name against
+  // the warehouse registry). Lets the user see, before importing, which items
+  // are stocked (withdraw) vs which need a Purchase Requisition (buy).
+  const rowName=r=>String(r.ResourceName||r.resourceName||r['Resource Name']||r.Name||r.name||'').trim();
+  const whCount=rows.filter(r=>_whMatchByName(rowName(r))).length;
+  const prCount=rows.length-whCount;
   preview.innerHTML=`
   <div style="margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <span style="font-size:12px;font-weight:600"><i class="fas fa-table" style="color:var(--accent-green);margin-right:5px"></i>${rows.length} rows ready to import</span>
     <span class="badge badge-green">${willAdd} new</span>
     <span class="badge badge-blue">${willUpdate} updates</span>
+    <span style="background:rgba(63,185,80,.15);color:var(--accent-green);font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700"><i class="fas fa-warehouse" style="margin-right:4px"></i>${whCount} in warehouse</span>
+    <span style="background:rgba(240,164,80,.15);color:var(--accent-amber);font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700"><i class="fas fa-file-invoice" style="margin-right:4px"></i>${prCount} need PR</span>
   </div>
   <div style="overflow-x:auto;max-height:180px;border:1px solid var(--border);border-radius:6px">
     <table style="width:100%;font-size:10px;border-collapse:collapse">
-      <thead style="background:var(--bg-hover);position:sticky;top:0"><tr>${headers.map(h=>`<th style="padding:5px 8px;text-align:left;font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap">${h}</th>`).join('')}</tr></thead>
-      <tbody>${show.map((r,i)=>`<tr style="${i%2?'background:var(--bg-hover)':''}">${headers.map(h=>`<td style="padding:4px 8px;border-bottom:1px solid var(--border);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r[h]||''}">${r[h]||''}</td>`).join('')}</tr>`).join('')}
-      ${rows.length>5?`<tr><td colspan="${headers.length}" style="padding:5px 8px;text-align:center;color:var(--text-muted)">... and ${rows.length-5} more rows</td></tr>`:''}</tbody>
+      <thead style="background:var(--bg-hover);position:sticky;top:0"><tr><th style="padding:5px 8px;text-align:left;font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap">Source</th>${headers.map(h=>`<th style="padding:5px 8px;text-align:left;font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap">${h}</th>`).join('')}</tr></thead>
+      <tbody>${show.map((r,i)=>`<tr style="${i%2?'background:var(--bg-hover)':''}"><td style="padding:4px 8px;border-bottom:1px solid var(--border);white-space:nowrap">${_resSourceBadge(rowName(r))}</td>${headers.map(h=>`<td style="padding:4px 8px;border-bottom:1px solid var(--border);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r[h]||''}">${r[h]||''}</td>`).join('')}</tr>`).join('')}
+      ${rows.length>5?`<tr><td colspan="${headers.length+1}" style="padding:5px 8px;text-align:center;color:var(--text-muted)">... and ${rows.length-5} more rows</td></tr>`:''}</tbody>
     </table>
   </div>
-  <div style="margin-top:8px;font-size:11px;color:var(--text-secondary)"><i class="fas fa-info-circle" style="margin-right:4px"></i>Matching IDs will be updated. New IDs will be added. Blank IDs will be auto-assigned.</div>
+  <div style="margin-top:8px;font-size:11px;color:var(--text-secondary)"><i class="fas fa-info-circle" style="margin-right:4px"></i>Matching IDs will be updated. New IDs will be added. Blank IDs will be auto-assigned. <strong>Source</strong> is matched by name against the warehouse registry — <span style="color:var(--accent-green);font-weight:600">WAREHOUSE</span> = in stock (withdraw), <span style="color:var(--accent-amber);font-weight:600">PR</span> = not registered (purchase).</div>
   ${(()=>{
     const csvPids=[...new Set(rows.map(r=>String(r.ProjectID||r.projectId||r['Project ID']||'').trim()).filter(Boolean))];
     const hasMultiPid=csvPids.length>1||(csvPids.length===1&&csvPids[0]!==pid);

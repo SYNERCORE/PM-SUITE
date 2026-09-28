@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.25';
-const APP_BUILD='20260926a';
+const APP_VERSION='2.14.26';
+const APP_BUILD='20260928a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Resource Allocation import now uses the same columns as the export, so Export → edit in Excel → re-import is a clean round-trip. The import "Download Template" button was handing out the Usage-Log template by mistake — it asked for TransactionType/Quantity/UnitCost (which allocation import ignores) and left out Role, Allocated Qty, Planned/Actual Cost, Status and the dates, so imported rows came in blank. The template now matches the export exactly.';
+const APP_RELEASE_NOTE='Resources are now auto-tagged Warehouse or PR. Each resource is matched by name against the warehouse registry: if it is stocked, it shows a green WAREHOUSE badge (withdraw from stock); if it is not registered, it shows an amber PR badge (needs a Purchase Requisition). The tags appear in the allocation import preview (with a "N in warehouse / N need PR" summary before you import), on every allocation row, and on the Transaction Log — so you can tell at a glance what to withdraw vs what to buy.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.26',date:'2026-09-28',type:'feature',notes:[
+    'Resources are now auto-tagged Warehouse vs PR so you can tell at a glance whether an item should be withdrawn from stock or purchased. Each resource name is matched against the warehouse registry (by name, and also code/barcode when present, case-insensitive). A match shows a green WAREHOUSE badge; no match shows an amber PR (Purchase Requisition) badge. This is computed live, so it always reflects the current registry.',
+    'The allocation Import preview now shows a Source column and a "N in warehouse / N need PR" summary BEFORE you import — useful because source files usually have no warehouse code, so the app detects it for you by name.',
+    'The same Warehouse/PR badge appears on every row of the Resource Allocation list and on the Transaction Log.',
+    'Note: matching is by exact resource name against the warehouse registry only. If an item that should be stocked reads as PR, check that its name matches the warehouse item name. Client-only change; devices pick it up on refresh once the LAN web app is redeployed. No server/DB change.',
+  ]},
   {version:'2.14.25',date:'2026-09-26',type:'fix',notes:[
     'Resource Allocation import template now matches the export. The Import dialog\'s "Download Template" button was giving out the Usage-Log template by mistake (an old copy-paste): it asked for LogID/AllocationID/TransactionType/Date/Quantity/UnitCost/IssuedTo/ApprovedBy — none of which the allocation importer reads — and omitted Role, AllocatedQty, PlannedCost, ActualCost, Status, StartDate and EndDate. Filling it in produced rows with zero quantity, zero cost, no dates and status "active".',
     'The template now offers exactly the columns the Export writes (ID, ProjectID, ResourceID, ResourceName, ResourceType, Unit, Role, AllocatedQty, PlannedCost, ActualCost, Status, StartDate, EndDate, Notes), so Export → edit → re-import is a clean round-trip. The importer already accepted these fields; only the template button was wrong.',
