@@ -4118,6 +4118,7 @@ function renderDetailGantt(){
           <span style="font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.name)}</span>
         </div>
         ${t.assignee?`<div style="font-size:9px;color:var(--text-muted);padding-left:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.assignee}</div>`:''}
+        ${(typeof _shiftBadge==='function'&&!isMile)?(_shiftBadge(t,p)?`<div style="padding-left:14px;margin-top:2px">${_shiftBadge(t,p)}</div>`:''):''}
       </div>
       <div id="ganttBar_${t.id}" style="flex:1;min-width:0">${barCell(barContent)}</div>
       <div style="width:86px;min-width:86px;padding:5px 8px;font-size:9px;font-family:var(--font-mono);border-left:1px solid var(--border);color:${overdue?'var(--accent-red)':'var(--text-secondary)'}">

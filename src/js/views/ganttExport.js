@@ -272,7 +272,9 @@ async function exportGanttPDF(projectId){
         }else{
           doc.setFont('helvetica','normal');doc.setFontSize(6);doc.setTextColor(...TEXT);
         }
-        doc.text(doc.splitTextToSize(t.name||'',nameMaxW)[0]||'',ML+C_ID+indent,midY);
+        const _shLbl=(!isProj&&typeof _taskShiftInfo==='function')?(_taskShiftInfo(t,project).label||''):'';
+        const _nmTxt=(t.name||'')+(_shLbl?('  ['+_shLbl+']'):'');
+        doc.text(doc.splitTextToSize(_nmTxt,nameMaxW)[0]||'',ML+C_ID+indent,midY);
 
         if(!isProj){
           doc.setFont('helvetica','normal');doc.setFontSize(6);doc.setTextColor(...TEXT);
@@ -493,7 +495,7 @@ function buildGanttPrintHTML(projectId,opts){
       let actual=''; if(a1!=null&&a2!=null){ const l=Math.min(a1,a2), w=Math.max(1.5,Math.abs(a2-a1)); actual=`<div class="abar" style="left:${l}%;width:${w}%"></div>`; }
       rows+=`<tr>
         <td class="mono">${esc(t.wbs||t.id)}</td>
-        <td class="nm" style="padding-left:${(depth||0)*12+4}px">${esc(t.name)}</td>
+        <td class="nm" style="padding-left:${(depth||0)*12+4}px">${esc(t.name)}${(typeof _taskShiftInfo==='function'&&_taskShiftInfo(t,p).isOverride)?` <span style="font-size:8px;color:#a15c00;border:1px solid #d9a441;border-radius:3px;padding:0 3px;white-space:nowrap">${esc(_taskShiftInfo(t,p).label)}</span>`:''}</td>
         <td>${esc((t.assignee||'').split(' ')[0])}</td>
         <td class="mono">${fmt(t.startDate)}</td><td class="mono">${fmt(t.endDate)}</td>
         <td class="mono a">${fmt(t.actualStart)}</td><td class="mono a">${fmt(t.actualEnd)}</td>

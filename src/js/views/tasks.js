@@ -146,6 +146,51 @@ function _getTaskProjHPD(projectId) {
   return p?.calendar?.hoursPerDay || 8;
 }
 
+// ── Per-task Work Window / Shift ──────────────────────────────────────────
+// A task defaults to the project's Work Calendar but can override its effective
+// hours-per-day so shift-restricted work (e.g. mornings only on a 24/7 job)
+// stretches across the right number of calendar days. Presets mirror the Work
+// Calendar options; 'custom' lets the planner type any hours + a window label.
+const _SHIFT_PRESETS = {
+  inherit:     { hpd: null, label: 'Project calendar' },
+  standard:    { hpd: 8,    label: 'Mon–Fri, 8h'  },
+  extended:    { hpd: 12,   label: 'Mon–Fri, 12h' },
+  monsat8:     { hpd: 8,    label: 'Mon–Sat, 8h'  },
+  monsat12:    { hpd: 12,   label: 'Mon–Sat, 12h' },
+  calendar247: { hpd: 24,   label: '24/7'         },
+  custom:      { hpd: null, label: 'Custom'       },
+};
+
+// Resolve a task's effective hours/day + display label against its project.
+// Returns { effHpd, label, isOverride }.
+function _taskShiftInfo(task, project) {
+  const projHpd = project?.calendar?.hoursPerDay || 8;
+  const sh = task && task.shift;
+  const mode = sh && sh.mode ? sh.mode : 'inherit';
+  if (mode === 'inherit' || !_SHIFT_PRESETS[mode]) {
+    return { effHpd: projHpd, label: '', isOverride: false };
+  }
+  const preset = _SHIFT_PRESETS[mode];
+  const effHpd = (mode === 'custom')
+    ? (sh.hoursPerDay > 0 ? sh.hoursPerDay : projHpd)
+    : (preset.hpd || projHpd);
+  const label = (sh.label && sh.label.trim())
+    ? sh.label.trim()
+    : (mode === 'custom' ? (effHpd + 'h/day') : preset.label);
+  return { effHpd, label, isOverride: true };
+}
+
+// Small color-coded chip for a task's shift override (empty string when inherited).
+function _shiftBadge(task, project) {
+  const proj = project || (AppState.data.projects||[]).find(p => p.id === task.projectId);
+  const info = _taskShiftInfo(task, proj);
+  if (!info.isOverride) return '';
+  const projHpd = proj?.calendar?.hoursPerDay || 8;
+  // amber = fewer hours than the project day (work stretches); cyan = same/more
+  const col = info.effHpd < projHpd ? 'var(--accent-amber)' : 'var(--accent-cyan)';
+  return `<span class="badge" title="Work window: ${esc(info.label)} (${info.effHpd}h/day vs project ${projHpd}h/day)" style="background:${col}22;color:${col};font-size:9px;white-space:nowrap"><i class="fas fa-business-time" style="font-size:8px;margin-right:3px"></i>${esc(info.label)}</span>`;
+}
+
 function renderTasks(){
 // Ensure all projects have sequential WBS numbers assigned
 const _wbsProjs=new Set((AppState.data.tasks||[]).filter(t=>!t._deleted).map(t=>t.projectId));
@@ -243,7 +288,7 @@ $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><tabl
 <thead><tr><th>WBS</th><th>Task</th><th>Project</th><th>Assignee</th><th>End</th><th>Dur (d)</th><th>Progress</th><th>Status</th><th>Priority</th><th></th></tr></thead>
 <tbody>${_pgSlice("tasks",_orderTasksHier(tasks)).map(({t,depth})=>{const isSum=_taskHasChildren(t.id,tasks);return`<tr>
 <td style="font-size:10px;font-family:var(--font-mono)">${t.wbs||t.id}</td>
-<td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${esc(t.name)}</div><div style="font-size:10px;color:var(--text-secondary);padding-left:${depth*18}px">${esc(t.dept||'')}</div></td>
+<td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${esc(t.name)}</div><div style="font-size:10px;color:var(--text-secondary);padding-left:${depth*18}px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${esc(t.dept||'')}${_shiftBadge(t)}</div></td>
 <td><span class="badge badge-blue">${t.projectId}</span></td>
 <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.assignee)}<span style="font-size:11px">${t.assignee.split(' ')[0]}</span></div></td>
 <td style="font-size:11px;font-family:var(--font-mono);color:${isOverdue(t.endDate)?'var(--accent-red)':'inherit'}">${t.endDate||''}${t.actualEnd?`<div style="font-size:9px;color:var(--text-muted)">act ${t.actualEnd} ${_varBadge(_taskFinishVarDays(t))}</div>`:''}</td>
@@ -316,6 +361,16 @@ $('#taskModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">Planned Hours</label><input class="form-input" type="number" id="tPH" value="${t?.plannedHrs||0}"></div>
 <div class="form-group"><label class="form-label">Actual Hours</label><input class="form-input" type="number" id="tAH" value="${t?.actualHrs||0}"></div>
 <div class="form-group"><label class="form-label">Duration (days) <span style="font-size:10px;color:var(--text-muted)">— working days</span></label><input class="form-input" type="number" id="tDur" step="0.125" min="0" value="${_durVal}" placeholder="e.g. 5" onchange="_tFormRecalc('dur')" ${_isMile?'readonly style="opacity:.55"':''}></div>
+<div class="form-group" style="grid-column:1/-1"><label class="form-label">Work Window <span style="font-size:10px;color:var(--text-muted)">— which shift this task runs on (defaults to the project Work Calendar)</span></label>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+    <select class="form-select" id="tShiftMode" style="flex:1;min-width:180px" onchange="_tShiftModeChange()">
+      ${Object.entries(_SHIFT_PRESETS).map(([k,v])=>`<option value="${k}" ${((t?.shift?.mode||'inherit')===k)?'selected':''}>${k==='inherit'?'Same as project calendar (default)':(k==='custom'?'Custom hours…':v.label)}</option>`).join('')}
+    </select>
+    <input class="form-input" type="number" id="tShiftHrs" min="0.5" max="24" step="0.5" value="${t?.shift?.hoursPerDay||''}" placeholder="hrs/day" title="Effective working hours per day for this task" style="width:100px;display:${(t?.shift?.mode==='custom')?'inline-block':'none'}" onchange="_tFormRecalc('shift')">
+    <input class="form-input" id="tShiftLabel" value="${esc(t?.shift?.label||'')}" placeholder="Label e.g. Morning / Night 18:00–06:00" title="Optional label shown as the shift badge" style="flex:1;min-width:160px;display:${(t?.shift?.mode==='custom')?'inline-block':'none'}">
+  </div>
+  <div id="tShiftNote" style="font-size:10px;color:var(--text-muted);margin-top:4px"></div>
+</div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Predecessors <span style="font-size:10px;color:var(--text-muted)">e.g. TSK-001 FS, TSK-002 SS+2d</span></label><div style="display:flex;gap:6px"><input class="form-input" id="tPred" value="${t?.predecessors||''}" placeholder="Leave blank if no dependencies" style="flex:1" onchange="_tFormRecalc('pred')"><button type="button" class="btn btn-secondary btn-sm" style="white-space:nowrap;padding:0 10px" onclick="showPredPicker('${id||''}')"><i class="fas fa-list-ul"></i> Pick</button></div></div>
 <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="tStat">${['todo','inprogress','done','blocked'].map(s=>`<option value="${s}" ${(t?.status||defStatus)===s?'selected':''}>${s}</option>`).join('')}</select></div>
 <div class="form-group"><label class="form-label">Priority</label><select class="form-select" id="tPri">${['critical','high','medium','low'].map(s=>`<option value="${s}" ${t?.priority===s?'selected':''}>${s}</option>`).join('')}</select></div>
@@ -332,6 +387,8 @@ if(!id) setTimeout(()=>{_tRefreshParentOptions('');_tRefreshWbs('');},0);
 if(_hasPred) setTimeout(_runFormCPMPreview, 50);
 // Show finish variance (actual vs planned) if actuals already recorded
 setTimeout(_tActualVar, 0);
+// Initialise the Work Window span note
+setTimeout(_tShiftUpdateNote, 0);
 }
 
 // Options for the Parent Task dropdown: same-project tasks, excluding self,
@@ -388,7 +445,8 @@ const t={
   milestone:_isMileSave,
   parentId:$('#tParent')?.value||'',
   predecessors:_normPred,
-  durationHrs:_isMileSave?0:(_tDurDays>0?_tDurDays*_tHPD:(id?(AppState.data.tasks||[]).find(x=>x.id===id)?.durationHrs||0:0))
+  durationHrs:_isMileSave?0:(_tDurDays>0?_tDurDays*_tHPD:(id?(AppState.data.tasks||[]).find(x=>x.id===id)?.durationHrs||0:0)),
+  shift:_tCollectShift()   // per-task Work Window override (mode:'inherit' = project calendar)
 };
 if(!_req(['tName','tProj','tStart'])){showToast('Fill in required fields','error');return;}
 // Hierarchy guards: no self-parenting, no cycles, parent must be in same project
@@ -468,7 +526,8 @@ function _runFormCPMPreview(){
     endDate:endEl.value||'',
     durationHrs:isMile?0:durDays*hpd,
     predecessors:predStr,
-    milestone:isMile
+    milestone:isMile,
+    shift:_tCollectShift()   // so the preview reflects the work-window stretch
   };
   const result=SHICCPMEngine.runFullCPM([...others,thisTask],proj);
   if(result.hasCycle)return;
@@ -487,8 +546,49 @@ function _runFormCPMPreview(){
   }
 }
 
+// ── Work Window (shift) form helpers ──────────────────────────────────────
+// Effective hours/day implied by the current Work Window controls.
+function _tFormEffHpd(){
+  const projHpd=_getTaskProjHPD($('#tProj')?.value||'');
+  const mode=$('#tShiftMode')?.value||'inherit';
+  if(mode==='inherit'||!_SHIFT_PRESETS[mode])return projHpd;
+  if(mode==='custom'){const h=parseFloat($('#tShiftHrs')?.value);return h>0?h:projHpd;}
+  return _SHIFT_PRESETS[mode].hpd||projHpd;
+}
+// Build the shift object to save (null-ish → omit override).
+function _tCollectShift(){
+  const mode=$('#tShiftMode')?.value||'inherit';
+  if(mode==='inherit')return {mode:'inherit'};
+  const projHpd=_getTaskProjHPD($('#tProj')?.value||'');
+  const hpd=(mode==='custom')?(parseFloat($('#tShiftHrs')?.value)||projHpd):(_SHIFT_PRESETS[mode]?.hpd||projHpd);
+  const label=($('#tShiftLabel')?.value||'').trim();
+  return {mode,hoursPerDay:hpd,label};
+}
+// Show/hide the custom hrs+label inputs when the mode changes, then recalc.
+function _tShiftModeChange(){
+  const custom=$('#tShiftMode')?.value==='custom';
+  const hrs=$('#tShiftHrs'), lbl=$('#tShiftLabel');
+  if(hrs)hrs.style.display=custom?'inline-block':'none';
+  if(lbl)lbl.style.display=custom?'inline-block':'none';
+  _tFormRecalc('shift');
+}
+// Live note under Work Window: how many calendar days the effort spans at this shift.
+function _tShiftUpdateNote(){
+  const el=$('#tShiftNote'); if(!el)return;
+  const mode=$('#tShiftMode')?.value||'inherit';
+  const projHpd=_getTaskProjHPD($('#tProj')?.value||'');
+  const eff=_tFormEffHpd();
+  const durDays=parseFloat($('#tDur')?.value)||0; // effort-days at project rate
+  if(mode==='inherit'){el.innerHTML='Uses the project Work Calendar ('+projHpd+'h/day).';return;}
+  const span=durDays>0?Math.ceil(durDays*projHpd/eff):0;
+  const cmp=eff<projHpd?`<span style="color:var(--accent-amber)">stretches</span>`:eff>projHpd?`<span style="color:var(--accent-cyan)">compresses</span>`:'matches';
+  el.innerHTML=`Effective <b>${eff}h/day</b> vs project ${projHpd}h/day — `+
+    (durDays>0?`${durDays} effort-day${durDays===1?'':'s'} ${cmp} to ≈ <b>${span}</b> calendar working day${span===1?'':'s'}.`
+              :`enter a duration to see the calendar span.`);
+}
+
 // Auto-sync Start / End / Duration / Milestone / Predecessor in the task form.
-// source: 'start' | 'end' | 'dur' | 'mile' | 'pred'
+// source: 'start' | 'end' | 'dur' | 'mile' | 'pred' | 'shift'
 function _tFormRecalc(source){
   const projId=$('#tProj')?.value;
   const cal=window.SHICCPMEngine?SHICCPMEngine.getCalendar((AppState.data.projects||[]).find(p=>p.id===projId)):null;
@@ -523,6 +623,21 @@ function _tFormRecalc(source){
     return;
   }
 
+  // Work Window changed: refresh the span note; recompute end for anchors, or
+  // re-run the CPM preview for successors (whose start comes from predecessors).
+  if(source==='shift'){
+    if(!isMile){
+      if(hasPred){ _runFormCPMPreview(); }
+      else {
+        const s0=startEl.value, dur0=parseFloat(durEl.value);
+        const effHpd=_tFormEffHpd(), projHpd=_getTaskProjHPD(projId);
+        if(!isNaN(dur0)&&dur0>0&&s0) endEl.value=addWD(s0,Math.max(0,Math.ceil(dur0*projHpd/effHpd)-1));
+      }
+    }
+    _tShiftUpdateNote();
+    return;
+  }
+
   // If milestone: end always = start
   if(isMile){
     if(startEl.value)endEl.value=startEl.value;
@@ -547,19 +662,27 @@ function _tFormRecalc(source){
     if(cur===0 || Math.abs(cur-dur*hpd)<hpd) phEl.value=+(dur*hpd).toFixed(2);
   }
 
+  // Effective work-window stretch: a shift with fewer hours/day spans more
+  // calendar days. calSpan(dur) = ceil(effort-days × projectHPD / shiftHPD) − 1
+  // (inclusive). With no shift override this equals ceil(dur)−1, unchanged.
+  const _effHpd=_tFormEffHpd(), _projHpd=_getTaskProjHPD(projId);
+  const calSpan=(d)=>Math.max(0,Math.ceil(d*_projHpd/_effHpd)-1);
+
   if(source==='start'){
-    // end = start + (ceil(dur)-1) working days  [inclusive model: dur<=1 → same day, 1.5 → 2 days]
-    if(!isNaN(dur)&&dur>0&&s) endEl.value=addWD(s,Math.max(0,Math.ceil(dur)-1));
+    // end = start + calSpan(dur) working days  [inclusive model: dur<=1 → same day]
+    if(!isNaN(dur)&&dur>0&&s) endEl.value=addWD(s,calSpan(dur));
     else if(e&&s>e) endEl.value=s;
   } else if(source==='dur'){
-    if(!isNaN(dur)&&dur>0&&s) endEl.value=addWD(s,Math.max(0,Math.ceil(dur)-1));
+    if(!isNaN(dur)&&dur>0&&s) endEl.value=addWD(s,calSpan(dur));
   } else if(source==='end'){
     if(s&&e){
       if(e<s){endEl.value=s;durEl.value=1;}
-      // inclusive count: Mon→Mon=1, Mon→Fri=5
-      else{const d=diffWD(s,e)+1;durEl.value=d>=1?d:1;}
+      // inclusive count: Mon→Mon=1, Mon→Fri=5. Convert calendar span back to
+      // effort-days at the project rate when a shift stretches the window.
+      else{const d=diffWD(s,e)+1;const eff=+(d*_effHpd/_projHpd).toFixed(3);durEl.value=eff>=1?+eff.toFixed(2).replace(/\.?0+$/,''):1;}
     }
   }
+  _tShiftUpdateNote();
 }
 
 // ── Task Import ─────────────────────────────────────────────

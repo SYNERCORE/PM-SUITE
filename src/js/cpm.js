@@ -145,10 +145,24 @@ function runFullCPM(tasks, project) {
   // Work on copies so we don't mutate AppState
   const map = new Map(ptasks.map(t => [t.id, { ...t }]));
 
+  // Effective hours-per-day for a single task. A task may carry a shift/work-window
+  // override (t.shift) whose hoursPerDay differs from the project calendar — e.g. a
+  // "mornings only" task in a 24/7 project works fewer hours each calendar day, so it
+  // spans MORE calendar days. mode 'inherit' (or no shift) → the project calendar rate,
+  // which keeps every existing task's schedule byte-for-byte identical.
+  function taskHpd(t) {
+    if (t && t.shift && t.shift.mode && t.shift.mode !== 'inherit' && t.shift.hoursPerDay > 0) {
+      return t.shift.hoursPerDay;
+    }
+    return cal.hoursPerDay || 8;
+  }
+
   // Duration in working days (inclusive: dur=1 → task spans 1 day, ES=EF)
   function getDurDays(t) {
     if (t.milestone) return 0;
-    if (t.durationHrs && t.durationHrs > 0) return t.durationHrs / cal.hoursPerDay;
+    // durationHrs is effort measured at the PROJECT rate; dividing by the task's own
+    // effective rate stretches (or compresses) the calendar span for shift-restricted work.
+    if (t.durationHrs && t.durationHrs > 0) return t.durationHrs / taskHpd(t);
     // Fallback: derive from stored start/end — inclusive count (+1)
     if (t.startDate && (t.endDate || t.dueDate)) {
       const s = t.startDate;
