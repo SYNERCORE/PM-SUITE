@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.31';
-const APP_BUILD='20260930b';
+const APP_VERSION='2.14.32';
+const APP_BUILD='20260930c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Performance fix for projects with many tasks or line items. The task list, Gantt ordering, WBS renumbering and summary roll-ups no longer slow down as tasks pile up (they were getting quadratically slower), and the Warehouse-vs-PR badge on the allocation list, transaction log and import preview now uses a fast lookup instead of scanning the whole warehouse registry for every row. Same results, just much faster. No change to any of your data.';
+const APP_RELEASE_NOTE='Task import now recognizes the WBS column and rebuilds the outline. When you import tasks from CSV/Excel, the WBS codes are used to nest the tasks: a code like 2.1.1 is placed under 2.1, which sits under 2. Top-level codes (1, 2, 3) stay at the top. Previously every imported task landed flat with no parent. Only the tasks in the file being imported are re-parented; your other tasks are left alone, and the imported WBS numbers are kept.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.32',date:'2026-09-30',type:'fix',notes:[
+    'Task CSV/Excel import now builds the WBS hierarchy. It previously read the WBS column into each task but never set parentId, so a structured outline imported as a flat list and the app then renumbered it. Import now derives each task\'s parent from its WBS code (2.1.1 → parent 2.1 → parent 2); codes with no dot (1, 2, 3, or 0) stay top-level.',
+    'Only the tasks present in the imported file are re-parented — pre-existing tasks you did not import keep their own parents. Parent lookup spans the whole project, so an imported child can attach to a task that already existed. Imported WBS numbers are preserved (not renumbered).',
+    'The fix lives in the executeTaskImport builtin module (hardening.js). Verified end-to-end against a 29-row multi-level outline: hierarchy correct, WBS preserved, unrelated tasks untouched.',
+    'Note: client-only change; devices pick it up on refresh once the LAN web app is redeployed. No server/DB change.',
+  ]},
   {version:'2.14.31',date:'2026-09-30',type:'improvement',notes:[
     'Performance: eliminated the quadratic (O(n^2)) slowdown that made the app lag as tasks accumulated. _orderTasksHier (runs on every task/Gantt render), _recalcAllWbs and _applySummaryRollups (run on every task save) now build a parent→children index once instead of re-scanning the whole task list per node. Benchmarks: ordering 2,000 tasks dropped from ~10ms to ~1.4ms per render; identical output verified against the old code (incl. cycles/orphans and WBS numbering).',
     'Performance: the Warehouse-vs-PR source badge (allocation list, transaction log, allocation import preview) built a linear scan of the entire warehouse registry for every row (O(rows × items)). It now builds one lookup index per render — e.g. 3,000 rows against 1,000 warehouse items went from ~61ms to ~0.3ms. Match results are unchanged.',
