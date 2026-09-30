@@ -688,19 +688,45 @@ function _pdfDocCtrl(key){
     rev:(d.rev!=null&&d.rev!=='')?d.rev:def.rev,
   };
 }
-function _lhUploadLogo(input){
-  const file=input.files&&input.files[0]; if(!file)return;
-  if(file.size>1200000){showToast('Logo too large — use an image under ~1 MB','warning',4000);input.value='';return;}
+// Downscale an uploaded logo to a small data URL before storing, so letterhead
+// logos never bloat the sync payload or slow the PDF render. Draws the image onto
+// a canvas capped at MAX px on its longest side (aspect preserved), re-encodes as
+// PNG (keeps transparency) or JPEG for photos, and keeps whichever is smaller. If
+// the image can't be decoded (e.g. an SVG), the original data URL is kept as-is.
+function _downscaleLogo(file, onDone){
+  const MAX=400; // longest side in px — ample for a letterhead
   const reader=new FileReader();
   reader.onload=e=>{
+    const src=e.target.result;
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        let w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+        if(!w||!h){onDone(src);return;}
+        if(w>MAX||h>MAX){const s=Math.min(MAX/w,MAX/h);w=Math.max(1,Math.round(w*s));h=Math.max(1,Math.round(h*s));}
+        const c=document.createElement('canvas');c.width=w;c.height=h;
+        const ctx=c.getContext('2d');ctx.drawImage(img,0,0,w,h);
+        const isJpeg=/^data:image\/jpe?g/i.test(src);
+        const out=isJpeg?c.toDataURL('image/jpeg',0.85):c.toDataURL('image/png');
+        onDone(out&&out.length<src.length?out:src); // never grow the payload
+      }catch(err){ onDone(src); }
+    };
+    img.onerror=()=>onDone(src); // undecodable raster (e.g. SVG) — store unchanged
+    img.src=src;
+  };
+  reader.readAsDataURL(file);
+}
+function _lhUploadLogo(input){
+  const file=input.files&&input.files[0]; if(!file)return;
+  if(file.size>10000000){showToast('Logo file too large — use an image under ~10 MB','warning',4000);input.value='';return;}
+  _downscaleLogo(file,(dataUrl)=>{
     if(!AppState.data.settings)AppState.data.settings={};
     if(!AppState.data.settings.reportLetterhead)AppState.data.settings.reportLetterhead={};
-    AppState.data.settings.reportLetterhead.logoDataUrl=e.target.result;
+    AppState.data.settings.reportLetterhead.logoDataUrl=dataUrl;
     AppState.save();
     showToast('Letterhead logo saved','success',2500);
     if(typeof renderSettings==='function')renderSettings();
-  };
-  reader.readAsDataURL(file);
+  });
 }
 function _lhRemoveLogo(){
   if(!AppState.data.settings||!AppState.data.settings.reportLetterhead)return;
@@ -743,13 +769,11 @@ function _pdfDocCtrlForProject(p,key){ return _pdfDocCtrlFor(_buForProject(p),ke
 // _buLogoTmp: undefined = keep existing, '' = cleared, string = new data URL.
 function _buLogoPick(input){
   const file=input.files&&input.files[0]; if(!file)return;
-  if(file.size>1200000){showToast('Logo too large — use an image under ~1 MB','warning',4000);input.value='';return;}
-  const reader=new FileReader();
-  reader.onload=e=>{ window._buLogoTmp=e.target.result;
+  if(file.size>10000000){showToast('Logo file too large — use an image under ~10 MB','warning',4000);input.value='';return;}
+  _downscaleLogo(file,(dataUrl)=>{ window._buLogoTmp=dataUrl;
     const pv=document.getElementById('buLogoPreview');
     if(pv)pv.innerHTML=`<img src="${window._buLogoTmp}" style="max-height:48px;max-width:150px;object-fit:contain;border:1px solid var(--border);border-radius:4px;padding:3px;background:#fff">`;
-  };
-  reader.readAsDataURL(file);
+  });
 }
 function _buLogoClear(){ window._buLogoTmp=''; const pv=document.getElementById('buLogoPreview'); if(pv)pv.innerHTML='<span style="font-size:11px;color:var(--text-muted)">No logo</span>'; }
 function _buLetterheadFormHTML(bu){

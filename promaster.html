@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.29';
-const APP_BUILD='20260929a';
+const APP_VERSION='2.14.30';
+const APP_BUILD='20260930a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Tasks can now run on their own shift. Each task has a Work Window that defaults to the project Work Calendar but can be overridden with a preset (8h, 12h, Mon-Sat, 24/7) or custom hours plus a label like Morning or Night. A task that works fewer hours per day than the project calendar (for example mornings only on a 24/7 job) now stretches across more calendar days automatically; the task form shows the calendar span live. The shift shows as a badge in the task list and Gantt, and in the Gantt PDF and print. Tasks left on the default are unchanged.';
+const APP_RELEASE_NOTE='Letterhead logos are now downscaled automatically when you upload them. Both the Main Company logo and each Business Unit logo are resized to a small image (longest side about 400 pixels) before being stored, so they no longer bloat the sync or slow down PDF generation. Existing logos are left as they are; re-upload one to shrink it. No change to how logos look on the printed PDFs.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.30',date:'2026-09-30',type:'improvement',notes:[
+    'Letterhead logos are downscaled on upload. Both the Main Company logo (Settings → Report Letterhead) and each Business Unit logo (Settings → Business Units → edit a BU) are now drawn onto a canvas capped at ~400px on the longest side and re-encoded (PNG, or JPEG for photos) before storing — keeping whichever is smaller, so a re-encode never grows the file.',
+    'Why: logos are stored as base64 inside the synced record; a full-size image bloated every sync and slowed PDF rendering. Downscaling keeps each logo a few KB. Each BU is its own SharePoint row, so its logo saves and syncs per unit.',
+    'Undecodable images (e.g. SVG) are stored unchanged. Existing logos are untouched — re-upload one to shrink it. The upload size guard is relaxed to ~10 MB since the image is downscaled anyway.',
+    'Note: client-only change; devices pick it up on refresh once the LAN web app is redeployed. No server/DB change.',
+  ]},
   {version:'2.14.29',date:'2026-09-29',type:'feature',notes:[
     'Per-task Work Window (shift). Each task defaults to its project Work Calendar but can be overridden — pick a preset (Mon-Fri 8h, Mon-Fri 12h, Mon-Sat 8h/12h, 24/7) or Custom hours with an optional label (e.g. Morning, Night 18:00-06:00) in the task form.',
     'Shift-aware scheduling. A task duration is effort measured at the project rate; CPM now divides that effort by the task\'s effective hours-per-day, so a task that can only work part of the day (e.g. mornings only on a 24/7 job) stretches across more calendar days. A night task in an 8h-day project keeps the same day count and is simply flagged. Tasks left on the default (inherit) schedule exactly as before.',
@@ -26660,19 +26666,45 @@ function _pdfDocCtrl(key){
     rev:(d.rev!=null&&d.rev!=='')?d.rev:def.rev,
   };
 }
-function _lhUploadLogo(input){
-  const file=input.files&&input.files[0]; if(!file)return;
-  if(file.size>1200000){showToast('Logo too large — use an image under ~1 MB','warning',4000);input.value='';return;}
+// Downscale an uploaded logo to a small data URL before storing, so letterhead
+// logos never bloat the sync payload or slow the PDF render. Draws the image onto
+// a canvas capped at MAX px on its longest side (aspect preserved), re-encodes as
+// PNG (keeps transparency) or JPEG for photos, and keeps whichever is smaller. If
+// the image can't be decoded (e.g. an SVG), the original data URL is kept as-is.
+function _downscaleLogo(file, onDone){
+  const MAX=400; // longest side in px — ample for a letterhead
   const reader=new FileReader();
   reader.onload=e=>{
+    const src=e.target.result;
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        let w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+        if(!w||!h){onDone(src);return;}
+        if(w>MAX||h>MAX){const s=Math.min(MAX/w,MAX/h);w=Math.max(1,Math.round(w*s));h=Math.max(1,Math.round(h*s));}
+        const c=document.createElement('canvas');c.width=w;c.height=h;
+        const ctx=c.getContext('2d');ctx.drawImage(img,0,0,w,h);
+        const isJpeg=/^data:image\/jpe?g/i.test(src);
+        const out=isJpeg?c.toDataURL('image/jpeg',0.85):c.toDataURL('image/png');
+        onDone(out&&out.length<src.length?out:src); // never grow the payload
+      }catch(err){ onDone(src); }
+    };
+    img.onerror=()=>onDone(src); // undecodable raster (e.g. SVG) — store unchanged
+    img.src=src;
+  };
+  reader.readAsDataURL(file);
+}
+function _lhUploadLogo(input){
+  const file=input.files&&input.files[0]; if(!file)return;
+  if(file.size>10000000){showToast('Logo file too large — use an image under ~10 MB','warning',4000);input.value='';return;}
+  _downscaleLogo(file,(dataUrl)=>{
     if(!AppState.data.settings)AppState.data.settings={};
     if(!AppState.data.settings.reportLetterhead)AppState.data.settings.reportLetterhead={};
-    AppState.data.settings.reportLetterhead.logoDataUrl=e.target.result;
+    AppState.data.settings.reportLetterhead.logoDataUrl=dataUrl;
     AppState.save();
     showToast('Letterhead logo saved','success',2500);
     if(typeof renderSettings==='function')renderSettings();
-  };
-  reader.readAsDataURL(file);
+  });
 }
 function _lhRemoveLogo(){
   if(!AppState.data.settings||!AppState.data.settings.reportLetterhead)return;
@@ -26715,13 +26747,11 @@ function _pdfDocCtrlForProject(p,key){ return _pdfDocCtrlFor(_buForProject(p),ke
 // _buLogoTmp: undefined = keep existing, '' = cleared, string = new data URL.
 function _buLogoPick(input){
   const file=input.files&&input.files[0]; if(!file)return;
-  if(file.size>1200000){showToast('Logo too large — use an image under ~1 MB','warning',4000);input.value='';return;}
-  const reader=new FileReader();
-  reader.onload=e=>{ window._buLogoTmp=e.target.result;
+  if(file.size>10000000){showToast('Logo file too large — use an image under ~10 MB','warning',4000);input.value='';return;}
+  _downscaleLogo(file,(dataUrl)=>{ window._buLogoTmp=dataUrl;
     const pv=document.getElementById('buLogoPreview');
     if(pv)pv.innerHTML=`<img src="${window._buLogoTmp}" style="max-height:48px;max-width:150px;object-fit:contain;border:1px solid var(--border);border-radius:4px;padding:3px;background:#fff">`;
-  };
-  reader.readAsDataURL(file);
+  });
 }
 function _buLogoClear(){ window._buLogoTmp=''; const pv=document.getElementById('buLogoPreview'); if(pv)pv.innerHTML='<span style="font-size:11px;color:var(--text-muted)">No logo</span>'; }
 function _buLetterheadFormHTML(bu){

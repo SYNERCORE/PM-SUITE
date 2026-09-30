@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.29';
-const APP_BUILD='20260929a';
+const APP_VERSION='2.14.30';
+const APP_BUILD='20260930a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Tasks can now run on their own shift. Each task has a Work Window that defaults to the project Work Calendar but can be overridden with a preset (8h, 12h, Mon-Sat, 24/7) or custom hours plus a label like Morning or Night. A task that works fewer hours per day than the project calendar (for example mornings only on a 24/7 job) now stretches across more calendar days automatically; the task form shows the calendar span live. The shift shows as a badge in the task list and Gantt, and in the Gantt PDF and print. Tasks left on the default are unchanged.';
+const APP_RELEASE_NOTE='Letterhead logos are now downscaled automatically when you upload them. Both the Main Company logo and each Business Unit logo are resized to a small image (longest side about 400 pixels) before being stored, so they no longer bloat the sync or slow down PDF generation. Existing logos are left as they are; re-upload one to shrink it. No change to how logos look on the printed PDFs.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.30',date:'2026-09-30',type:'improvement',notes:[
+    'Letterhead logos are downscaled on upload. Both the Main Company logo (Settings → Report Letterhead) and each Business Unit logo (Settings → Business Units → edit a BU) are now drawn onto a canvas capped at ~400px on the longest side and re-encoded (PNG, or JPEG for photos) before storing — keeping whichever is smaller, so a re-encode never grows the file.',
+    'Why: logos are stored as base64 inside the synced record; a full-size image bloated every sync and slowed PDF rendering. Downscaling keeps each logo a few KB. Each BU is its own SharePoint row, so its logo saves and syncs per unit.',
+    'Undecodable images (e.g. SVG) are stored unchanged. Existing logos are untouched — re-upload one to shrink it. The upload size guard is relaxed to ~10 MB since the image is downscaled anyway.',
+    'Note: client-only change; devices pick it up on refresh once the LAN web app is redeployed. No server/DB change.',
+  ]},
   {version:'2.14.29',date:'2026-09-29',type:'feature',notes:[
     'Per-task Work Window (shift). Each task defaults to its project Work Calendar but can be overridden — pick a preset (Mon-Fri 8h, Mon-Fri 12h, Mon-Sat 8h/12h, 24/7) or Custom hours with an optional label (e.g. Morning, Night 18:00-06:00) in the task form.',
     'Shift-aware scheduling. A task duration is effort measured at the project rate; CPM now divides that effort by the task\'s effective hours-per-day, so a task that can only work part of the day (e.g. mornings only on a 24/7 job) stretches across more calendar days. A night task in an 8h-day project keeps the same day count and is simply flagged. Tasks left on the default (inherit) schedule exactly as before.',
