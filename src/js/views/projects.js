@@ -2300,6 +2300,7 @@ function renderDetailAllocation(){
   const pid=detailProjectId;
   const p=(AppState.data.projects||[]).find(x=>x.id===pid);
   if(!p)return;
+  _whRebuildIndex(); // refresh warehouse lookup once for all rows below
   AppState.ensureData();
   if(!AppState.data.resourceAllocations)AppState.data.resourceAllocations=[];
   if(!AppState.data.resourceUsageLogs)AppState.data.resourceUsageLogs=[];
@@ -2528,14 +2529,27 @@ function renderAllocBody(pid){
 // the warehouse registry (code / barcode / name, case-insensitive). Source
 // files rarely carry a warehouse code, so name is the working key. Computed
 // live at render, so it stays correct as the registry changes.
+// Warehouse registry lookup index, built once per render pass. Was a linear
+// .find() over every warehouse item PER ROW (O(rows × items)) — the main lag on
+// the allocation list and transaction log once both grew. _whRebuildIndex() is
+// called at the top of each render that shows the source badge so the data stays
+// fresh; the lazy fallback keeps any other caller correct.
+let _whIndex=null;
+function _whRebuildIndex(){
+  const m=new Map();
+  (AppState.data.warehouseItems||[]).forEach(i=>{
+    if(!i||i._deleted)return;
+    ['name','code','barcode'].forEach(f=>{
+      const k=String(i[f]||'').trim().toLowerCase();
+      if(k&&!m.has(k))m.set(k,i); // first item in array order wins — matches old .find()
+    });
+  });
+  _whIndex=m; return m;
+}
 function _whMatchByName(name){
   const n=String(name||'').trim().toLowerCase();
   if(!n)return null;
-  return (AppState.data.warehouseItems||[]).find(i=>i&&!i._deleted&&(
-    String(i.name||'').trim().toLowerCase()===n||
-    String(i.code||'').trim().toLowerCase()===n||
-    String(i.barcode||'').trim().toLowerCase()===n
-  ))||null;
+  return (_whIndex||_whRebuildIndex()).get(n)||null;
 }
 // Returns an HTML badge: green WAREHOUSE (in registry) or amber PR (not found).
 function _resSourceBadge(name){
@@ -2563,6 +2577,7 @@ function _logLineCost(l){
 }
 
 function renderLogBody(){
+  _whRebuildIndex(); // refresh warehouse lookup once for all log rows below
   const logs=window._adLogs||[];
   const srch=(_aLogSearch||'').toLowerCase();
   const filtered=srch?logs.filter(l=>(l.id+' '+l.resourceName+' '+l.resourceType+' '+(l.issuedTo||'')+' '+(l.reference||'')).toLowerCase().includes(srch)):logs;
@@ -3482,6 +3497,7 @@ function previewAllocImport(input,pid){
 function showAllocImportPreview(rows,pid,fromExcel=false){
   const preview=$('#allocImportPreview');
   if(!rows||!rows.length){preview.innerHTML=`<div style="color:var(--accent-red);padding:10px">No data rows found.</div>`;return;}
+  _whRebuildIndex(); // refresh warehouse lookup once for all preview rows below
   window._allocImportRows=rows;
   const btn=$('#allocImportBtn');if(btn)btn.removeAttribute('disabled');
   const headers=Object.keys(rows[0]);

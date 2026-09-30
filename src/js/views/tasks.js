@@ -24,8 +24,12 @@ function _autoWbs(projId,parentId,editId){
 function _recalcAllWbs(projId){
   const all=AppState.data.tasks||[];
   const pool=all.filter(t=>t.projectId===projId&&!t._deleted);
+  // Index children by parentId once (O(n)) rather than re-filtering pool per node.
+  const byParent=new Map();
+  for(const t of pool){const k=t.parentId||'';let a=byParent.get(k);if(!a){a=[];byParent.set(k,a);}a.push(t);}
   const assign=(parentId,prefix)=>{
-    const children=pool.filter(t=>(t.parentId||'')===(parentId||''));
+    const children=byParent.get(parentId||'');
+    if(!children)return;
     children.sort((a,b)=>{
       const ap=(a.wbs||'').split('.'),bp=(b.wbs||'').split('.');
       const aw=parseInt(ap[ap.length-1])||0,bw=parseInt(bp[bp.length-1])||0;
@@ -76,14 +80,25 @@ function _cmpWbs(a,b){
 }
 function _orderTasksHier(list){
   const ids=new Set(list.map(t=>t.id));
+  // Build a parent→children index ONCE (O(n)) instead of filtering the whole
+  // list per node (was O(n²) — the main render-time cost with many tasks).
+  // Key '' = a root: no parent, or a parent that isn't in this list.
+  const byParent=new Map();
+  for(const t of list){
+    const key=(t.parentId&&ids.has(t.parentId))?t.parentId:'';
+    let arr=byParent.get(key); if(!arr){arr=[];byParent.set(key,arr);}
+    arr.push(t);
+  }
+  for(const arr of byParent.values())arr.sort(_cmpWbs);
   const out=[];const visited=new Set();
   const add=(t,depth)=>{
     if(visited.has(t.id))return; // cycle guard
     visited.add(t.id);
     out.push({t,depth});
-    list.filter(c=>c.parentId===t.id).sort(_cmpWbs).forEach(c=>add(c,Math.min(depth+1,6)));
+    const kids=byParent.get(t.id);
+    if(kids)for(const c of kids)add(c,Math.min(depth+1,6));
   };
-  list.filter(t=>!t.parentId||!ids.has(t.parentId)).sort(_cmpWbs).forEach(t=>add(t,0));
+  (byParent.get('')||[]).forEach(t=>add(t,0));
   list.forEach(t=>{if(!visited.has(t.id))add(t,0);}); // orphans in a cycle
   return out;
 }
@@ -91,11 +106,14 @@ function _orderTasksHier(list){
 // Bottom-up via repeated passes (handles nesting up to 10 levels).
 function _applySummaryRollups(projId){
   const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===projId&&!t._deleted);
+  // Index children once (O(n)); parent links don't change across the passes below.
+  const byParent=new Map();
+  for(const c of tasks){if(!c.parentId)continue;let a=byParent.get(c.parentId);if(!a){a=[];byParent.set(c.parentId,a);}a.push(c);}
   for(let pass=0;pass<10;pass++){
     let changed=false;
     tasks.forEach(p=>{
-      const kids=tasks.filter(c=>c.parentId===p.id);
-      if(!kids.length)return;
+      const kids=byParent.get(p.id);
+      if(!kids||!kids.length)return;
       const starts=kids.map(k=>k.startDate).filter(Boolean);
       const ends=kids.map(k=>k.endDate).filter(Boolean);
       const ns=starts.length?starts.reduce((a,b)=>a<b?a:b):p.startDate;

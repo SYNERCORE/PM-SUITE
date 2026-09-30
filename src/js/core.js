@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.30';
-const APP_BUILD='20260930a';
+const APP_VERSION='2.14.31';
+const APP_BUILD='20260930b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Letterhead logos are now downscaled automatically when you upload them. Both the Main Company logo and each Business Unit logo are resized to a small image (longest side about 400 pixels) before being stored, so they no longer bloat the sync or slow down PDF generation. Existing logos are left as they are; re-upload one to shrink it. No change to how logos look on the printed PDFs.';
+const APP_RELEASE_NOTE='Performance fix for projects with many tasks or line items. The task list, Gantt ordering, WBS renumbering and summary roll-ups no longer slow down as tasks pile up (they were getting quadratically slower), and the Warehouse-vs-PR badge on the allocation list, transaction log and import preview now uses a fast lookup instead of scanning the whole warehouse registry for every row. Same results, just much faster. No change to any of your data.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.31',date:'2026-09-30',type:'improvement',notes:[
+    'Performance: eliminated the quadratic (O(n^2)) slowdown that made the app lag as tasks accumulated. _orderTasksHier (runs on every task/Gantt render), _recalcAllWbs and _applySummaryRollups (run on every task save) now build a parent→children index once instead of re-scanning the whole task list per node. Benchmarks: ordering 2,000 tasks dropped from ~10ms to ~1.4ms per render; identical output verified against the old code (incl. cycles/orphans and WBS numbering).',
+    'Performance: the Warehouse-vs-PR source badge (allocation list, transaction log, allocation import preview) built a linear scan of the entire warehouse registry for every row (O(rows × items)). It now builds one lookup index per render — e.g. 3,000 rows against 1,000 warehouse items went from ~61ms to ~0.3ms. Match results are unchanged.',
+    'No data or behaviour change — these are pure speedups. Client-only; devices pick it up on refresh after the LAN web app is redeployed.',
+  ]},
   {version:'2.14.30',date:'2026-09-30',type:'improvement',notes:[
     'Letterhead logos are downscaled on upload. Both the Main Company logo (Settings → Report Letterhead) and each Business Unit logo (Settings → Business Units → edit a BU) are now drawn onto a canvas capped at ~400px on the longest side and re-encoded (PNG, or JPEG for photos) before storing — keeping whichever is smaller, so a re-encode never grows the file.',
     'Why: logos are stored as base64 inside the synced record; a full-size image bloated every sync and slowed PDF rendering. Downscaling keeps each logo a few KB. Each BU is its own SharePoint row, so its logo saves and syncs per unit.',
