@@ -449,6 +449,8 @@ const _normPred=window.SHICCPMEngine?SHICCPMEngine.parsePredecessors(_rawPred).m
   const lagStr=p.lagDays>0?`+${p.lagDays}d`:p.lagDays<0?`${p.lagDays}d`:'';
   return `${p.id} ${p.type}${lagStr}`;
 }).join(', '):_rawPred;
+// Entries the parser cannot read are dropped from the saved value — tell the user which ones
+const _dropPred=window.SHICCPMEngine?_rawPred.split(',').map(s=>s.trim()).filter(s=>s&&!SHICCPMEngine.parsePredecessors(s).length):[];
 const t={
   id:id||'TSK-'+(Date.now()%100000).toString().padStart(5,'0'),
   projectId:_tProjId,wbs:$('#tWbs').value,name:$('#tName').value,
@@ -481,7 +483,8 @@ _recalcProjectProgress(_tProjId);
 _recalcAllWbs(_tProjId);
 AppState.save();closeModal('taskModal');
 if(typeof detailProjectId!=='undefined'&&detailProjectId&&typeof renderDetailTasks==='function'){renderDetailTasks();}else{renderTaskView();}
-showToast(id?'Task updated':'Task created','success');}
+showToast(id?'Task updated':'Task created','success');
+if(_dropPred.length)showToast('Predecessor not recognised and removed: '+_dropPred.join(', ')+' — use IDs like TSK-001 FS','warning',8000);}
 
 // After any task save, run CPM on the project and write _ES/_EF back to
 // startDate/endDate for tasks that are CPM-scheduled (have predecessors or
