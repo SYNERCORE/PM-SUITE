@@ -829,8 +829,8 @@ function showPredPicker(currentTaskId){
   // Parse existing predecessors into a working set
   const existing={};
   ($('#tPred').value||'').split(',').map(s=>s.trim()).filter(Boolean).forEach(entry=>{
-    const m=entry.match(/^([A-Za-z0-9_-]*[0-9])\s*(FS|SS|FF|SF)?\s*([+-]\d+d?)?$/i);
-    if(m){existing[m[1].toUpperCase()]={type:(m[2]||'FS').toUpperCase(),lag:m[3]||''};}
+    const p=SHICCPMEngine.parsePredecessors(entry)[0];
+    if(p){existing[p.id]={type:p.type,lag:p.lagDays?(p.lagDays>0?'+':'')+p.lagDays+'d':''};}
   });
 
   // Build rows
