@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.36';
-const APP_BUILD='20261008d';
+const APP_VERSION='2.14.37';
+const APP_BUILD='20261008e';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,18 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Task import now brings in Duration and Predecessors AND reschedules from the dependencies. The import reads a Duration column (days) and a Predecessors column in WBS form (e.g. "3.1 SS", "3.5 FS+2d"), links each predecessor to the right task, and then runs the CPM schedule so every linked task is dated from its predecessors (anchors with no predecessor keep their date; summary tasks roll up from their children). A schedule exported from MS Project (save the .mpp as Excel, convert to the template) now comes in fully linked and scheduled. Imports without a Predecessors column are unchanged.';
+const APP_RELEASE_NOTE='Task import now takes MS Project schedules directly. Drop an Excel .xlsx file straight into Import (no more saving as CSV first) and the app reads it in the browser. An MS Project export is auto-detected: the app builds the WBS from the Outline Level, reads the Duration, and converts the row-number predecessors (like "4SS") into real task links, then runs the CPM schedule so every linked task is dated from its predecessors and summaries roll up. A normal CSV or a filled-in template (as .csv or .xlsx) still imports exactly as before.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.37',date:'2026-10-08',type:'feature',notes:[
+    'Task import now accepts Excel .xlsx/.xlsm files directly — no need to save as CSV first. The file is read entirely in the browser with a self-contained ZIP+DEFLATE reader (no external library, works offline on the LAN); the Task_Table sheet is used if present, otherwise the first sheet.',
+    'MS Project exports are auto-detected and converted on import: the WBS is rebuilt from the Outline Level column, Duration is read, and MS Project row-number predecessors (e.g. "4SS", "8FS+2 days", "45FF") are translated to real task links. The project-summary row (outline level 0) is dropped. After linking, the CPM schedule runs so dates are driven by the dependencies and summaries roll up.',
+    'Workflow for users: in MS Project choose File > Save As > Excel Workbook, then drop that .xlsx straight into Tasks > Import. A plain CSV or filled-in template (as .csv or .xlsx) still imports exactly as before — the MS Project path only activates when the MS Project layout is detected.',
+    'Verified against a real 47-task MS Project rotor schedule: .xlsx read in Node and in a real browser engine (byte-correct inflate), 47 tasks parsed, WBS hierarchy up to 3 levels, durations and all predecessor links resolved, and the end-to-end import drove dates via CPM including dependencies on summary tasks.',
+    'Client-only (task_import_export builtin in hardening.js); refresh after redeploy. No server/DB change.',
+  ]},
   {version:'2.14.36',date:'2026-10-08',type:'feature',notes:[
     'Task import now drives dates from the dependencies. After the predecessor-resolution pass (v2.14.35), executeTaskImport runs the same scheduling sequence a task save uses — _applyCPMDates, _applySummaryRollups, _recalcProjectProgress — per imported project, so every task with a predecessor is scheduled from its links (anchors with no predecessor keep their imported date; summaries roll up from children).',
     'Gated: the CPM pass only runs for a project when at least one imported task actually got a predecessor (_anyPred), so a plain CSV import with no dependencies behaves exactly as before — no reschedule, imported dates stand.',
