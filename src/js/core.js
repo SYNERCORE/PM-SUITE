@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.37';
-const APP_BUILD='20261008e';
+const APP_VERSION='2.14.38';
+const APP_BUILD='20261008f';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Task import now takes MS Project schedules directly. Drop an Excel .xlsx file straight into Import (no more saving as CSV first) and the app reads it in the browser. An MS Project export is auto-detected: the app builds the WBS from the Outline Level, reads the Duration, and converts the row-number predecessors (like "4SS") into real task links, then runs the CPM schedule so every linked task is dated from its predecessors and summaries roll up. A normal CSV or a filled-in template (as .csv or .xlsx) still imports exactly as before.';
+const APP_RELEASE_NOTE='Task import preview now fills in the project automatically. When you open Import from inside a project and pick a file, the preview immediately tags every row with that project — the Project column shows it and the "Project not found" warnings are gone — matching what actually happens on import. Importing from the global task list is unchanged (it still uses each row\'s own Project ID and warns if it is blank or unknown). Follows v2.14.37 (native .xlsx drop-in and MS Project auto-detect).';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.38',date:'2026-10-08',type:'fix',notes:[
+    'Task import preview now assigns the current project to every row when Import is opened from inside a project detail (taskProjectFilter is a specific project). Previously the project was only applied at Import time, so the preview showed a blank Project column and one "Project \'\' not found" warning per row, which was confusing even though the import itself attached to the right project.',
+    'Scoped to in-project imports: a global import (taskProjectFilter = all/none) still uses each row\'s own Project ID and still warns when it is blank or not a known project — unchanged behavior.',
+    'Verified with a stubbed FileReader against the real previewTaskImport: in-project rows get the project id and no warning; global import leaves blank project ids and still warns.',
+    'Client-only (task_import_export builtin in hardening.js); refresh after redeploy. No server/DB change.',
+  ]},
   {version:'2.14.37',date:'2026-10-08',type:'feature',notes:[
     'Task import now accepts Excel .xlsx/.xlsm files directly — no need to save as CSV first. The file is read entirely in the browser with a self-contained ZIP+DEFLATE reader (no external library, works offline on the LAN); the Task_Table sheet is used if present, otherwise the first sheet.',
     'MS Project exports are auto-detected and converted on import: the WBS is rebuilt from the Outline Level column, Duration is read, and MS Project row-number predecessors (e.g. "4SS", "8FS+2 days", "45FF") are translated to real task links. The project-summary row (outline level 0) is dropped. After linking, the CPM schedule runs so dates are driven by the dependencies and summaries roll up.',
