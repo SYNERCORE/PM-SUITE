@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.35';
-const APP_BUILD='20261008c';
+const APP_VERSION='2.14.36';
+const APP_BUILD='20261008d';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Task import now brings in Duration and Predecessors. The CSV import previously ignored both; it now reads a Duration column (in days) and a Predecessors column written with WBS codes (e.g. "3.1 SS", "3.5 FS+2d"), and links each predecessor to the right task after import — so a schedule exported from MS Project (save the .mpp as Excel, then convert to the import template) comes in with its dependencies and durations intact, not just a flat task list. Existing CSVs without those columns import exactly as before.';
+const APP_RELEASE_NOTE='Task import now brings in Duration and Predecessors AND reschedules from the dependencies. The import reads a Duration column (days) and a Predecessors column in WBS form (e.g. "3.1 SS", "3.5 FS+2d"), links each predecessor to the right task, and then runs the CPM schedule so every linked task is dated from its predecessors (anchors with no predecessor keep their date; summary tasks roll up from their children). A schedule exported from MS Project (save the .mpp as Excel, convert to the template) now comes in fully linked and scheduled. Imports without a Predecessors column are unchanged.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.36',date:'2026-10-08',type:'feature',notes:[
+    'Task import now drives dates from the dependencies. After the predecessor-resolution pass (v2.14.35), executeTaskImport runs the same scheduling sequence a task save uses — _applyCPMDates, _applySummaryRollups, _recalcProjectProgress — per imported project, so every task with a predecessor is scheduled from its links (anchors with no predecessor keep their imported date; summaries roll up from children).',
+    'Gated: the CPM pass only runs for a project when at least one imported task actually got a predecessor (_anyPred), so a plain CSV import with no dependencies behaves exactly as before — no reschedule, imported dates stand.',
+    'Verified with the real CPM engine against the converted 26-task MS Project schedule: anchor held its date, each FS/SS successor moved to follow its predecessor down the chain, and summary tasks spanned their children. Durations and WBS hierarchy from v2.14.35/32 still correct.',
+    'Client-only (executeTaskImport builtin in hardening.js); refresh after redeploy. No server/DB change.',
+  ]},
   {version:'2.14.35',date:'2026-10-08',type:'feature',notes:[
     'Task CSV import now reads two more columns: Duration (in days) and Predecessors. Duration is converted to the task\'s working hours using the project\'s hours/day. Predecessors are written with WBS codes plus the usual link type and lag (e.g. "3.1 SS", "3.5 FS+2d", "1 FS").',
     'After the tasks and the WBS hierarchy are built, a resolution pass rewrites each predecessor from its WBS code to the real task ID that was just created, in the engine\'s "<id> <TYPE><±lag>" form, so the dependencies actually drive the CPM schedule. Row-number links from MS Project don\'t work directly (they point at MSP rows, not app IDs); the conversion to WBS form handles that. This relies on the parser accepting letter-ending IDs (v shipped earlier).',
