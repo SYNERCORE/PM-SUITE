@@ -1,6 +1,6 @@
 function renderProspects(){
   AppState.ensureData();
-  const all = (AppState.data.projects || []).filter(p => p.status === 'prospect');
+  const all = (AppState.data.projects || []).filter(p => p && !p._deleted && p.status === 'prospect');
   let ps = all;
   if (prospectBUFilter !== 'all') {
     ps = ps.filter(p => (p.businessUnit||'') === (prospectBUFilter||''));
@@ -25,7 +25,7 @@ function renderProspects(){
       <div class="section-sub">${totalProspects} prospect${totalProspects!==1?'s':''} · Pipeline value: ${fmt}</div>
     </div>
     <div style="display:flex;gap:7px;align-items:center">
-      <button class="btn btn-secondary btn-sm" onclick="exportCSV((AppState.data.projects||[]).filter(p=>p.status==='prospect').map(p=>[p.id,p.name,p.client,p.location,p.budget,p.startDate,p.endDate,p.discipline,p.priority]),['ID','Name','Client','Location','Budget','Start','End','Discipline','Priority'],'prospects.csv')"><i class="fas fa-download"></i> Export</button>
+      <button class="btn btn-secondary btn-sm" onclick="exportCSV((AppState.data.projects||[]).filter(p=>p&&!p._deleted&&p.status==='prospect').map(p=>[p.id,p.name,p.client,p.location,p.budget,p.startDate,p.endDate,p.discipline,p.priority]),['ID','Name','Client','Location','Budget','Start','End','Discipline','Priority'],'prospects.csv')"><i class="fas fa-download"></i> Export</button>
       <button class="btn btn-primary btn-sm" onclick="showProspectForm()"><i class="fas fa-plus"></i> New Prospect</button>
     </div>
   </div>
@@ -98,7 +98,7 @@ function renderProspects(){
       <div style="margin-top:10px;display:flex;gap:5px" onclick="event.stopPropagation()">
         <button class="btn btn-secondary btn-sm" style="flex:1" onclick="showProspectForm('${p.id}')"><i class="fas fa-edit"></i> Edit</button>
         <button class="btn btn-success btn-sm" style="flex:1" onclick="convertProspectToProject('${p.id}')" title="Convert to Project"><i class="fas fa-arrow-right"></i> Convert</button>
-        <button class="btn btn-danger btn-sm btn-icon" onclick="if(confirm('Delete prospect?')){deleteProject('${p.id}');renderProspects();}"><i class="fas fa-trash"></i></button>
+        <button class="btn btn-danger btn-sm btn-icon" onclick="if(deleteProject('${p.id}'))renderProspects()"><i class="fas fa-trash"></i></button>
       </div>
     </div>`;
   }).join('')}</div>`}

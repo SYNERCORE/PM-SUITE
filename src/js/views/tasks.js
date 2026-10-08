@@ -443,12 +443,37 @@ const _tProjId=$('#tProj').value;
 const _tDurDays=parseFloat($('#tDur')?.value)||0;
 const _tHPD=_getTaskProjHPD(_tProjId);
 const _isMileSave=$('#tMile').value==='true';
-// Normalize predecessor string: parse then re-serialize with space separator
+// Normalize predecessor string. The CPM parser only accepts clean task IDs
+// (ending in a digit) and silently drops anything else — which used to make a
+// typed WBS code like "2.1" vanish with no error. Resolve each token against
+// the project's tasks (by ID first, then by WBS), and warn on anything unknown
+// instead of discarding it quietly.
 const _rawPred=($('#tPred')?.value||'').trim();
-const _normPred=window.SHICCPMEngine?SHICCPMEngine.parsePredecessors(_rawPred).map(p=>{
-  const lagStr=p.lagDays>0?`+${p.lagDays}d`:p.lagDays<0?`${p.lagDays}d`:'';
-  return `${p.id} ${p.type}${lagStr}`;
-}).join(', '):_rawPred;
+const _predIdSet={}, _predWbsMap={};
+(AppState.data.tasks||[]).filter(x=>x&&x.projectId===_tProjId&&!x._deleted&&x.id!==id).forEach(x=>{
+  _predIdSet[String(x.id).toUpperCase()]=x.id;
+  const w=String(x.wbs||'').trim().toUpperCase();
+  if(w&&!_predWbsMap[w])_predWbsMap[w]=x.id;
+});
+const _resolvePredTok=(tok)=>{
+  tok=String(tok||'').trim(); if(!tok)return null;
+  let lagN=0, type='';
+  // Peel a whitespace-separated "TYPE[±lag]" suffix (e.g. "2.1 FS+2d"). The
+  // leading \s+ is required so an ID's own "-00123" is never mistaken for a lag.
+  const m=tok.match(/\s+(FS|SS|FF|SF)\s*([+-]\d+)?d?$/i);
+  if(m){type=m[1].toUpperCase();if(m[2])lagN=parseInt(m[2],10)||0;tok=tok.slice(0,m.index).trim();}
+  const id2=_predIdSet[tok.toUpperCase()]||_predWbsMap[tok.toUpperCase()]||null;
+  if(!id2)return null;
+  const lagStr=lagN>0?`+${lagN}d`:lagN<0?`${lagN}d`:'';
+  return `${id2} ${type||'FS'}${lagStr}`;
+};
+const _predUnresolved=[];
+const _normPred=_rawPred.split(',').map(s=>s.trim()).filter(Boolean).map(tok=>{
+  const r=_resolvePredTok(tok);
+  if(!r)_predUnresolved.push(tok);
+  return r;
+}).filter(Boolean).join(', ');
+if(_predUnresolved.length)showToast('Ignored unknown predecessor'+(_predUnresolved.length>1?'s':'')+': '+_predUnresolved.join(', ')+' — use the Pick button to select tasks','warning',6000);
 const t={
   id:id||'TSK-'+(Date.now()%100000).toString().padStart(5,'0'),
   projectId:_tProjId,wbs:$('#tWbs').value,name:$('#tName').value,

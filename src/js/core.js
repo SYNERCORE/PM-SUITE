@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.32';
-const APP_BUILD='20260930c';
+const APP_VERSION='2.14.33';
+const APP_BUILD='20261008a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Task import now recognizes the WBS column and rebuilds the outline. When you import tasks from CSV/Excel, the WBS codes are used to nest the tasks: a code like 2.1.1 is placed under 2.1, which sits under 2. Top-level codes (1, 2, 3) stay at the top. Previously every imported task landed flat with no parent. Only the tasks in the file being imported are re-parented; your other tasks are left alone, and the imported WBS numbers are kept.';
+const APP_RELEASE_NOTE='Two fixes. Deleting a prospect now works: the Prospects page was still showing records that had already been moved to Trash, so a delete looked like it did nothing. It also stops asking you to confirm twice. And task predecessors no longer disappear: if you typed a WBS code (like 2.1) in the Predecessors box it was silently discarded, because the field only accepted task IDs. The box now accepts WBS codes too (they are matched to the right task), and anything it cannot recognize now shows a warning instead of vanishing. The Pick button was already reliable and still is.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.33',date:'2026-10-08',type:'fix',notes:[
+    'Prospects could not be deleted. renderProspects() filtered projects by status===\'prospect\' but never excluded _deleted records, so a soft-deleted prospect stayed on screen and the delete looked like a no-op (the record WAS moved to Trash — the console showed "Admin soft-deleted Project ..."). Added the !_deleted filter to the list and the CSV export. The main Projects list was already correct; this bug was specific to Prospects.',
+    'Prospect delete also prompted for confirmation twice (an inline confirm() plus the one inside requestOrDelete). Removed the duplicate — one confirmation now, and the list re-renders on success.',
+    'Task predecessors typed as a WBS code were silently lost. The Predecessors box ran its value through the CPM parser, which only accepts task IDs ending in a digit and drops everything else with no error — so "2.1" or any WBS/name reference saved as blank. Save now resolves each predecessor against the project\'s tasks by ID first, then by WBS code, and warns about anything it cannot match instead of discarding it. The Pick button (which emits clean IDs) was unaffected and still works.',
+    'Client-only change; devices pick it up on refresh once the LAN web app is redeployed. No server/DB change.',
+  ]},
   {version:'2.14.32',date:'2026-09-30',type:'fix',notes:[
     'Task CSV/Excel import now builds the WBS hierarchy. It previously read the WBS column into each task but never set parentId, so a structured outline imported as a flat list and the app then renumbered it. Import now derives each task\'s parent from its WBS code (2.1.1 → parent 2.1 → parent 2); codes with no dot (1, 2, 3, or 0) stay top-level.',
     'Only the tasks present in the imported file are re-parented — pre-existing tasks you did not import keep their own parents. Parent lookup spans the whole project, so an imported child can attach to a task that already existed. Imported WBS numbers are preserved (not renumbered).',

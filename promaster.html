@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.32';
-const APP_BUILD='20260930c';
+const APP_VERSION='2.14.33';
+const APP_BUILD='20261008a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Task import now recognizes the WBS column and rebuilds the outline. When you import tasks from CSV/Excel, the WBS codes are used to nest the tasks: a code like 2.1.1 is placed under 2.1, which sits under 2. Top-level codes (1, 2, 3) stay at the top. Previously every imported task landed flat with no parent. Only the tasks in the file being imported are re-parented; your other tasks are left alone, and the imported WBS numbers are kept.';
+const APP_RELEASE_NOTE='Two fixes. Deleting a prospect now works: the Prospects page was still showing records that had already been moved to Trash, so a delete looked like it did nothing. It also stops asking you to confirm twice. And task predecessors no longer disappear: if you typed a WBS code (like 2.1) in the Predecessors box it was silently discarded, because the field only accepted task IDs. The box now accepts WBS codes too (they are matched to the right task), and anything it cannot recognize now shows a warning instead of vanishing. The Pick button was already reliable and still is.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.33',date:'2026-10-08',type:'fix',notes:[
+    'Prospects could not be deleted. renderProspects() filtered projects by status===\'prospect\' but never excluded _deleted records, so a soft-deleted prospect stayed on screen and the delete looked like a no-op (the record WAS moved to Trash — the console showed "Admin soft-deleted Project ..."). Added the !_deleted filter to the list and the CSV export. The main Projects list was already correct; this bug was specific to Prospects.',
+    'Prospect delete also prompted for confirmation twice (an inline confirm() plus the one inside requestOrDelete). Removed the duplicate — one confirmation now, and the list re-renders on success.',
+    'Task predecessors typed as a WBS code were silently lost. The Predecessors box ran its value through the CPM parser, which only accepts task IDs ending in a digit and drops everything else with no error — so "2.1" or any WBS/name reference saved as blank. Save now resolves each predecessor against the project\'s tasks by ID first, then by WBS code, and warns about anything it cannot match instead of discarding it. The Pick button (which emits clean IDs) was unaffected and still works.',
+    'Client-only change; devices pick it up on refresh once the LAN web app is redeployed. No server/DB change.',
+  ]},
   {version:'2.14.32',date:'2026-09-30',type:'fix',notes:[
     'Task CSV/Excel import now builds the WBS hierarchy. It previously read the WBS column into each task but never set parentId, so a structured outline imported as a flat list and the app then renumbered it. Import now derives each task\'s parent from its WBS code (2.1.1 → parent 2.1 → parent 2); codes with no dot (1, 2, 3, or 0) stay top-level.',
     'Only the tasks present in the imported file are re-parented — pre-existing tasks you did not import keep their own parents. Parent lookup spans the whole project, so an imported child can attach to a task that already existed. Imported WBS numbers are preserved (not renumbered).',
@@ -15930,7 +15936,7 @@ function mlFlash(id){
 <script>
 function renderProspects(){
   AppState.ensureData();
-  const all = (AppState.data.projects || []).filter(p => p.status === 'prospect');
+  const all = (AppState.data.projects || []).filter(p => p && !p._deleted && p.status === 'prospect');
   let ps = all;
   if (prospectBUFilter !== 'all') {
     ps = ps.filter(p => (p.businessUnit||'') === (prospectBUFilter||''));
@@ -15955,7 +15961,7 @@ function renderProspects(){
       <div class="section-sub">${totalProspects} prospect${totalProspects!==1?'s':''} · Pipeline value: ${fmt}</div>
     </div>
     <div style="display:flex;gap:7px;align-items:center">
-      <button class="btn btn-secondary btn-sm" onclick="exportCSV((AppState.data.projects||[]).filter(p=>p.status==='prospect').map(p=>[p.id,p.name,p.client,p.location,p.budget,p.startDate,p.endDate,p.discipline,p.priority]),['ID','Name','Client','Location','Budget','Start','End','Discipline','Priority'],'prospects.csv')"><i class="fas fa-download"></i> Export</button>
+      <button class="btn btn-secondary btn-sm" onclick="exportCSV((AppState.data.projects||[]).filter(p=>p&&!p._deleted&&p.status==='prospect').map(p=>[p.id,p.name,p.client,p.location,p.budget,p.startDate,p.endDate,p.discipline,p.priority]),['ID','Name','Client','Location','Budget','Start','End','Discipline','Priority'],'prospects.csv')"><i class="fas fa-download"></i> Export</button>
       <button class="btn btn-primary btn-sm" onclick="showProspectForm()"><i class="fas fa-plus"></i> New Prospect</button>
     </div>
   </div>
@@ -16028,7 +16034,7 @@ function renderProspects(){
       <div style="margin-top:10px;display:flex;gap:5px" onclick="event.stopPropagation()">
         <button class="btn btn-secondary btn-sm" style="flex:1" onclick="showProspectForm('${p.id}')"><i class="fas fa-edit"></i> Edit</button>
         <button class="btn btn-success btn-sm" style="flex:1" onclick="convertProspectToProject('${p.id}')" title="Convert to Project"><i class="fas fa-arrow-right"></i> Convert</button>
-        <button class="btn btn-danger btn-sm btn-icon" onclick="if(confirm('Delete prospect?')){deleteProject('${p.id}');renderProspects();}"><i class="fas fa-trash"></i></button>
+        <button class="btn btn-danger btn-sm btn-icon" onclick="if(deleteProject('${p.id}'))renderProspects()"><i class="fas fa-trash"></i></button>
       </div>
     </div>`;
   }).join('')}</div>`}
@@ -17721,12 +17727,37 @@ const _tProjId=$('#tProj').value;
 const _tDurDays=parseFloat($('#tDur')?.value)||0;
 const _tHPD=_getTaskProjHPD(_tProjId);
 const _isMileSave=$('#tMile').value==='true';
-// Normalize predecessor string: parse then re-serialize with space separator
+// Normalize predecessor string. The CPM parser only accepts clean task IDs
+// (ending in a digit) and silently drops anything else — which used to make a
+// typed WBS code like "2.1" vanish with no error. Resolve each token against
+// the project's tasks (by ID first, then by WBS), and warn on anything unknown
+// instead of discarding it quietly.
 const _rawPred=($('#tPred')?.value||'').trim();
-const _normPred=window.SHICCPMEngine?SHICCPMEngine.parsePredecessors(_rawPred).map(p=>{
-  const lagStr=p.lagDays>0?`+${p.lagDays}d`:p.lagDays<0?`${p.lagDays}d`:'';
-  return `${p.id} ${p.type}${lagStr}`;
-}).join(', '):_rawPred;
+const _predIdSet={}, _predWbsMap={};
+(AppState.data.tasks||[]).filter(x=>x&&x.projectId===_tProjId&&!x._deleted&&x.id!==id).forEach(x=>{
+  _predIdSet[String(x.id).toUpperCase()]=x.id;
+  const w=String(x.wbs||'').trim().toUpperCase();
+  if(w&&!_predWbsMap[w])_predWbsMap[w]=x.id;
+});
+const _resolvePredTok=(tok)=>{
+  tok=String(tok||'').trim(); if(!tok)return null;
+  let lagN=0, type='';
+  // Peel a whitespace-separated "TYPE[±lag]" suffix (e.g. "2.1 FS+2d"). The
+  // leading \s+ is required so an ID's own "-00123" is never mistaken for a lag.
+  const m=tok.match(/\s+(FS|SS|FF|SF)\s*([+-]\d+)?d?$/i);
+  if(m){type=m[1].toUpperCase();if(m[2])lagN=parseInt(m[2],10)||0;tok=tok.slice(0,m.index).trim();}
+  const id2=_predIdSet[tok.toUpperCase()]||_predWbsMap[tok.toUpperCase()]||null;
+  if(!id2)return null;
+  const lagStr=lagN>0?`+${lagN}d`:lagN<0?`${lagN}d`:'';
+  return `${id2} ${type||'FS'}${lagStr}`;
+};
+const _predUnresolved=[];
+const _normPred=_rawPred.split(',').map(s=>s.trim()).filter(Boolean).map(tok=>{
+  const r=_resolvePredTok(tok);
+  if(!r)_predUnresolved.push(tok);
+  return r;
+}).filter(Boolean).join(', ');
+if(_predUnresolved.length)showToast('Ignored unknown predecessor'+(_predUnresolved.length>1?'s':'')+': '+_predUnresolved.join(', ')+' — use the Pick button to select tasks','warning',6000);
 const t={
   id:id||'TSK-'+(Date.now()%100000).toString().padStart(5,'0'),
   projectId:_tProjId,wbs:$('#tWbs').value,name:$('#tName').value,
