@@ -443,37 +443,13 @@ const _tProjId=$('#tProj').value;
 const _tDurDays=parseFloat($('#tDur')?.value)||0;
 const _tHPD=_getTaskProjHPD(_tProjId);
 const _isMileSave=$('#tMile').value==='true';
-// Normalize predecessor string. The CPM parser only accepts clean task IDs
-// (ending in a digit) and silently drops anything else — which used to make a
-// typed WBS code like "2.1" vanish with no error. Resolve each token against
-// the project's tasks (by ID first, then by WBS), and warn on anything unknown
-// instead of discarding it quietly.
-const _rawPred=($('#tPred')?.value||'').trim();
-const _predIdSet={}, _predWbsMap={};
-(AppState.data.tasks||[]).filter(x=>x&&x.projectId===_tProjId&&!x._deleted&&x.id!==id).forEach(x=>{
-  _predIdSet[String(x.id).toUpperCase()]=x.id;
-  const w=String(x.wbs||'').trim().toUpperCase();
-  if(w&&!_predWbsMap[w])_predWbsMap[w]=x.id;
-});
-const _resolvePredTok=(tok)=>{
-  tok=String(tok||'').trim(); if(!tok)return null;
-  let lagN=0, type='';
-  // Peel a whitespace-separated "TYPE[±lag]" suffix (e.g. "2.1 FS+2d"). The
-  // leading \s+ is required so an ID's own "-00123" is never mistaken for a lag.
-  const m=tok.match(/\s+(FS|SS|FF|SF)\s*([+-]\d+)?d?$/i);
-  if(m){type=m[1].toUpperCase();if(m[2])lagN=parseInt(m[2],10)||0;tok=tok.slice(0,m.index).trim();}
-  const id2=_predIdSet[tok.toUpperCase()]||_predWbsMap[tok.toUpperCase()]||null;
-  if(!id2)return null;
-  const lagStr=lagN>0?`+${lagN}d`:lagN<0?`${lagN}d`:'';
-  return `${id2} ${type||'FS'}${lagStr}`;
-};
-const _predUnresolved=[];
-const _normPred=_rawPred.split(',').map(s=>s.trim()).filter(Boolean).map(tok=>{
-  const r=_resolvePredTok(tok);
-  if(!r)_predUnresolved.push(tok);
-  return r;
-}).filter(Boolean).join(', ');
+// Resolve the Predecessors field (accepts WBS codes or task IDs) to canonical
+// task IDs and warn on anything it cannot match. _tResolvePredField rewrites
+// #tPred in place; the field is normally already resolved on change, this is
+// the safety net for typing + Update without blurring first.
+const _predUnresolved=(typeof _tResolvePredField==='function')?_tResolvePredField():[];
 if(_predUnresolved.length)showToast('Ignored unknown predecessor'+(_predUnresolved.length>1?'s':'')+': '+_predUnresolved.join(', ')+' — use the Pick button to select tasks','warning',6000);
+const _normPred=($('#tPred')?.value||'').trim();
 const t={
   id:id||'TSK-'+(Date.now()%100000).toString().padStart(5,'0'),
   projectId:_tProjId,wbs:$('#tWbs').value,name:$('#tName').value,
@@ -630,6 +606,36 @@ function _tShiftUpdateNote(){
               :`enter a duration to see the calendar span.`);
 }
 
+// Resolve the Predecessors field to canonical task IDs. Accepts task IDs or WBS
+// codes (e.g. "2.1", "2.1 FS+2d"), matched against the current project's tasks
+// and excluding the task being edited (so a task cannot depend on itself).
+// Rewrites #tPred in place and returns the tokens it could not match. Called on
+// field change (so the CPM preview + required Start Date work) and again at save.
+function _tResolvePredField(){
+  const el=$('#tPred'); if(!el) return [];
+  const projId=$('#tProj')?.value||'';
+  const curId=(typeof _tEditingId!=='undefined')?_tEditingId:null;
+  const idSet={}, wbsMap={};
+  (AppState.data.tasks||[]).filter(x=>x&&x.projectId===projId&&!x._deleted&&x.id!==curId).forEach(x=>{
+    idSet[String(x.id).toUpperCase()]=x.id;
+    const w=String(x.wbs||'').trim().toUpperCase(); if(w&&!wbsMap[w])wbsMap[w]=x.id;
+  });
+  const unresolved=[];
+  const norm=(el.value||'').split(',').map(s=>s.trim()).filter(Boolean).map(tok=>{
+    let lagN=0, type='', key=tok;
+    // Peel a whitespace-separated "TYPE[±lag]" suffix (e.g. "2.1 FS+2d"). The
+    // leading \s+ is required so an ID's own "-00123" is never read as a lag.
+    const m=tok.match(/\s+(FS|SS|FF|SF)\s*([+-]\d+)?d?$/i);
+    if(m){type=m[1].toUpperCase();if(m[2])lagN=parseInt(m[2],10)||0;key=tok.slice(0,m.index).trim();}
+    const id2=idSet[key.toUpperCase()]||wbsMap[key.toUpperCase()]||null;
+    if(!id2){unresolved.push(tok);return null;}
+    const lagStr=lagN>0?`+${lagN}d`:lagN<0?`${lagN}d`:'';
+    return `${id2} ${type||'FS'}${lagStr}`;
+  }).filter(Boolean).join(', ');
+  el.value=norm;
+  return unresolved;
+}
+
 // Auto-sync Start / End / Duration / Milestone / Predecessor in the task form.
 // source: 'start' | 'end' | 'dur' | 'mile' | 'pred' | 'shift'
 function _tFormRecalc(source){
@@ -657,12 +663,16 @@ function _tFormRecalc(source){
     return;
   }
 
-  // Predecessor changed: lock/unlock start+end fields, then run live CPM preview
+  // Predecessor changed: accept WBS codes or IDs, resolve to canonical task IDs
+  // first (so the CPM preview and the required Start Date see real IDs), warn on
+  // anything unmatched, then lock/unlock start+end and run the live CPM preview.
   if(source==='pred'){
-    const ro=hasPred;
+    const _unres=(typeof _tResolvePredField==='function')?_tResolvePredField():[];
+    if(_unres.length)showToast('Ignored unknown predecessor'+(_unres.length>1?'s':'')+': '+_unres.join(', ')+' — use the Pick button to select tasks','warning',6000);
+    const ro=!!(predEl?.value||'').trim();   // re-read after normalization
     startEl.readOnly=ro; startEl.style.opacity=ro?'.55':''; startEl.style.cursor=ro?'not-allowed':'';
     endEl.readOnly=ro;   endEl.style.opacity=ro?'.55':'';   endEl.style.cursor=ro?'not-allowed':'';
-    if(hasPred) _runFormCPMPreview(); // show computed dates immediately
+    if(ro) _runFormCPMPreview(); // show computed dates immediately
     return;
   }
 

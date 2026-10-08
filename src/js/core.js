@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.33';
-const APP_BUILD='20261008a';
+const APP_VERSION='2.14.34';
+const APP_BUILD='20261008b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Two fixes. Deleting a prospect now works: the Prospects page was still showing records that had already been moved to Trash, so a delete looked like it did nothing. It also stops asking you to confirm twice. And task predecessors no longer disappear: if you typed a WBS code (like 2.1) in the Predecessors box it was silently discarded, because the field only accepted task IDs. The box now accepts WBS codes too (they are matched to the right task), and anything it cannot recognize now shows a warning instead of vanishing. The Pick button was already reliable and still is.';
+const APP_RELEASE_NOTE='Follow-up to the predecessor fix. Typing a WBS code (like 2.1) in the Predecessors box now works fully: it is converted to the matching task the moment you leave the field, so the Start Date is computed and the task can be saved. Before this, the conversion only happened at save, by which point the Start Date was already locked empty and the Update button blocked you. A task still cannot depend on itself — typing a task\'s own WBS just warns and is ignored. The Pick button is unchanged.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.34',date:'2026-10-08',type:'fix',notes:[
+    'Predecessor-by-WBS fix, completed. v2.14.33 resolved a typed WBS code (e.g. 2.1) to the real task ID only at save time. But typing into the Predecessors box immediately locks the Start Date read-only and tries to compute it via CPM using the raw text — which the CPM parser cannot read — so Start stayed empty and locked, and because Start is required, Update refused to save. You could never reach the save-time resolver.',
+    'Resolution now happens on field change: a new shared helper (_tResolvePredField) rewrites the field to canonical task IDs the moment you leave it (or pick), so the CPM preview computes the Start Date and the save succeeds. The same helper runs again at save as a safety net (for typing + Update without blurring). Save-time and change-time share one code path.',
+    'Self-dependency is prevented: the lookup excludes the task being edited, so typing a task\'s own WBS warns ("Ignored unknown predecessor: …") and is dropped rather than creating a self-loop. WBS and task-ID inputs both accepted; the ID\'s own trailing "-00123" is never mistaken for a lag.',
+    'Client-only; refresh after redeploy. No server/DB change.',
+  ]},
   {version:'2.14.33',date:'2026-10-08',type:'fix',notes:[
     'Prospects could not be deleted. renderProspects() filtered projects by status===\'prospect\' but never excluded _deleted records, so a soft-deleted prospect stayed on screen and the delete looked like a no-op (the record WAS moved to Trash — the console showed "Admin soft-deleted Project ..."). Added the !_deleted filter to the list and the CSV export. The main Projects list was already correct; this bug was specific to Prospects.',
     'Prospect delete also prompted for confirmation twice (an inline confirm() plus the one inside requestOrDelete). Removed the duplicate — one confirmation now, and the list re-renders on success.',
