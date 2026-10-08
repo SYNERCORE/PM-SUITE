@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.38';
-const APP_BUILD='20261008f';
+const APP_VERSION='2.14.39';
+const APP_BUILD='20261008g';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,18 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Task import preview now fills in the project automatically. When you open Import from inside a project and pick a file, the preview immediately tags every row with that project — the Project column shows it and the "Project not found" warnings are gone — matching what actually happens on import. Importing from the global task list is unchanged (it still uses each row\'s own Project ID and warns if it is blank or unknown). Follows v2.14.37 (native .xlsx drop-in and MS Project auto-detect).';
+const APP_RELEASE_NOTE='Fixes importing tasks from inside a project. The importer was reading the selected project from the wrong place (window.taskProjectFilter, which is never set), so an import whose file had no Project ID column — e.g. an MS Project / Excel schedule — brought the tasks in without a project and they did not appear under it. The importer now reads the real project filter, so tasks imported from inside a project are correctly tagged to it, both in the preview and on import. Imports whose file already has a Project ID column, and global imports, are unchanged.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.39',date:'2026-10-08',type:'fix',notes:[
+    'Fixed: tasks imported from inside a project detail were not attached to that project when the file had no Project ID column (e.g. an MS Project .xlsx/CSV export). Root cause: the importer read window.taskProjectFilter, but taskProjectFilter is a global `let` (not a window property), so window.taskProjectFilter was always undefined and the project was never applied — the rows imported with an empty projectId and did not show under the project (they still synced to SharePoint as orphans).',
+    'The importer (both the preview tag and the import-time assignment) now reads the real global taskProjectFilter, with window.taskProjectFilter kept only as a fallback. Imports from inside a project are correctly tagged; imports whose file already carries a Project ID column, and global (all-projects) imports, behave exactly as before.',
+    'Verified by reproducing the exact condition in the eval\'d patch (global let set, window property undefined): preview shows the project with no "not found" warnings, and the import assigns the correct projectId with zero orphan rows.',
+    'Note on already-imported orphans: tasks imported before this fix kept an empty projectId. They can be re-pointed to the project (reassign projectId) rather than re-imported, which preserves their WBS hierarchy, links and dates.',
+    'Client-only (task_import_export builtin in hardening.js); refresh after redeploy. No server/DB change.',
+  ]},
   {version:'2.14.38',date:'2026-10-08',type:'fix',notes:[
     'Task import preview now assigns the current project to every row when Import is opened from inside a project detail (taskProjectFilter is a specific project). Previously the project was only applied at Import time, so the preview showed a blank Project column and one "Project \'\' not found" warning per row, which was confusing even though the import itself attached to the right project.',
     'Scoped to in-project imports: a global import (taskProjectFilter = all/none) still uses each row\'s own Project ID and still warns when it is blank or not a known project — unchanged behavior.',
