@@ -1,5 +1,8 @@
 // _ganttShowBaseline: baseline ghost bars toggle (ganttFrom/To/ProjFilter declared in core.js)
 let _ganttShowBaseline=true;
+// _ganttShowLinks: dependency-arrow overlay toggle. On a dense schedule the
+// predecessor arrows can read as clutter, so users can switch them off.
+let _ganttShowLinks=true;
 
 function renderGantt(){
   AppState.ensureData();
@@ -288,7 +291,7 @@ function renderGantt(){
 
   // ── Dependency Arrows SVG ─────────────────────────────────────
   let arrowsSvg='';
-  if(window.SHICCPMEngine&&taskPos.size>0){
+  if(window.SHICCPMEngine&&taskPos.size>0&&_ganttShowLinks){
     let defs=`<defs>
       <marker id="gArr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#8b949e"/></marker>
       <marker id="rArr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#f85149"/></marker>
@@ -337,12 +340,12 @@ function renderGantt(){
         // If source and target are on the same row, fall back to simple horizontal line
         if(Math.abs(sy - ey) < 2){
           paths+=`<path d="M${sx.toFixed(1)},${sy.toFixed(1)} H${ex.toFixed(1)}"
-            stroke="${color}" stroke-width="1.5" fill="none" opacity="0.75" stroke-dasharray="5,3"
+            stroke="${color}" stroke-width="1.25" fill="none" opacity="0.6"
             marker-end="${marker}"/>`;
         } else {
           // M start → short hop right → vertical lane → approach target row → arrive at target
           paths+=`<path d="M${sx.toFixed(1)},${sy.toFixed(1)} H${vx.toFixed(1)} V${midY.toFixed(1)} H${ex.toFixed(1)} V${ey.toFixed(1)}"
-            stroke="${color}" stroke-width="1.5" fill="none" opacity="0.75" stroke-dasharray="5,3"
+            stroke="${color}" stroke-width="1.25" fill="none" opacity="0.6"
             marker-end="${marker}"/>`;
         }
       });
@@ -429,6 +432,12 @@ function renderGantt(){
           Show Baseline
         </label>
       </div>`:''}
+      <div style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:flex;align-items:center;gap:5px;cursor:pointer" title="Show or hide the dependency arrows between tasks">
+          <input type="checkbox" ${_ganttShowLinks?'checked':''} onchange="_ganttShowLinks=this.checked;renderGantt()" style="accent-color:var(--accent-blue)">
+          Links
+        </label>
+      </div>
       <div style="display:flex;align-items:center;gap:6px">
         <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:flex;align-items:center;gap:5px;cursor:pointer" title="Completed projects are hidden by default">
           <input type="checkbox" ${ganttShowCompleted?'checked':''} onchange="ganttShowCompleted=this.checked;renderGantt()" style="accent-color:var(--accent-green)">

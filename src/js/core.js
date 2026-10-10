@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.40';
-const APP_BUILD='20261010a';
+const APP_VERSION='2.14.41';
+const APP_BUILD='20261010b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Gantt and Baseline Manager cleanup. The Baseline Manager now lists only live projects (deleted, archived and completed projects are hidden) and has a search box to jump to a project by ID or name. On the Gantt, the dashed float bar no longer appears on tasks that have no dependency links at all — those tasks were inheriting the project end date as their late finish and showing a misleading float bar stretching to project finish. Float now shows only for tasks wired into the schedule (with a predecessor or successor), where it actually means something.';
+const APP_RELEASE_NOTE='Gantt dependency arrows are cleaner and can be switched off. The predecessor arrows are now solid thin connectors instead of busy dashes, and a new Links checkbox on the Gantt toolbar hides or shows them — useful on dense schedules where the arrows read as clutter. This builds on the previous release, which hid deleted/closed projects in the Baseline Manager (plus a project search box) and stopped drawing a misleading float bar on tasks that have no dependency links.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.41',date:'2026-10-10',type:'improvement',notes:[
+    'Gantt: dependency arrows are now solid thin connectors (stroke-width 1.25, 60% opacity) instead of dashed lines. On a dense schedule the dashed arrows at many angles read as scattered clutter; solid connectors look intentional and track the bars more clearly.',
+    'Gantt: added a "Links" checkbox to the toolbar (default on) that shows/hides the dependency-arrow overlay — MS-Project style — so a crowded chart can be decluttered without losing the bars or the critical-path colouring.',
+    'Note: the long horizontal dashed lines some charts showed were float bars on unlinked tasks, already removed in 2.14.40. Combined with solid links and the new toggle, the arrow overlay is much calmer.',
+    'View-only (gantt.js); no server/DB change. Refresh after redeploy.',
+  ]},
   {version:'2.14.40',date:'2026-10-10',type:'fix',notes:[
     'Baseline Manager: now lists only live projects — soft-deleted (_deleted), archived (_archived) and closed (completed/archived status) projects are hidden, so you no longer see projects you deleted or closed. When the Gantt is pinned to a single project, that project is still shown even if closed.',
     'Baseline Manager: added a search box that filters the project list by project ID or name as you type (pure client-side show/hide, so the box keeps focus). Shows a "No projects match your search" note when nothing matches.',
