@@ -116,6 +116,19 @@ function renderGantt(){
       return true;
     });
 
+    // Every task id referenced as someone else's predecessor. A task that has
+    // neither a predecessor nor a successor is not wired into the schedule
+    // network; CPM then falls its late-finish back to the project end, which
+    // would paint a misleading float bar stretching to project finish. We only
+    // draw float for tasks that actually sit in the dependency network.
+    const succSet=new Set();
+    if(window.SHICCPMEngine){
+      pt.forEach(t=>{
+        if(!t.predecessors)return;
+        SHICCPMEngine.parsePredecessors(t.predecessors).forEach(pr=>succSet.add(pr.id));
+      });
+    }
+
     const activeBL=hasBL?SHICBaseline.getActiveBaseline(p.id):null;
     const showBL=_ganttShowBaseline&&!!activeBL;
 
@@ -170,6 +183,11 @@ function renderGantt(){
       const cpm=cpmMap.get(t.id);
       const isCrit=!isSummary&&(cpm?._isCritical||false);
       const tf=cpm?._TF||0;
+      // Float is only meaningful for a task wired into the dependency network
+      // (has a predecessor or a successor). Unlinked tasks inherit the project
+      // finish as late-finish and would otherwise show float to project end.
+      const _predN=(window.SHICCPMEngine&&t.predecessors)?SHICCPMEngine.parsePredecessors(t.predecessors).length:0;
+      const inNetwork=_predN>0||succSet.has(t.id);
 
       // Always use stored dates for bar position (keeps Gantt in sync with Task List).
       // CPM _ES/_EF are only used for float bar and critical path decoration.
@@ -225,7 +243,7 @@ function renderGantt(){
         const lft=pct(tsStr);
         const wdt=wPct(tsStr,teStr);
         const progW=t.status==='done'?wdt:Math.min(wdt,wdt*((t.progress||0)/100));
-        const floatBar=(tf>0&&lfStr&&lfStr>teStr)?`<div style="position:absolute;left:${pct(teStr)}%;width:${wPct(teStr,lfStr)}%;min-width:2px;top:9px;height:12px;background:rgba(139,148,158,.25);border:1px dashed rgba(139,148,158,.4);border-radius:0 3px 3px 0" title="Float: ${tf.toFixed(1)} working days"></div>`:'';
+        const floatBar=(inNetwork&&tf>0&&lfStr&&lfStr>teStr)?`<div style="position:absolute;left:${pct(teStr)}%;width:${wPct(teStr,lfStr)}%;min-width:2px;top:9px;height:12px;background:rgba(139,148,158,.25);border:1px dashed rgba(139,148,158,.4);border-radius:0 3px 3px 0" title="Float: ${tf.toFixed(1)} working days"></div>`:'';
         bar=`
           ${ghostBar}
           ${floatBar}
@@ -236,9 +254,9 @@ function renderGantt(){
           ${overdue?`<div style="position:absolute;left:calc(${lft+wdt}% + 2px);top:7px;font-size:9px;color:var(--accent-red)">⚠</div>`:''}`;
       }
 
-      const predCount=(window.SHICCPMEngine&&t.predecessors)?SHICCPMEngine.parsePredecessors(t.predecessors).length:0;
+      const predCount=_predN;
 
-      rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0?' — Float: '+tf.toFixed(1)+'d':''}">
+      rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0&&inNetwork?' — Float: '+tf.toFixed(1)+'d':''}">
         <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;height:${TASK_H}px;padding:3px 10px 3px ${26+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
           <div style="display:flex;align-items:center;gap:5px">
             <i class="fas ${isSummary?'fa-folder-open':isMile?'fa-diamond':'fa-circle'}" style="color:${isSummary?'#6e7681':isMile?(isCrit?'#f85149':'var(--accent-amber)'):tc};font-size:${isSummary?'9':isMile?'9':'5'}px;flex-shrink:0"></i>
@@ -460,7 +478,13 @@ function ganttQuickRange(months){
 function showBaselineManager(){
   if(!window.SHICBaseline)return;
   const projects=AppState.data.projects||[];
-  const target=ganttProjFilter!=='all'?projects.filter(p=>p.id===ganttProjFilter):projects;
+  // A project you can baseline is one that is still live: not soft-deleted,
+  // not archived, and not closed (completed/archived status). When the Gantt
+  // is pinned to a single project, honour that pin even if it's closed.
+  const _blClosed=p=>{const s=String(p.status||'').toLowerCase();return s==='completed'||s==='archived';};
+  const target=ganttProjFilter!=='all'
+    ? projects.filter(p=>p.id===ganttProjFilter)
+    : projects.filter(p=>!p._deleted&&!p._archived&&!_blClosed(p));
 
   const projectRows=target.map(p=>{
     const bls=p.baselines||[];
@@ -478,7 +502,7 @@ function showBaselineManager(){
 
     const canAdd=bls.length<SHICBaseline.MAX_BASELINES;
 
-    return `<div style="margin-bottom:16px">
+    return `<div class="bl-proj-row" data-blsearch="${esc((p.id+' '+(p.name||'')).toLowerCase())}" style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">
       <div style="font-size:12px;font-weight:700;color:var(--accent-blue);margin-bottom:8px"><i class="fas fa-folder" style="margin-right:5px"></i>${esc(p.id)} — ${esc(p.name)}</div>
       ${blList}
       ${canAdd?`<div style="display:flex;gap:6px;margin-top:6px">
@@ -486,18 +510,40 @@ function showBaselineManager(){
         <button class="btn btn-primary btn-sm" onclick="_blCreate('${p.id}')" style="font-size:11px;white-space:nowrap"><i class="fas fa-plus"></i> Set Baseline</button>
       </div>`:`<div style="font-size:10px;color:var(--accent-amber);margin-top:4px"><i class="fas fa-info-circle"></i> Max ${SHICBaseline.MAX_BASELINES} baselines reached. Delete one to add a new baseline.</div>`}
     </div>`;
-  }).join('<hr style="border-color:var(--border);margin:12px 0">');
+  }).join('');
 
   $('#genericModalTitle').textContent='Baseline Manager';
   $('#genericModalBody').innerHTML=`
-    <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;line-height:1.6">
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;line-height:1.6">
       A baseline captures the current planned dates for all tasks. Once set, ghost bars appear on the Gantt and the <strong>SV</strong> column shows schedule variance per task.
     </div>
-    ${projectRows}
+    <div style="position:relative;margin-bottom:14px">
+      <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--text-muted);pointer-events:none"></i>
+      <input class="form-input" id="blProjSearch" placeholder="Search projects by ID or name…" oninput="_blFilterProjects(this.value)" style="height:32px;font-size:12px;padding-left:28px;width:100%">
+    </div>
+    <div id="blProjList">${projectRows||'<div style="font-size:12px;color:var(--text-muted);font-style:italic;padding:12px 0">No active projects available to baseline (deleted, archived and completed projects are hidden).</div>'}</div>
+    <div id="blNoMatch" style="display:none;font-size:12px;color:var(--text-muted);font-style:italic;padding:12px 0">No projects match your search.</div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('genericModal')">Close</button>
     </div>`;
   openModal('genericModal');
+}
+
+// Live client-side filter for the Baseline Manager's project list. Pure DOM
+// show/hide (no re-render) so the search box keeps focus while typing.
+function _blFilterProjects(q){
+  q=(q||'').trim().toLowerCase();
+  const list=document.getElementById('blProjList');
+  if(!list)return;
+  const rows=list.querySelectorAll('.bl-proj-row');
+  let shown=0;
+  rows.forEach(r=>{
+    const vis=!q||(r.getAttribute('data-blsearch')||'').indexOf(q)!==-1;
+    r.style.display=vis?'':'none';
+    if(vis)shown++;
+  });
+  const nm=document.getElementById('blNoMatch');
+  if(nm)nm.style.display=(rows.length&&shown===0)?'':'none';
 }
 
 function _blCreate(projectId){

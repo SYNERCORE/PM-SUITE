@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.39';
-const APP_BUILD='20261008g';
+const APP_VERSION='2.14.40';
+const APP_BUILD='20261010a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Fixes importing tasks from inside a project. The importer was reading the selected project from the wrong place (window.taskProjectFilter, which is never set), so an import whose file had no Project ID column — e.g. an MS Project / Excel schedule — brought the tasks in without a project and they did not appear under it. The importer now reads the real project filter, so tasks imported from inside a project are correctly tagged to it, both in the preview and on import. Imports whose file already has a Project ID column, and global imports, are unchanged.';
+const APP_RELEASE_NOTE='Gantt and Baseline Manager cleanup. The Baseline Manager now lists only live projects (deleted, archived and completed projects are hidden) and has a search box to jump to a project by ID or name. On the Gantt, the dashed float bar no longer appears on tasks that have no dependency links at all — those tasks were inheriting the project end date as their late finish and showing a misleading float bar stretching to project finish. Float now shows only for tasks wired into the schedule (with a predecessor or successor), where it actually means something.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.40',date:'2026-10-10',type:'fix',notes:[
+    'Baseline Manager: now lists only live projects — soft-deleted (_deleted), archived (_archived) and closed (completed/archived status) projects are hidden, so you no longer see projects you deleted or closed. When the Gantt is pinned to a single project, that project is still shown even if closed.',
+    'Baseline Manager: added a search box that filters the project list by project ID or name as you type (pure client-side show/hide, so the box keeps focus). Shows a "No projects match your search" note when nothing matches.',
+    'Gantt: the dashed float bar no longer renders on tasks that are not wired into the schedule network (no predecessor and no successor). Such tasks inherited the project finish as their CPM late finish, which painted a float bar stretching all the way to project end — visually wrong. Float (bar + tooltip) now appears only when a task has a predecessor or successor, where total float is actually meaningful.',
+    'View-only (gantt.js); no server/DB change. Refresh after redeploy.',
+  ]},
   {version:'2.14.39',date:'2026-10-08',type:'fix',notes:[
     'Fixed: tasks imported from inside a project detail were not attached to that project when the file had no Project ID column (e.g. an MS Project .xlsx/CSV export). Root cause: the importer read window.taskProjectFilter, but taskProjectFilter is a global `let` (not a window property), so window.taskProjectFilter was always undefined and the project was never applied — the rows imported with an empty projectId and did not show under the project (they still synced to SharePoint as orphans).',
     'The importer (both the preview tag and the import-time assignment) now reads the real global taskProjectFilter, with window.taskProjectFilter kept only as a fallback. Imports from inside a project are correctly tagged; imports whose file already carries a Project ID column, and global (all-projects) imports, behave exactly as before.',
