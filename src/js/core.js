@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.42';
-const APP_BUILD='20261010c';
+const APP_VERSION='2.14.43';
+const APP_BUILD='20261010d';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Critical build fix. The last few builds of promaster.html were produced by build.js, which corrupted the bundle: several source files contain a dollar-apostrophe sequence that the inliner mis-handled, splicing the rest of the page back in and loading dozens of modules twice. That caused the "already declared" console errors and the failing GitHub build check, and left the online app only partly working. The inliner is fixed (it now inserts code verbatim), the bundle is clean again, and this release also carries the Gantt improvements: solid dependency arrows with a Links on/off toggle, no float bars on unlinked tasks, and a Baseline Manager that hides closed/deleted projects and has a project search box.';
+const APP_RELEASE_NOTE='Gantt float and dependency arrows corrected. The dashed float bar now shows FREE float — it fills only the gap between a task and its next dependent task and stops there — instead of total float running all the way to project end, so a task that feeds another no longer shows a float bar stretching across the chart. Critical and terminal tasks show no float bar. Dependency arrows were re-routed MS-Project style (the vertical leg now sits next to the successor), which removes the scattered crossing lines on dense schedules. The Links toggle and the earlier build fix remain.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.43',date:'2026-10-10',type:'fix',notes:[
+    'Gantt float now shows FREE float, not total float. The dashed bar is drawn from a task\'s finish to the EARLIEST start among its successors (using the same stored dates the bars use), so it fills the gap up to the next dependent task and stops there. Previously the bar extended to the CPM late finish (total float), which for a side-branch task runs all the way to project end — the long dashed lines stretching across the chart. The CPM engine was correct (a task with a successor already gets its late finish pinned); only the bar\'s drawn extent was misleading.',
+    'Float bars are suppressed for critical tasks (zero slack) and for terminal tasks with no successor (nothing to bound the gap), so the overlay is far cleaner. Total float is still available in the row tooltip.',
+    'Gantt dependency arrows re-routed MS-Project style: leave the predecessor horizontally, drop in a vertical lane placed just before the successor\'s start, then step in. The vertical leg now sits next to the successor instead of a shared lane hugging every predecessor, which removes the long overlapping verticals that looked like scattered lines on dense schedules.',
+    'View-only (gantt.js); no server/DB change. Refresh after redeploy.',
+  ]},
   {version:'2.14.42',date:'2026-10-10',type:'fix',notes:[
     'CRITICAL build fix: builds produced by build.js (v2.14.38 through v2.14.41) were corrupt. build.js inlined each module with String.replace(tag, code) using a string replacement, which runs the special dollar-sign substitution in JavaScript. Several source files (sync.js, hardening.js, projects.js, manpower.js) contain a literal dollar-then-apostrophe sequence, which String.replace expands to "everything after the match" — splicing the rest of the document in and duplicating the trailing script-src tags thousands of times.',
     'Symptoms: the online app loaded every view module both inlined and as an external src/js script, throwing "Identifier X has already been declared" and "AppState is not defined" in the console, and the GitHub "Validate build" check failed its headless smoke-load.',

@@ -119,16 +119,26 @@ function renderGantt(){
       return true;
     });
 
-    // Every task id referenced as someone else's predecessor. A task that has
-    // neither a predecessor nor a successor is not wired into the schedule
-    // network; CPM then falls its late-finish back to the project end, which
-    // would paint a misleading float bar stretching to project finish. We only
-    // draw float for tasks that actually sit in the dependency network.
+    // Dependency maps for float rendering.
+    //  • succSet        — task ids referenced as some other task's predecessor.
+    //  • succEarliest   — for each task, the EARLIEST start date among the tasks
+    //                     that depend on it (its successors), taken from the same
+    //                     stored dates the bars are drawn from.
+    // We draw float as FREE float: the gap between a task's finish and its
+    // earliest successor's start — the slack it can absorb WITHOUT pushing the
+    // next task. That is what fills the visible gap up to the dependent task and
+    // stops there, instead of the total-float run to project end (which made
+    // side-branch tasks show a float bar stretching across the whole chart).
     const succSet=new Set();
+    const succEarliest={};
     if(window.SHICCPMEngine){
       pt.forEach(t=>{
         if(!t.predecessors)return;
-        SHICCPMEngine.parsePredecessors(t.predecessors).forEach(pr=>succSet.add(pr.id));
+        const myStart=t.startDate||t.dueDate||t.endDate||null;
+        SHICCPMEngine.parsePredecessors(t.predecessors).forEach(pr=>{
+          succSet.add(pr.id);
+          if(myStart&&(!succEarliest[pr.id]||myStart<succEarliest[pr.id]))succEarliest[pr.id]=myStart;
+        });
       });
     }
 
@@ -186,11 +196,13 @@ function renderGantt(){
       const cpm=cpmMap.get(t.id);
       const isCrit=!isSummary&&(cpm?._isCritical||false);
       const tf=cpm?._TF||0;
-      // Float is only meaningful for a task wired into the dependency network
-      // (has a predecessor or a successor). Unlinked tasks inherit the project
-      // finish as late-finish and would otherwise show float to project end.
       const _predN=(window.SHICCPMEngine&&t.predecessors)?SHICCPMEngine.parsePredecessors(t.predecessors).length:0;
       const inNetwork=_predN>0||succSet.has(t.id);
+      // Free-float end = the earliest start among this task's successors. The
+      // float bar fills the gap from the task's finish up to that successor and
+      // stops there, so the slack shown is "how long before the NEXT task is
+      // affected", not the total run to project end.
+      const _floatEnd=succEarliest[t.id]||null;
 
       // Always use stored dates for bar position (keeps Gantt in sync with Task List).
       // CPM _ES/_EF are only used for float bar and critical path decoration.
@@ -246,7 +258,10 @@ function renderGantt(){
         const lft=pct(tsStr);
         const wdt=wPct(tsStr,teStr);
         const progW=t.status==='done'?wdt:Math.min(wdt,wdt*((t.progress||0)/100));
-        const floatBar=(inNetwork&&tf>0&&lfStr&&lfStr>teStr)?`<div style="position:absolute;left:${pct(teStr)}%;width:${wPct(teStr,lfStr)}%;min-width:2px;top:9px;height:12px;background:rgba(139,148,158,.25);border:1px dashed rgba(139,148,158,.4);border-radius:0 3px 3px 0" title="Float: ${tf.toFixed(1)} working days"></div>`:'';
+        // Free-float bar: from this task's finish to its earliest successor's
+        // start. Only drawn when that leaves a real gap (successor starts after
+        // this task ends) and the task is not critical. No successor → no bar.
+        const floatBar=(!isCrit&&_floatEnd&&_floatEnd>teStr)?`<div style="position:absolute;left:${pct(teStr)}%;width:${wPct(teStr,_floatEnd)}%;min-width:2px;top:9px;height:12px;background:rgba(139,148,158,.22);border:1px dashed rgba(139,148,158,.4);border-radius:0 3px 3px 0" title="Free float: can slip until ${_floatEnd} without delaying the next task${tf>0?' · total float '+tf.toFixed(1)+'d':''}"></div>`:'';
         bar=`
           ${ghostBar}
           ${floatBar}
@@ -259,7 +274,7 @@ function renderGantt(){
 
       const predCount=_predN;
 
-      rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0&&inNetwork?' — Float: '+tf.toFixed(1)+'d':''}">
+      rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0&&inNetwork?' — Total float: '+tf.toFixed(1)+'d':''}">
         <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;height:${TASK_H}px;padding:3px 10px 3px ${26+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
           <div style="display:flex;align-items:center;gap:5px">
             <i class="fas ${isSummary?'fa-folder-open':isMile?'fa-diamond':'fa-circle'}" style="color:${isSummary?'#6e7681':isMile?(isCrit?'#f85149':'var(--accent-amber)'):tc};font-size:${isSummary?'9':isMile?'9':'5'}px;flex-shrink:0"></i>
@@ -328,24 +343,22 @@ function renderGantt(){
         const color=isCritArrow?'#f85149':'#8b949e';
         const marker=isCritArrow?'url(#rArr)':'url(#gArr)';
 
-        // Proper elbow routing: exit right of predecessor → step right by gap →
-        // travel vertically between rows → step left to successor start
-        // The vertical leg stays at (sx + gap) so it clears the predecessor bar edge
-        // and avoids cutting through any task bars in between rows.
-        const vx = sx + gap; // vertical routing lane X (just past predecessor right edge)
-        const midY = ey > sy
-          ? ey - halfH - 2   // going down: enter row from the top edge
-          : ey + halfH + 2;  // going up: enter row from the bottom edge
+        // MS-Project-style orthogonal route: leave the predecessor horizontally,
+        // drop in a vertical lane placed just BEFORE the successor's start, then
+        // step into the successor. Keeping the vertical leg next to the successor
+        // (rather than a shared lane hugging every predecessor) removes the long
+        // overlapping verticals that made dense charts look like scattered lines.
+        const vx = Math.max(sx + gap, ex - gap);
 
-        // If source and target are on the same row, fall back to simple horizontal line
         if(Math.abs(sy - ey) < 2){
+          // Same row → straight horizontal.
           paths+=`<path d="M${sx.toFixed(1)},${sy.toFixed(1)} H${ex.toFixed(1)}"
-            stroke="${color}" stroke-width="1.25" fill="none" opacity="0.6"
+            stroke="${color}" stroke-width="1.25" fill="none" opacity="0.55"
             marker-end="${marker}"/>`;
         } else {
-          // M start → short hop right → vertical lane → approach target row → arrive at target
-          paths+=`<path d="M${sx.toFixed(1)},${sy.toFixed(1)} H${vx.toFixed(1)} V${midY.toFixed(1)} H${ex.toFixed(1)} V${ey.toFixed(1)}"
-            stroke="${color}" stroke-width="1.25" fill="none" opacity="0.6"
+          // Out of predecessor → vertical lane near successor → into successor.
+          paths+=`<path d="M${sx.toFixed(1)},${sy.toFixed(1)} H${vx.toFixed(1)} V${ey.toFixed(1)} H${ex.toFixed(1)}"
+            stroke="${color}" stroke-width="1.25" fill="none" opacity="0.55"
             marker-end="${marker}"/>`;
         }
       });
