@@ -22,18 +22,26 @@ const jsFiles = JSON.parse(fs.readFileSync(path.join(SRC, 'bundle.json'), 'utf8'
 
 let out = read('index.html');
 
+// IMPORTANT: always replace with a FUNCTION, never a string. A string
+// replacement runs JS's special `$` substitution ($&, $`, $', $1…), and
+// several source files legitimately contain `$'` (dollar-apostrophe) in their
+// code — which `String.replace` would expand to "everything after the match",
+// splicing the rest of the document back in and duplicating the trailing
+// <script> tags thousands of times. A function replacement returns its value
+// verbatim with no `$` handling, so the inlined code is inserted as-is.
+
 // Inline CSS
 const css = read('css/main.css');
 out = out.replace(
   '  <link rel="stylesheet" href="src/css/main.css">',
-  `<style>\n${css}\n</style>`
+  () => `<style>\n${css}\n</style>`
 );
 
 // Inline each JS file
 for (const f of jsFiles) {
   const tag  = `<script src="src/${f}"></script>`;
   const code = read(f);
-  out = out.replace(tag, `<script>\n${code}\n</script>`);
+  out = out.replace(tag, () => `<script>\n${code}\n</script>`);
 }
 
 fs.writeFileSync(path.join(BASE, 'promaster.html'), out, 'utf8');

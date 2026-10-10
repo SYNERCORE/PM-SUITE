@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.41';
-const APP_BUILD='20261010b';
+const APP_VERSION='2.14.42';
+const APP_BUILD='20261010c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,18 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Gantt dependency arrows are cleaner and can be switched off. The predecessor arrows are now solid thin connectors instead of busy dashes, and a new Links checkbox on the Gantt toolbar hides or shows them — useful on dense schedules where the arrows read as clutter. This builds on the previous release, which hid deleted/closed projects in the Baseline Manager (plus a project search box) and stopped drawing a misleading float bar on tasks that have no dependency links.';
+const APP_RELEASE_NOTE='Critical build fix. The last few builds of promaster.html were produced by build.js, which corrupted the bundle: several source files contain a dollar-apostrophe sequence that the inliner mis-handled, splicing the rest of the page back in and loading dozens of modules twice. That caused the "already declared" console errors and the failing GitHub build check, and left the online app only partly working. The inliner is fixed (it now inserts code verbatim), the bundle is clean again, and this release also carries the Gantt improvements: solid dependency arrows with a Links on/off toggle, no float bars on unlinked tasks, and a Baseline Manager that hides closed/deleted projects and has a project search box.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.42',date:'2026-10-10',type:'fix',notes:[
+    'CRITICAL build fix: builds produced by build.js (v2.14.38 through v2.14.41) were corrupt. build.js inlined each module with String.replace(tag, code) using a string replacement, which runs the special dollar-sign substitution in JavaScript. Several source files (sync.js, hardening.js, projects.js, manpower.js) contain a literal dollar-then-apostrophe sequence, which String.replace expands to "everything after the match" — splicing the rest of the document in and duplicating the trailing script-src tags thousands of times.',
+    'Symptoms: the online app loaded every view module both inlined and as an external src/js script, throwing "Identifier X has already been declared" and "AppState is not defined" in the console, and the GitHub "Validate build" check failed its headless smoke-load.',
+    'Fix: build.js now passes a replacement FUNCTION (out.replace(tag, () => wrapped)), which inserts the code verbatim with no $ handling. build.ps1 was already safe (it uses .Replace(), a literal .NET replace). The rebuilt bundle has zero leftover external src/js tags.',
+    'This release also carries v2.14.40/41: Gantt solid dependency arrows + Links toggle, no float bars on unlinked tasks, and the Baseline Manager hiding closed/deleted projects with a search box.',
+    'Build-tooling + view-only; no server/DB change. Refresh after redeploy.',
+  ]},
   {version:'2.14.41',date:'2026-10-10',type:'improvement',notes:[
     'Gantt: dependency arrows are now solid thin connectors (stroke-width 1.25, 60% opacity) instead of dashed lines. On a dense schedule the dashed arrows at many angles read as scattered clutter; solid connectors look intentional and track the bars more clearly.',
     'Gantt: added a "Links" checkbox to the toolbar (default on) that shows/hides the dependency-arrow overlay — MS-Project style — so a crowded chart can be decluttered without losing the bars or the critical-path colouring.',
