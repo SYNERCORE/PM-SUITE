@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.44';
-const APP_BUILD='20261010e';
+const APP_VERSION='2.14.45';
+const APP_BUILD='20261010f';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Gantt scattered-arrow fix. The long dependency arrows stretching across the chart were links drawn to or from summary (parent) rows: a summary bar spans its whole phase, so any arrow touching it reaches the far edge of that span. Dependency arrows are now drawn only between leaf tasks (the schedule math is unchanged — summary links still drive the dates, only the misleading arrow is hidden). Verified in a rendered Gantt: the worst arrow span dropped from 804/1000 of the width to 8/1000. Carries the earlier free-float bar and solid-arrow / Links-toggle changes too.';
+const APP_RELEASE_NOTE='Gantt scattered-arrow fix (real root cause). The main Gantt placed each dependency arrow using an ASSUMED row height, but real rows run a few pixels taller, so the error added up row after row and arrows drifted away from their bars — the scatter that the project-details Gantt never had. Arrows are now drawn from the ACTUAL rendered layout (measured after render, like the project-details chart), so every line sits exactly on its bars no matter the row height, font or zoom, and they re-align on window resize. Keeps the earlier summary-skip, free-float bar, and solid-arrow / Links-toggle changes.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.45',date:'2026-10-10',type:'fix',notes:[
+    'Gantt scattered arrows fixed at the REAL root cause. The main Gantt computed each arrow\'s vertical position by adding up an assumed per-row height (TASK_H). Real rows render a few pixels taller (the two-line START/END date cell), so the error accumulated row after row — by the 20th task an arrow landed ~90px off its bar. That drift is the scatter. The project-details Gantt never showed it because it measures the real DOM.',
+    'Fix: the main Gantt now draws its arrows the same way the project-details chart does — after render it MEASURES each row\'s actual on-screen position (and the timeline cell\'s real width) and draws the SVG in 1:1 pixels, so every line sits exactly on its bars regardless of row height, font metrics or browser zoom. The overlay also redraws on window resize to stay aligned.',
+    'Verified by rendering a 2-project, 21-task schedule in a headless browser and checking geometry: all 14 dependency arrows start on their predecessor row\'s centre and end on their successor\'s, each spanning one row (~37px) — no cross-chart lines. Keeps the earlier summary-skip, free-float bar, and solid-arrow / Links-toggle behaviour.',
+    'View-only (gantt.js); no server/DB change. Refresh after redeploy.',
+  ]},
   {version:'2.14.44',date:'2026-10-10',type:'fix',notes:[
     'Gantt scattered arrows fixed — root cause: dependency arrows drawn to/from a SUMMARY (parent) row. A summary bar spans all its children (e.g. a phase running 2026→2028), so taskPos for that row has its edge at the far end of the chart; any arrow touching it stretched clear across the Gantt. Reproduced in a rendered harness: one summary-linked arrow spanned 804 of 1000 horizontal units.',
     'Fix: the arrow overlay now skips any link whose predecessor OR successor is a summary task (a task that is some other task\'s parent). Leaf-to-leaf arrows are unchanged. After the fix the widest arrow span in the same harness is 8/1000 — adjacent rows only.',

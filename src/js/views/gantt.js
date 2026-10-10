@@ -238,10 +238,14 @@ function renderGantt(){
         }
       }
 
-      const rowCenterY=currentY+TASK_H/2;
-      const leftX=pct(tsStr)*10;
-      const rightX=Math.min(1000,(pct(tsStr)+wPct(tsStr,teStr))*10);
-      taskPos.set(t.id,{leftX,rightX,y:rowCenterY});
+      // Store date-based percentages only. The arrow Y (and the exact X in px)
+      // are MEASURED from the real DOM after render by _drawMainGanttArrows() —
+      // never accumulated from an assumed row height, because real rows run
+      // taller than TASK_H (the two-line START/END cell), so a computed Y drifts
+      // a few px per row and arrows end up scattered off their bars.
+      const leftPct=pct(tsStr);
+      const rightPct=Math.min(100,pct(tsStr)+wPct(tsStr,teStr));
+      taskPos.set(t.id,{leftPct,rightPct});
       totalTasksShown++;
 
       let bar='';
@@ -274,7 +278,7 @@ function renderGantt(){
 
       const predCount=_predN;
 
-      rows+=`<div style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0&&inNetwork?' — Total float: '+tf.toFixed(1)+'d':''}">
+      rows+=`<div data-trow data-tid="${esc(t.id)}" style="display:flex;border-bottom:1px solid var(--border)" title="${esc(t.name)} [${t.status}]${isCrit?' — CRITICAL PATH':''}${tf>0&&inNetwork?' — Total float: '+tf.toFixed(1)+'d':''}">
         <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;height:${TASK_H}px;padding:3px 10px 3px ${26+depth*14}px;border-right:1px solid var(--border);overflow:hidden">
           <div style="display:flex;align-items:center;gap:5px">
             <i class="fas ${isSummary?'fa-folder-open':isMile?'fa-diamond':'fa-circle'}" style="color:${isSummary?'#6e7681':isMile?(isCrit?'#f85149':'var(--accent-amber)'):tc};font-size:${isSummary?'9':isMile?'9':'5'}px;flex-shrink:0"></i>
@@ -286,7 +290,7 @@ function renderGantt(){
             ${predCount>0?`<span style="font-size:8px;color:var(--accent-cyan);flex-shrink:0"><i class="fas fa-link"></i> ${predCount}</span>`:''}
           </div>
         </div>
-        <div style="flex:1;position:relative;height:${TASK_H}px;min-width:0">
+        <div data-tl style="flex:1;position:relative;height:${TASK_H}px;min-width:0">
           ${todayLine}${bar}
         </div>
         <div style="width:86px;min-width:86px;padding:4px 8px;font-size:9px;font-family:var(--font-mono);border-left:1px solid var(--border);color:${overdue?'var(--accent-red)':'var(--text-secondary)'};line-height:1.5">
@@ -304,82 +308,47 @@ function renderGantt(){
 
   const totalRowsH=currentY;
 
-  // ── Dependency Arrows SVG ─────────────────────────────────────
-  let arrowsSvg='';
+  // ── Dependency Arrows ─────────────────────────────────────────
+  // We DO NOT build the arrow paths here from assumed row heights — real rows
+  // run taller than TASK_H, so an accumulated Y drifts a few px per row and the
+  // arrows scatter off their bars (the main Gantt's long-standing bug; the
+  // project-details Gantt never had it because it measures the DOM). Instead we
+  // stash a lightweight context and draw the SVG in real pixels AFTER render,
+  // measuring each row's actual position — see _drawMainGanttArrows().
+  window._gArrowCtx=null;
   if(window.SHICCPMEngine&&taskPos.size>0&&_ganttShowLinks){
-    let defs=`<defs>
-      <marker id="gArr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#8b949e"/></marker>
-      <marker id="rArr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#f85149"/></marker>
-    </defs>`;
-    let paths='';
-
     const viewTasks=filteredProjects.flatMap(p=>tasks.filter(t=>t.projectId===p.id&&!t._deleted&&(ganttStatusFilter==='all'||t.status===ganttStatusFilter)));
 
     // A summary (parent) row's bar spans ALL its children, so its edges sit at
     // the far ends of the whole phase. An arrow drawn to/from a summary stretches
-    // across the entire chart — the "scattered" long arrows. Dependencies are
+    // across the entire chart — the other "scattered" cause. Dependencies are
     // only meaningful between leaf tasks, so skip any link touching a summary.
     const summaryIds=new Set();
     viewTasks.forEach(t=>{ if(t.parentId)summaryIds.add(t.parentId); });
 
+    const pairs=[];
     viewTasks.forEach(t=>{
       if(!t.predecessors)return;
-      if(summaryIds.has(t.id))return; // successor is a summary → skip
-      const preds=SHICCPMEngine.parsePredecessors(t.predecessors);
-      const succPos=taskPos.get(t.id);
-      if(!succPos)return;
-
-      preds.forEach(pr=>{
-        if(summaryIds.has(pr.id))return; // predecessor is a summary → skip
-        const predPos=taskPos.get(pr.id);
-        if(!predPos)return;
-
-        let sx,sy,ex,ey;
-        // Use bar edges + a small vertical offset so the line exits/enters at the edge of the bar
-        // rather than its center — this prevents crossing through bars
-        const halfH = TASK_H / 2;
-        const gap = 5; // clearance in px past the bar edge before routing vertically
-        switch(pr.type){
-          case 'SS': sx=predPos.leftX;  sy=predPos.y; ex=succPos.leftX;  ey=succPos.y; break;
-          case 'FF': sx=predPos.rightX; sy=predPos.y; ex=succPos.rightX; ey=succPos.y; break;
-          case 'SF': sx=predPos.leftX;  sy=predPos.y; ex=succPos.rightX; ey=succPos.y; break;
-          default:   sx=predPos.rightX; sy=predPos.y; ex=succPos.leftX;  ey=succPos.y;
-        }
-
-        const predCrit=cpmMap.get(pr.id)?._isCritical;
-        const succCrit=cpmMap.get(t.id)?._isCritical;
-        const isCritArrow=predCrit&&succCrit;
-        const color=isCritArrow?'#f85149':'#8b949e';
-        const marker=isCritArrow?'url(#rArr)':'url(#gArr)';
-
-        // MS-Project-style orthogonal route: leave the predecessor horizontally,
-        // drop in a vertical lane placed just BEFORE the successor's start, then
-        // step into the successor. Keeping the vertical leg next to the successor
-        // (rather than a shared lane hugging every predecessor) removes the long
-        // overlapping verticals that made dense charts look like scattered lines.
-        const vx = Math.max(sx + gap, ex - gap);
-
-        if(Math.abs(sy - ey) < 2){
-          // Same row → straight horizontal.
-          paths+=`<path d="M${sx.toFixed(1)},${sy.toFixed(1)} H${ex.toFixed(1)}"
-            stroke="${color}" stroke-width="1.25" fill="none" opacity="0.55"
-            marker-end="${marker}"/>`;
-        } else {
-          // Out of predecessor → vertical lane near successor → into successor.
-          paths+=`<path d="M${sx.toFixed(1)},${sy.toFixed(1)} H${vx.toFixed(1)} V${ey.toFixed(1)} H${ex.toFixed(1)}"
-            stroke="${color}" stroke-width="1.25" fill="none" opacity="0.55"
-            marker-end="${marker}"/>`;
-        }
+      if(summaryIds.has(t.id))return;        // successor is a summary → skip
+      if(!taskPos.has(t.id))return;
+      SHICCPMEngine.parsePredecessors(t.predecessors).forEach(pr=>{
+        if(summaryIds.has(pr.id))return;     // predecessor is a summary → skip
+        if(!taskPos.has(pr.id))return;
+        const crit=!!(cpmMap.get(pr.id)?._isCritical&&cpmMap.get(t.id)?._isCritical);
+        pairs.push({predId:pr.id,succId:t.id,type:pr.type||'FS',crit});
       });
     });
 
-    if(paths){
-      arrowsSvg=`<svg style="position:absolute;top:0;left:${LABEL_W}px;width:calc(100% - ${LABEL_W+161+SV_W}px);height:${totalRowsH}px;pointer-events:none;overflow:visible"
-        viewBox="0 0 1000 ${totalRowsH}" preserveAspectRatio="none">
-        ${defs}${paths}
-      </svg>`;
+    if(pairs.length){
+      const pctById={};
+      taskPos.forEach((v,k)=>{ pctById[k]={l:v.leftPct,r:v.rightPct}; });
+      window._gArrowCtx={pairs,pct:pctById};
     }
   }
+  // Empty overlay — _drawMainGanttArrows() fills it with measured-pixel paths.
+  const arrowsSvg=window._gArrowCtx
+    ? `<svg id="gArrowSvg" style="position:absolute;top:0;left:0;pointer-events:none;overflow:visible"></svg>`
+    : '';
 
   // ── Month Header HTML ─────────────────────────────────────────
   const monthHeader=`<div style="display:flex;position:sticky;top:0;z-index:8;background:var(--bg-hover);border-bottom:2px solid var(--border)">
@@ -494,6 +463,78 @@ function renderGantt(){
       <span>${totalTasksShown} tasks displayed${anyBaseline&&_ganttShowBaseline?' · <span style="color:var(--accent-cyan)">Baseline active</span>':''}</span>
     </div>
   </div>`;
+
+  // Draw dependency arrows from the REAL rendered layout (two frames so fonts/
+  // wrapping have settled), then keep them aligned on window resize.
+  if(window._gArrowCtx){
+    requestAnimationFrame(()=>requestAnimationFrame(_drawMainGanttArrows));
+    if(!window._ganttArrowResizeHooked){
+      window._ganttArrowResizeHooked=true;
+      window.addEventListener('resize',()=>{
+        clearTimeout(window._gArrowRT);
+        window._gArrowRT=setTimeout(_drawMainGanttArrows,120);
+      });
+    }
+  }
+}
+
+// Draw the main Gantt's dependency arrows by MEASURING the rendered DOM, so the
+// line endpoints sit exactly on the bars regardless of real row height, font
+// metrics, wrapping or zoom. Mirrors the project-details Gantt's approach
+// (_drawGanttArrows); replaces the old math overlay that accumulated an assumed
+// row height and drifted into scattered arrows.
+function _drawMainGanttArrows(){
+  const ctx=window._gArrowCtx;
+  const svg=document.getElementById('gArrowSvg');
+  if(!ctx||!svg)return;
+  const wrap=svg.parentElement;                 // the position:relative grid
+  if(!wrap)return;
+  const wrapRect=wrap.getBoundingClientRect();
+  const sampleTl=wrap.querySelector('[data-trow] [data-tl]');
+  if(!sampleTl){svg.innerHTML='';return;}
+  const tlRect=sampleTl.getBoundingClientRect();
+  const tlLeft=tlRect.left-wrapRect.left;       // timeline cell offset from grid
+  const tlW=tlRect.width||1;
+
+  svg.setAttribute('width',wrapRect.width);
+  svg.setAttribute('height',wrap.scrollHeight||wrapRect.height);
+
+  const esc2=s=>(window.CSS&&CSS.escape)?CSS.escape(s):String(s).replace(/"/g,'\\"');
+  const yById={};
+  const idsNeeded=new Set();
+  ctx.pairs.forEach(p=>{idsNeeded.add(p.predId);idsNeeded.add(p.succId);});
+  idsNeeded.forEach(id=>{
+    const row=wrap.querySelector('[data-tid="'+esc2(id)+'"]');
+    if(row){const r=row.getBoundingClientRect();yById[id]=r.top-wrapRect.top+r.height/2;}
+  });
+
+  const xL=id=>tlLeft+(ctx.pct[id].l/100)*tlW;
+  const xR=id=>tlLeft+(ctx.pct[id].r/100)*tlW;
+  const gap=6;
+  let paths='';
+  ctx.pairs.forEach(pr=>{
+    const py=yById[pr.predId], sy=yById[pr.succId];
+    if(py==null||sy==null||!ctx.pct[pr.predId]||!ctx.pct[pr.succId])return;
+    let sx,ex;
+    switch(pr.type){
+      case 'SS': sx=xL(pr.predId); ex=xL(pr.succId); break;
+      case 'FF': sx=xR(pr.predId); ex=xR(pr.succId); break;
+      case 'SF': sx=xL(pr.predId); ex=xR(pr.succId); break;
+      default:   sx=xR(pr.predId); ex=xL(pr.succId);   // FS
+    }
+    const color=pr.crit?'#f85149':'#8b949e';
+    const marker=pr.crit?'url(#rArr)':'url(#gArr)';
+    const vx=Math.max(sx+gap,ex-gap);
+    const d=Math.abs(py-sy)<2
+      ? `M${sx.toFixed(1)},${py.toFixed(1)} H${ex.toFixed(1)}`
+      : `M${sx.toFixed(1)},${py.toFixed(1)} H${vx.toFixed(1)} V${sy.toFixed(1)} H${ex.toFixed(1)}`;
+    paths+=`<path d="${d}" stroke="${color}" stroke-width="1.25" fill="none" opacity="0.6" marker-end="${marker}"/>`;
+  });
+
+  svg.innerHTML=`<defs>
+    <marker id="gArr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#8b949e"/></marker>
+    <marker id="rArr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#f85149"/></marker>
+  </defs>${paths}`;
 }
 
 function ganttQuickRange(months){
