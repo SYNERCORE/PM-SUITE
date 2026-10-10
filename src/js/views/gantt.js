@@ -315,13 +315,22 @@ function renderGantt(){
 
     const viewTasks=filteredProjects.flatMap(p=>tasks.filter(t=>t.projectId===p.id&&!t._deleted&&(ganttStatusFilter==='all'||t.status===ganttStatusFilter)));
 
+    // A summary (parent) row's bar spans ALL its children, so its edges sit at
+    // the far ends of the whole phase. An arrow drawn to/from a summary stretches
+    // across the entire chart — the "scattered" long arrows. Dependencies are
+    // only meaningful between leaf tasks, so skip any link touching a summary.
+    const summaryIds=new Set();
+    viewTasks.forEach(t=>{ if(t.parentId)summaryIds.add(t.parentId); });
+
     viewTasks.forEach(t=>{
       if(!t.predecessors)return;
+      if(summaryIds.has(t.id))return; // successor is a summary → skip
       const preds=SHICCPMEngine.parsePredecessors(t.predecessors);
       const succPos=taskPos.get(t.id);
       if(!succPos)return;
 
       preds.forEach(pr=>{
+        if(summaryIds.has(pr.id))return; // predecessor is a summary → skip
         const predPos=taskPos.get(pr.id);
         if(!predPos)return;
 
