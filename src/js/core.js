@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.45';
-const APP_BUILD='20261010f';
+const APP_VERSION='2.14.46';
+const APP_BUILD='20261012a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Gantt scattered-arrow fix (real root cause). The main Gantt placed each dependency arrow using an ASSUMED row height, but real rows run a few pixels taller, so the error added up row after row and arrows drifted away from their bars — the scatter that the project-details Gantt never had. Arrows are now drawn from the ACTUAL rendered layout (measured after render, like the project-details chart), so every line sits exactly on its bars no matter the row height, font or zoom, and they re-align on window resize. Keeps the earlier summary-skip, free-float bar, and solid-arrow / Links-toggle changes.';
+const APP_RELEASE_NOTE='Project detail task list is now collapsible. Every parent (summary) task has a chevron — click it to collapse or expand its sub-tasks, so you can fold whole phases out of the way on a long WBS. New Collapse All / Expand All buttons in the Task List header do the whole tree at once, and nested fold state is remembered (collapsing a child, then re-opening its parent, keeps the child folded).';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.46',date:'2026-10-12',type:'feat',notes:[
+    'Project detail → Task List: parent (summary) tasks now expand and collapse. Each summary row shows a chevron; clicking it folds or unfolds all of that task\'s descendants, so long WBS breakdowns can be collapsed phase by phase.',
+    'Added Collapse All / Expand All buttons to the Task List header. Nested fold state is preserved — collapse a sub-task, re-open its parent, and the sub-task stays collapsed.',
+    'Fold state is per session and view-only (hides rows, never changes data). Toggling re-renders only the task-table body. View-only (projects.js); no server/DB change. Refresh after redeploy.',
+  ]},
   {version:'2.14.45',date:'2026-10-10',type:'fix',notes:[
     'Gantt scattered arrows fixed at the REAL root cause. The main Gantt computed each arrow\'s vertical position by adding up an assumed per-row height (TASK_H). Real rows render a few pixels taller (the two-line START/END date cell), so the error accumulated row after row — by the 20th task an arrow landed ~90px off its bar. That drift is the scatter. The project-details Gantt never showed it because it measures the real DOM.',
     'Fix: the main Gantt now draws its arrows the same way the project-details chart does — after render it MEASURES each row\'s actual on-screen position (and the timeline cell\'s real width) and draws the SVG in 1:1 pixels, so every line sits exactly on its bars regardless of row height, font metrics or browser zoom. The overlay also redraws on window resize to stay aligned.',

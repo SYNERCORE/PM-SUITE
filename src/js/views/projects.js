@@ -1503,6 +1503,8 @@ function renderDetailTasks(){
     <div class="section-header" style="margin-bottom:12px">
       <div class="section-title">Task List — ${p?.name||detailProjectId}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="detailTasksCollapseAll()" title="Collapse all parent tasks"><i class="fas fa-compress-alt"></i> Collapse All</button>
+        <button class="btn btn-secondary btn-sm" onclick="detailTasksExpandAll()" title="Expand all parent tasks"><i class="fas fa-expand-alt"></i> Expand All</button>
         <button class="btn btn-secondary btn-sm" onclick="exportTasksExcel('${detailProjectId}')" title="Export tasks to CSV (opens in Excel)"><i class="fas fa-file-export"></i> Export</button>
         <button class="btn btn-secondary btn-sm" onclick="taskProjectFilter='${detailProjectId}';showTaskImport()" title="Import tasks from CSV / Excel"><i class="fas fa-file-import"></i> Import CSV</button>
         <button class="btn btn-secondary btn-sm" onclick="showImportFromProject('${detailProjectId}')"><i class="fas fa-copy"></i> Import from Project</button>
@@ -1519,9 +1521,22 @@ function renderDetailTasks(){
 function renderDetailTaskRows(tasks){
   if(!tasks.length)return`<tr><td colspan="14"><div class="empty-state"><i class="fas fa-tasks"></i><p>No tasks yet. Click "Add Task" to create one.</p></div></td></tr>`;
   const ordered=typeof _orderTasksHier==='function'?_orderTasksHier(tasks):tasks.map(t=>({t,depth:0}));
-  return ordered.map(({t,depth})=>{const isSum=typeof _taskHasChildren==='function'&&_taskHasChildren(t.id,tasks);return`<tr>
+  // Collapsed parents (per session, keyed by task id). A row is hidden when any
+  // of its ancestors is collapsed; the ancestor's own chevron stays visible so
+  // it can be re-expanded.
+  const colSet=window._detailTaskCollapsed||(window._detailTaskCollapsed=new Set());
+  const byId={};tasks.forEach(t=>byId[t.id]=t);
+  const ancestorCollapsed=t=>{let p=t.parentId;const seen=new Set();while(p&&!seen.has(p)){seen.add(p);if(colSet.has(p))return true;p=byId[p]?.parentId;}return false;};
+  return ordered.map(({t,depth})=>{
+    const isSum=typeof _taskHasChildren==='function'&&_taskHasChildren(t.id,tasks);
+    const collapsed=isSum&&colSet.has(t.id);
+    const hidden=ancestorCollapsed(t);
+    const chevron=isSum
+      ?`<i class="fas fa-chevron-${collapsed?'right':'down'}" style="font-size:8px;color:var(--text-muted);margin-right:6px;cursor:pointer;width:9px" title="${collapsed?'Expand':'Collapse'}" onclick="event.stopPropagation();toggleDetailTask('${t.id}')"></i>`
+      :'';
+    return`<tr data-tid="${t.id}"${hidden?' style="display:none"':''}>
     <td style="font-size:10px;font-family:var(--font-mono);color:var(--text-muted)">${t.wbs||t.id}</td>
-    <td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${esc(t.name)}</div></td>
+    <td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${chevron}${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${esc(t.name)}</div></td>
     <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.assignee,22)}<span style="font-size:11px">${t.assignee}</span></div></td>
     <td style="font-size:11px;color:var(--text-secondary)">${t.dept}</td>
     <td style="font-size:11px;font-family:var(--font-mono)">${t.startDate}</td>
@@ -1538,6 +1553,30 @@ function renderDetailTaskRows(tasks){
       <button class="btn btn-danger btn-sm btn-icon" onclick="deleteDetailTask('${t.id}')"><i class="fas fa-trash"></i></button>
     </div></td>
   </tr>`;}).join('');
+}
+
+// ── Project-detail task tree: expand / collapse parent rows ──
+function _rerenderDetailTaskBody(){
+  const body=document.getElementById('detailTaskBody');
+  if(!body)return;
+  const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===detailProjectId&&!t._deleted);
+  body.innerHTML=renderDetailTaskRows(tasks);
+}
+function toggleDetailTask(id){
+  const s=window._detailTaskCollapsed||(window._detailTaskCollapsed=new Set());
+  s.has(id)?s.delete(id):s.add(id);
+  _rerenderDetailTaskBody();
+}
+function detailTasksExpandAll(){
+  if(window._detailTaskCollapsed)window._detailTaskCollapsed.clear();
+  _rerenderDetailTaskBody();
+}
+function detailTasksCollapseAll(){
+  const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===detailProjectId&&!t._deleted);
+  const s=window._detailTaskCollapsed||(window._detailTaskCollapsed=new Set());
+  s.clear();
+  tasks.forEach(t=>{ if(typeof _taskHasChildren==='function'&&_taskHasChildren(t.id,tasks))s.add(t.id); });
+  _rerenderDetailTaskBody();
 }
 
 function deleteDetailTask(id){
