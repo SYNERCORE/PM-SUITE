@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.46';
-const APP_BUILD='20261012a';
+const APP_VERSION='2.14.47';
+const APP_BUILD='20261017a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Project detail task list is now collapsible. Every parent (summary) task has a chevron — click it to collapse or expand its sub-tasks, so you can fold whole phases out of the way on a long WBS. New Collapse All / Expand All buttons in the Task List header do the whole tree at once, and nested fold state is remembered (collapsing a child, then re-opening its parent, keeps the child folded).';
+const APP_RELEASE_NOTE='Resource Allocation Register: the Category column is now an editable dropdown — pick any category to re-file a line, and the row jumps to that group instantly (choosing the auto-detected category clears the override). Transaction Log: the Edit Log Entry dialog now has a "Linked Allocation" picker, so you can re-point a transaction to the correct allocation line; its quantity and cost move to that line\'s Net Used / Remaining / Actual automatically.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.47',date:'2026-10-17',type:'feat',notes:[
+    'Resource Allocation Register: the Category column is now an editable dropdown. Pick any category to override the auto-detected one and the line immediately moves to that group; choosing the category auto-detection would pick anyway clears the override so the row stays dynamic.',
+    'Transaction Log → Edit Log Entry: added a "Linked Allocation" picker. Re-point a transaction to the right allocation register line and its quantity and cost move to that line\'s Net Used / Remaining / Actual (both the old and new line are recalculated). "None (unlinked)" is also available.',
+    'View/data edits in projects.js; no server/DB schema change. Refresh after redeploy.',
+  ]},
   {version:'2.14.46',date:'2026-10-12',type:'feat',notes:[
     'Project detail → Task List: parent (summary) tasks now expand and collapse. Each summary row shows a chevron; clicking it folds or unfolds all of that task\'s descendants, so long WBS breakdowns can be collapsed phase by phase.',
     'Added Collapse All / Expand All buttons to the Task List header. Nested fold state is preserved — collapse a sub-task, re-open its parent, and the sub-task stays collapsed.',

@@ -2309,7 +2309,14 @@ const ALLOC_CATS=[
   {id:'misc',      label:'Miscellaneous',    icon:'fa-layer-group', color:'#8b949e',
    test:()=>true},
 ];
-function getAllocCat(a){return ALLOC_CATS.find(c=>c.test(a))||ALLOC_CATS[ALLOC_CATS.length-1];}
+// Category is auto-detected from resource type/name, but a user can pin it with
+// categoryOverride (set from the register's category dropdown). A valid override
+// always wins; otherwise fall back to the type/name tests.
+function _autoAllocCat(a){return ALLOC_CATS.find(c=>c.test(a))||ALLOC_CATS[ALLOC_CATS.length-1];}
+function getAllocCat(a){
+  if(a&&a.categoryOverride){const o=ALLOC_CATS.find(c=>c.id===a.categoryOverride);if(o)return o;}
+  return _autoAllocCat(a);
+}
 
 let _aSearch='',_aLogSearch='',_aCatFilter='all';
 
@@ -2539,7 +2546,7 @@ function renderAllocBody(pid){
         html+=`<tr style="border-top:1px solid var(--border);background:${ri%2?'rgba(255,255,255,.02)':'transparent'}">
 <td style="padding:4px 8px;font-size:10px;font-family:var(--font-mono)">${a.id}</td>
 <td style="padding:4px 8px;max-width:160px"><div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${nm}">${a.resourceName}</div><div style="margin-top:2px">${_resSourceBadge(a.resourceName)}</div>${a.resourceId?`<div style="font-size:9px;color:var(--text-muted)">${a.resourceId}</div>`:''}</td>
-<td style="padding:4px 8px"><span style="background:${c.color}22;color:${c.color};font-size:9px;padding:1px 6px;border-radius:4px;white-space:nowrap">${c.label}</span></td>
+<td style="padding:4px 8px"><select class="form-select" title="Category${a.categoryOverride?' (manually set — pick auto group to reset)':' (auto-detected — change to override)'}" style="height:24px;font-size:9px;min-width:92px;color:${c.color};font-weight:600;background:${c.color}14;border-color:${c.color}55${a.categoryOverride?';border-style:solid':''}" onchange="updateAllocCat('${a.id}',this.value)">${ALLOC_CATS.map(cc=>`<option value="${cc.id}"${cc.id===c.id?' selected':''}>${cc.label}</option>`).join('')}</select></td>
 <td style="padding:4px 8px"><input class="form-input" value="${String(a.unit||'unit').replace(/"/g,'&quot;')}" style="width:58px;height:24px;font-size:11px;text-align:center" onchange="updateAlloc('${a.id}','unit',this.value)"></td>
 <td style="padding:4px 8px"><input class="form-input" value="${String(a.role||'').replace(/"/g,'&quot;')}" style="min-width:90px;height:24px;font-size:11px" onchange="updateAlloc('${a.id}','role',this.value)"></td>
 <td style="padding:4px 8px;text-align:center"><input class="form-input" type="number" value="${a.allocatedQty}" style="width:65px;height:24px;font-family:var(--font-mono);font-weight:600;text-align:right" onchange="updateAlloc('${a.id}','allocatedQty',+this.value);setTimeout(renderDetailAllocation,700)"></td>
@@ -2662,6 +2669,19 @@ function updateAlloc(id,field,val){
   if(!AppState.data.resourceAllocations)AppState.data.resourceAllocations=[];
   const a=(AppState.data.resourceAllocations||[]).find(a=>a.id===id);
   if(a){a[field]=val;AppState.save();}
+}
+// Pin an allocation's category. If the chosen category equals what auto-detection
+// would pick anyway, drop the override so the row stays dynamic as the resource
+// changes. Re-render so the row jumps to its new category group.
+function updateAllocCat(id,catId){
+  const a=(AppState.data.resourceAllocations||[]).find(a=>a.id===id);
+  if(!a)return;
+  const auto=_autoAllocCat(a);
+  if(catId===auto.id){delete a.categoryOverride;}else{a.categoryOverride=catId;}
+  AppState.save();
+  renderDetailAllocation();
+  const lbl=(ALLOC_CATS.find(c=>c.id===catId)||auto).label;
+  showToast(a.categoryOverride?`Category set to ${lbl}`:`Category reset to auto (${lbl})`,'success',2500);
 }
 function deleteAlloc(id){ return requestOrDelete('resourceAllocations', id); }
 
@@ -3363,10 +3383,19 @@ function editUsageLog(id){
   const l=(AppState.data.resourceUsageLogs||[]).find(x=>x.id===id);
   if(!l){showToast('Log entry not found','error');return;}
   const isVar=l.category&&l.category!=='Budgeted';
+  const _optEsc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const allocOpts=(AppState.data.resourceAllocations||[])
+    .filter(a=>a&&!a._deleted&&a.projectId===l.projectId)
+    .map(a=>`<option value="${a.id}"${a.id===l.allocationId?' selected':''}>${_optEsc(a.id+' · '+(a.resourceName||'')+(a.role?' ('+a.role+')':''))}</option>`).join('');
   $('#genericModalTitle').textContent='Edit Log Entry — '+id;
   $('#genericModalBody').innerHTML=`
   <div style="padding:6px 10px;background:rgba(56,139,253,.08);border-radius:6px;margin-bottom:12px;font-size:11px;font-family:var(--font-mono)">
     ${l.id} · ${l.resourceName} · ${l.transactionType}
+  </div>
+  <div class="form-group" style="margin-bottom:12px">
+    <label class="form-label">Linked Allocation</label>
+    <select class="form-select" id="elAllocId"><option value="">— None (unlinked) —</option>${allocOpts}</select>
+    <div style="font-size:9px;color:var(--text-muted);margin-top:3px">The allocation register line this transaction draws from — changing it moves its quantity and cost to that line's Net Used / Remaining / Actual.</div>
   </div>
   <div class="form-grid">
     <div class="form-group"><label class="form-label">Date</label><input class="form-input" type="date" id="elDate" value="${l.date||''}"></div>
@@ -3428,9 +3457,14 @@ function _saveEditUsageLog(id){
   const uc=parseFloat($('#elUnitCost')?.value);
   if(!isNaN(uc)&&uc>=0)l.unitCost=uc;
   l.totalCost=Math.round(qty*(parseFloat(l.unitCost)||0)*100)/100;
+  const oldAllocId=l.allocationId||'';
+  const newAllocId=$('#elAllocId')?.value||'';
+  l.allocationId=newAllocId;
   l._updatedAt=new Date().toISOString();
   l._updatedBy=_currentUserProfile?.name||_currentUserProfile?.email||'unknown';
-  if(l.allocationId)_recalcAllocationActual(l.allocationId);
+  // Re-link can shift cost between two allocations — recalc both ends.
+  if(oldAllocId&&oldAllocId!==newAllocId)_recalcAllocationActual(oldAllocId);
+  if(newAllocId)_recalcAllocationActual(newAllocId);
   _syncIssuanceCosts(l.projectId);
   AppState.save();closeModal('genericModal');renderDetailAllocation();
   showToast('Log entry updated','success');
