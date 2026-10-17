@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.56';
-const APP_BUILD='20261017j';
+const APP_VERSION='2.14.57';
+const APP_BUILD='20261017k';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Task import now handles MS Project "Plan vs Actual" Excel exports cleanly: WBS codes no longer come in with float noise (4.1 instead of 4.0999999999999996), and predecessors written as MS Project task numbers (e.g. "2SS", "27SS", "124", "130SS+1 day") are now recognised and linked to the right task — the FS/SS/FF/SF relationship is kept (lag offsets are dropped). Classic WBS-code predecessors still work exactly as before.';
+const APP_RELEASE_NOTE='Task import: a WBS "0" row (the MS Project project-summary line) is now treated as the single root that every top-level phase (WBS 1, 2, 3…) hangs under, so the whole outline imports as one tree. Its progress — and the project\'s overall % — is the duration-weighted roll-up of all tasks beneath it, instead of WBS 0 sitting beside the phases and skewing the numbers. Builds on v2.14.56 (clean WBS codes + MS Project task-number predecessors).';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.57',date:'2026-10-17',type:'fix',notes:[
+    'Task import: when the file has a WBS "0" row (the MS Project project-summary line, e.g. the overall job), it is now made the single root parent of every top-level phase (WBS 1, 2, 3…), so the whole project imports as one outline tree with WBS 0 as the ancestor of all tasks. Previously WBS 0 came in as just another top-level item sitting beside the phases.',
+    'Because WBS 0 now has children, its progress (and the project\'s overall %) is the duration-weighted roll-up of every task beneath it — the whole-project progress — rather than whatever single % Complete value was on that summary row. The roll-up now also runs on every import (not only when predecessors were linked), so summary rows and the project percentage are correct straight after importing.',
+  ]},
   {version:'2.14.56',date:'2026-10-17',type:'fix',notes:[
     'Task import (Excel): WBS codes read from an MS Project export no longer show floating-point noise. Excel stores "4.1" as 4.0999999999999996, and that raw value was being imported verbatim; the reader now normalises single-decimal number cells back to their clean value (4.1, 4.4, 4.6…). Multi-level WBS like 2.1.1 and whole numbers are untouched.',
     'Task import (Excel/CSV): predecessors written in MS Project task-number form are now recognised. An MS Project "Plan vs Actual" export lists predecessors as task row-numbers with an optional relationship, e.g. "2SS", "27SS", "124", "130SS+1 day" — previously these were treated as WBS codes, found no match, and were silently dropped. The importer now detects this format and links each dependency to the task at that position, keeping the FS/SS/FF/SF relationship (lag offsets such as "+1 day" are dropped). Files that use WBS-code predecessors (e.g. "2.1 FS") continue to resolve by WBS exactly as before.',
