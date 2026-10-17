@@ -3383,10 +3383,14 @@ function editUsageLog(id){
   const l=(AppState.data.resourceUsageLogs||[]).find(x=>x.id===id);
   if(!l){showToast('Log entry not found','error');return;}
   const isVar=l.category&&l.category!=='Budgeted';
-  const _optEsc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const allocOpts=(AppState.data.resourceAllocations||[])
+  const _elEsc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  // Searchable allocation picker data: each item carries a plain label so the
+  // combobox can filter by id / resource name / role without scrolling.
+  window._elAllocItems=(AppState.data.resourceAllocations||[])
     .filter(a=>a&&!a._deleted&&a.projectId===l.projectId)
-    .map(a=>`<option value="${a.id}"${a.id===l.allocationId?' selected':''}>${_optEsc(a.id+' · '+(a.resourceName||'')+(a.role?' ('+a.role+')':''))}</option>`).join('');
+    .map(a=>({id:a.id,label:a.id+' · '+(a.resourceName||'')+(a.role?' ('+a.role+')':'')}));
+  const _curItem=window._elAllocItems.find(x=>x.id===l.allocationId);
+  const _curLabel=_curItem?_curItem.label:'';
   $('#genericModalTitle').textContent='Edit Log Entry — '+id;
   $('#genericModalBody').innerHTML=`
   <div style="padding:6px 10px;background:rgba(56,139,253,.08);border-radius:6px;margin-bottom:12px;font-size:11px;font-family:var(--font-mono)">
@@ -3394,8 +3398,15 @@ function editUsageLog(id){
   </div>
   <div class="form-group" style="margin-bottom:12px">
     <label class="form-label">Linked Allocation</label>
-    <select class="form-select" id="elAllocId"><option value="">— None (unlinked) —</option>${allocOpts}</select>
-    <div style="font-size:9px;color:var(--text-muted);margin-top:3px">The allocation register line this transaction draws from — changing it moves its quantity and cost to that line's Net Used / Remaining / Actual.</div>
+    <input type="hidden" id="elAllocId" value="${_elEsc(l.allocationId||'')}">
+    <div style="position:relative">
+      <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:12px;pointer-events:none"></i>
+      <input class="form-input" id="elAllocSearch" placeholder="Search allocation by ID, resource or role..." value="${_elEsc(_curLabel)}" autocomplete="off" style="padding-left:32px;padding-right:28px"
+        onfocus="this.select();_elAllocFilter(this.value)" oninput="_elAllocFilter(this.value)" onkeydown="_elAllocKey(event)" onblur="setTimeout(()=>{const b=document.getElementById('elAllocResults');if(b)b.style.display='none';},150)">
+      <button type="button" title="Clear link" onclick="_elAllocPick('','')" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:13px;padding:2px 6px">✕</button>
+      <div id="elAllocResults" style="display:none;position:absolute;z-index:300;width:100%;margin-top:2px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;max-height:200px;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,.4)"></div>
+    </div>
+    <div style="font-size:9px;color:var(--text-muted);margin-top:3px">The allocation register line this transaction draws from — changing it moves its quantity and cost to that line's Net Used / Remaining / Actual. Clear (✕) to unlink.</div>
   </div>
   <div class="form-grid">
     <div class="form-group"><label class="form-label">Date</label><input class="form-input" type="date" id="elDate" value="${l.date||''}"></div>
@@ -3468,6 +3479,44 @@ function _saveEditUsageLog(id){
   _syncIssuanceCosts(l.projectId);
   AppState.save();closeModal('genericModal');renderDetailAllocation();
   showToast('Log entry updated','success');
+}
+
+// ── Searchable allocation picker (Edit Log Entry) ──────────
+// Filters window._elAllocItems (built in editUsageLog) by id / resource / role
+// so a long allocation list is typed, not scrolled. The chosen id is stored in
+// the hidden #elAllocId that _saveEditUsageLog reads.
+function _elAllocFilter(q){
+  const box=document.getElementById('elAllocResults');if(!box)return;
+  const items=window._elAllocItems||[];
+  const s=String(q||'').trim().toLowerCase();
+  const matches=(s?items.filter(it=>it.label.toLowerCase().includes(s)):items).slice(0,50);
+  window._elAllocMatches=matches;window._elAllocActive=-1;
+  const esc=x=>String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  if(!matches.length){box.innerHTML='<div style="padding:8px 10px;font-size:11px;color:var(--text-muted)">No matching allocation</div>';box.style.display='block';return;}
+  box.innerHTML=matches.map((it,i)=>`<div class="elAllocRow" data-i="${i}" onmousedown="event.preventDefault();_elAllocPick('${esc(it.id)}','${esc(it.label)}')" style="padding:7px 10px;font-size:11px;cursor:pointer;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.label)}</div>`).join('');
+  box.style.display='block';
+}
+function _elAllocPick(id,label){
+  const h=document.getElementById('elAllocId');if(h)h.value=id;
+  const s=document.getElementById('elAllocSearch');if(s)s.value=label;
+  const box=document.getElementById('elAllocResults');if(box)box.style.display='none';
+}
+function _elAllocKey(e){
+  const box=document.getElementById('elAllocResults');if(!box||box.style.display==='none')return;
+  const matches=window._elAllocMatches||[];
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();
+    let a=(window._elAllocActive==null?-1:window._elAllocActive);
+    a=e.key==='ArrowDown'?Math.min(matches.length-1,a+1):Math.max(0,a-1);
+    window._elAllocActive=a;
+    [...box.querySelectorAll('.elAllocRow')].forEach((r,i)=>r.style.background=i===a?'var(--bg-hover)':'');
+    const act=box.querySelector('.elAllocRow[data-i="'+a+'"]');if(act)act.scrollIntoView({block:'nearest'});
+  }else if(e.key==='Enter'){
+    const a=(window._elAllocActive==null?-1:window._elAllocActive);
+    if(a>=0&&matches[a]){e.preventDefault();_elAllocPick(matches[a].id,matches[a].label);}
+  }else if(e.key==='Escape'){
+    box.style.display='none';
+  }
 }
 
 // ── RESOURCE ALLOCATION EXCEL EXPORT ──────────────────────
