@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.53';
-const APP_BUILD='20261017g';
+const APP_VERSION='2.14.54';
+const APP_BUILD='20261017h';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Task import now reads Actual Start / Actual Finish and % Complete from your Excel/CSV (MS Project "NA" = blank; fractions like 0.81 become 81%), and sets each task\'s status from its progress (0 = To-do, 1-99 = In-progress, 100 = Done). A "Finish" column is now recognised as the end date too. Also this week: Allocation Register usage filter, kept scroll position on log edits, and searchable allocation pickers.';
+const APP_RELEASE_NOTE='Task Management list view: admins can now tick multiple tasks and "Delete selected" in one go (moves them to Trash, restorable for 30 days). Also recently: task import reads Actual Start/Finish + % Complete and sets status from progress; an Allocation Register usage filter; kept scroll position on log edits; and searchable "Link to Allocation" pickers.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.54',date:'2026-10-17',type:'feat',notes:[
+    'Task Management (list view): admins can now delete several tasks at once. Tick the checkboxes in the new left column (or the header "select all"), then click "Delete selected (N)". Like single delete, it moves the tasks to Trash (restorable for 30 days). Non-admins still use the deletion-request flow.',
+  ]},
   {version:'2.14.53',date:'2026-10-17',type:'feat',notes:[
     'Task import (Project Details & Task Management): the Excel/CSV importer now reads Actual Start and Actual Finish columns into each task (MS Project "NA" is treated as blank), so a Plan-vs-Actual export carries its real dates in.',
     'Import now also reads % Complete into task Progress — accepting MS Project fractions (0.81 → 81%, 1 → 100%) as well as plain percentages — and sets each task\'s Status from that progress (0 = To-do, 1-99 = In-progress, 100 = Done). Explicit Blocked / On-hold statuses are kept.',
@@ -17897,9 +17900,11 @@ function renderTaskTable(){
 const __ttContainer=$('#taskViewContent');
 if(!__ttContainer)return; // not on tasks page
 const tasks=getFilteredTasks();
-$('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><table>
-<thead><tr><th>WBS</th><th>Task</th><th>Project</th><th>Assignee</th><th>End</th><th>Dur (d)</th><th>Progress</th><th>Status</th><th>Priority</th><th></th></tr></thead>
+const adm=typeof isAdminUser==='function'&&isAdminUser();
+$('#taskViewContent').innerHTML=`<div class="card">${adm?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap"><button id="taskBulkDelBtn" class="btn btn-danger btn-sm" disabled style="opacity:.5" onclick="_taskBulkDelete()"><i class="fas fa-trash"></i> Delete selected</button><span style="font-size:10px;color:var(--text-muted)">Tick rows, then Delete selected (admin only · moves to Trash)</span></div>`:''}<div class="table-wrap"><table>
+<thead><tr>${adm?`<th style="width:28px;text-align:center"><input type="checkbox" id="taskSelAll" title="Select all on this page" onchange="document.querySelectorAll('.tdel-chk').forEach(c=>c.checked=this.checked);_taskDelCount()"></th>`:''}<th>WBS</th><th>Task</th><th>Project</th><th>Assignee</th><th>End</th><th>Dur (d)</th><th>Progress</th><th>Status</th><th>Priority</th><th></th></tr></thead>
 <tbody>${_pgSlice("tasks",_orderTasksHier(tasks)).map(({t,depth})=>{const isSum=_taskHasChildren(t.id,tasks);return`<tr>
+${adm?`<td style="text-align:center"><input type="checkbox" class="tdel-chk" data-id="${t.id}" onchange="_taskDelCount()"></td>`:''}
 <td style="font-size:10px;font-family:var(--font-mono)">${t.wbs||t.id}</td>
 <td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${esc(t.name)}</div><div style="font-size:10px;color:var(--text-secondary);padding-left:${depth*18}px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${esc(t.dept||'')}${_shiftBadge(t)}</div></td>
 <td><span class="badge badge-blue">${t.projectId}</span></td>
@@ -17912,6 +17917,34 @@ $('#taskViewContent').innerHTML=`<div class="card"><div class="table-wrap"><tabl
 <button class="btn btn-secondary btn-sm btn-icon" onclick="showTaskForm('${t.id}')"><i class="fas fa-edit"></i></button>
 <button class="btn btn-danger btn-sm btn-icon" onclick="deleteTask('${t.id}')"><i class="fas fa-trash"></i></button>
 </div></td></tr>`;}).join('')}</tbody></table>${_pgNav("tasks",tasks,typeof renderTaskView==="function"?renderTaskView:null)}</div></div>`;}
+
+// Admin bulk-delete for the Task table. Mirrors requestOrDelete's admin path
+// (soft-delete to Trash), just over many tasks with one confirm.
+function _taskDelCount(){
+  const n=document.querySelectorAll('.tdel-chk:checked').length;
+  const btn=document.getElementById('taskBulkDelBtn');
+  if(btn){btn.disabled=!n;btn.style.opacity=n?'1':'.5';btn.innerHTML='<i class="fas fa-trash"></i> Delete selected'+(n?' ('+n+')':'');}
+  const sa=document.getElementById('taskSelAll');
+  if(sa){const all=document.querySelectorAll('.tdel-chk').length;sa.checked=n>0&&n===all;sa.indeterminate=n>0&&n<all;}
+}
+function _taskBulkDelete(){
+  if(!(typeof isAdminUser==='function'&&isAdminUser())){showToast('Only admins can delete tasks','error');return;}
+  const ids=[...document.querySelectorAll('.tdel-chk:checked')].map(c=>c.getAttribute('data-id'));
+  if(!ids.length){showToast('No tasks selected','info');return;}
+  const days=(typeof SOFT_DELETE_RETENTION_DAYS!=='undefined')?SOFT_DELETE_RETENTION_DAYS:30;
+  if(!confirm('Delete '+ids.length+' task'+(ids.length>1?'s':'')+'?\n\nThey will be moved to Trash and can be restored within '+days+' days.'))return;
+  let n=0;const pids=new Set();
+  ids.forEach(id=>{
+    const t=(AppState.data.tasks||[]).find(x=>x.id===id);
+    if(typeof softDelete==='function'&&softDelete('tasks',id)){n++;if(t&&t.projectId)pids.add(t.projectId);}
+  });
+  if(!n){showToast('Nothing deleted','error');return;}
+  AppState.save();
+  if(typeof auditLog==='function')auditLog('delete','Admin bulk soft-deleted '+n+' task'+(n>1?'s':''),{ids:ids});
+  pids.forEach(pid=>{if(typeof _applySummaryRollups==='function')_applySummaryRollups(pid);if(typeof _recalcProjectProgress==='function')_recalcProjectProgress(pid);});
+  renderTaskView();
+  showToast(n+' task'+(n>1?'s':'')+' moved to Trash','warning');
+}
 
 let _tEditingId=null; // tracks which task is open in the form
 
