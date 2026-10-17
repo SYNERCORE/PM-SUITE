@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.52';
-const APP_BUILD='20261017f';
+const APP_VERSION='2.14.53';
+const APP_BUILD='20261017g';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Allocation Register: new usage filter — show only Unused, Partially used, Fully consumed, or Over-used allocations (each with a live count), combinable with the category filter and search. Also this week: the view keeps your scroll position when saving a log edit, searchable "Link to Allocation" boxes, and an editable Category dropdown in the register.';
+const APP_RELEASE_NOTE='Task import now reads Actual Start / Actual Finish and % Complete from your Excel/CSV (MS Project "NA" = blank; fractions like 0.81 become 81%), and sets each task\'s status from its progress (0 = To-do, 1-99 = In-progress, 100 = Done). A "Finish" column is now recognised as the end date too. Also this week: Allocation Register usage filter, kept scroll position on log edits, and searchable allocation pickers.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.53',date:'2026-10-17',type:'feat',notes:[
+    'Task import (Project Details & Task Management): the Excel/CSV importer now reads Actual Start and Actual Finish columns into each task (MS Project "NA" is treated as blank), so a Plan-vs-Actual export carries its real dates in.',
+    'Import now also reads % Complete into task Progress — accepting MS Project fractions (0.81 → 81%, 1 → 100%) as well as plain percentages — and sets each task\'s Status from that progress (0 = To-do, 1-99 = In-progress, 100 = Done). Explicit Blocked / On-hold statuses are kept.',
+    'The template path also now recognises a "Finish" column as the end date (previously only Start imported from MS Project-style exports). Import preview shows Act. Start / Act. Finish / Progress columns.',
+  ]},
   {version:'2.14.52',date:'2026-10-17',type:'feat',notes:[
     'Allocation Register: added a usage filter next to the category filter. Filter by Unused (nothing issued yet), Partially used (some left), Fully consumed (issued exactly the allocated qty), or Over-used (issued more than allocated). Each option shows a live count, and it combines with the category filter and search.',
   ]},
