@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.49';
-const APP_BUILD='20261017c';
+const APP_VERSION='2.14.50';
+const APP_BUILD='20261017d';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Transaction Log → Edit Log Entry: the "Linked Allocation" field is now a search box — type part of an allocation ID, resource name or role to filter instantly instead of scrolling the whole register (arrow keys + Enter to pick, ✕ to unlink). Builds on the editable Category dropdown in the Allocation Register and the re-link picker added this week.';
+const APP_RELEASE_NOTE='Both the Log Issue / Usage dialog and the Edit Log Entry dialog now use a searchable "Link to Allocation" box — type part of an allocation ID, resource name or role to filter instantly instead of scrolling the whole register (arrow keys + Enter to pick, ✕ to unlink). Picking still prefills the unit/cost and shows the allocation balance. Builds on the editable Category dropdown added to the Allocation Register this week.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.50',date:'2026-10-17',type:'feat',notes:[
+    'Log Issue / Usage dialog: each line\'s "Link to Allocation" field is now the same search box as the Edit Log Entry dialog — type part of an allocation ID, resource name or role to filter instead of scrolling the dropdown (arrow keys + Enter to pick, ✕ to unlink). Picking still prefills the unit/cost and shows the allocation balance exactly as before.',
+  ]},
   {version:'2.14.49',date:'2026-10-17',type:'feat',notes:[
     'Transaction Log → Edit Log Entry: the "Linked Allocation" field is now a search box instead of a long dropdown. Type any part of an allocation ID, resource name or role to filter the list — no more scrolling a 60+ line register. Arrow keys + Enter select; the ✕ button unlinks.',
   ]},

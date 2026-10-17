@@ -2950,10 +2950,13 @@ function _ulLineHtml(line,i){
     </div>
     <div class="form-group">
       <label class="form-label">Link to Allocation</label>
-      <select class="form-select" id="ulAL_${i}" onchange="_ulPrefill(${i},this.value)">
-        <option value="">— Optional —</option>
-        ${allocs.map(a=>`<option value="${a.id}" ${a.id===line.allocId?'selected':''}>${a.id} · ${a.resourceName} [${a.unit}]</option>`).join('')}
-      </select>
+      ${(()=>{const cur=line.allocId?allocs.find(x=>x.id===line.allocId):null;const curLabel=cur?(cur.id+' · '+(cur.resourceName||'')+(cur.role?' ('+cur.role+')':'')):'';return`<div style="position:relative">
+        <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:11px;pointer-events:none"></i>
+        <input class="form-input" id="ulALS_${i}" placeholder="Optional — search ID, resource or role..." value="${String(curLabel).replace(/"/g,'&quot;')}" autocomplete="off" style="padding-left:30px;padding-right:26px"
+          onfocus="this.select();_ulAllocFilter(${i},this.value)" oninput="_ulAllocFilter(${i},this.value)" onkeydown="_ulAllocKey(${i},event)" onblur="setTimeout(()=>{const b=document.getElementById('ulALR_${i}');if(b)b.style.display='none';},150)">
+        <button type="button" title="Clear link" onclick="_ulAllocPick(${i},'','')" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:12px;padding:2px 5px">✕</button>
+        <div id="ulALR_${i}" style="display:none;position:absolute;z-index:300;width:100%;margin-top:2px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;max-height:180px;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,.4)"></div>
+      </div>`;})()}
     </div>
     <div class="form-group">
       <label class="form-label">Quantity *</label>
@@ -3057,6 +3060,49 @@ function _ulCatChange(i,val){
 }
 
 function _ulLV(i,field,val){window._ulLines[i][field]=val;}
+
+// Searchable "Link to Allocation" picker for each usage-log line. Filters the
+// project's allocations by id / resource / role so a long register is typed, not
+// scrolled. Picking calls _ulPrefill (unchanged) so cost/unit prefill + balance
+// readout still fire; clearing passes an empty id.
+function _ulAllocList(){
+  const pid=window._ulPid;
+  return (AppState.data.resourceAllocations||[]).filter(a=>a&&!a._deleted&&a.projectId===pid)
+    .map(a=>({id:a.id,label:a.id+' · '+(a.resourceName||'')+(a.role?' ('+a.role+')':'')}));
+}
+function _ulAllocFilter(i,q){
+  const box=document.getElementById('ulALR_'+i);if(!box)return;
+  const s=String(q||'').trim().toLowerCase();
+  const items=_ulAllocList();
+  const matches=(s?items.filter(it=>it.label.toLowerCase().includes(s)):items).slice(0,50);
+  (window._ulAllocMatches=window._ulAllocMatches||{})[i]=matches;
+  (window._ulAllocActive=window._ulAllocActive||{})[i]=-1;
+  const e=x=>String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  if(!matches.length){box.innerHTML='<div style="padding:8px 10px;font-size:11px;color:var(--text-muted)">No matching allocation</div>';box.style.display='block';return;}
+  box.innerHTML=matches.map((it,n)=>`<div class="ulAllocRow" data-i="${n}" onmousedown="event.preventDefault();_ulAllocPick(${i},'${e(it.id)}','${e(it.label)}')" style="padding:7px 10px;font-size:11px;cursor:pointer;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e(it.label)}</div>`).join('');
+  box.style.display='block';
+}
+function _ulAllocPick(i,id,label){
+  const box=document.getElementById('ulALR_'+i);if(box)box.style.display='none';
+  const s=document.getElementById('ulALS_'+i);if(s)s.value=label;
+  _ulPrefill(i,id);
+}
+function _ulAllocKey(i,e){
+  const box=document.getElementById('ulALR_'+i);if(!box||box.style.display==='none')return;
+  const matches=(window._ulAllocMatches||{})[i]||[];
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();
+    const act=(window._ulAllocActive=window._ulAllocActive||{});
+    let a=act[i]==null?-1:act[i];
+    a=e.key==='ArrowDown'?Math.min(matches.length-1,a+1):Math.max(0,a-1);
+    act[i]=a;
+    [...box.querySelectorAll('.ulAllocRow')].forEach((r,n)=>r.style.background=n===a?'var(--bg-hover)':'');
+    const el=box.querySelector('.ulAllocRow[data-i="'+a+'"]');if(el)el.scrollIntoView({block:'nearest'});
+  }else if(e.key==='Enter'){
+    const a=(window._ulAllocActive||{})[i];
+    if(a>=0&&matches[a]){e.preventDefault();_ulAllocPick(i,matches[a].id,matches[a].label);}
+  }else if(e.key==='Escape'){box.style.display='none';}
+}
 
 function _ulPrefill(i,allocId){
   window._ulLines[i].allocId=allocId;
