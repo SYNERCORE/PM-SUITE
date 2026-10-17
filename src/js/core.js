@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.51';
-const APP_BUILD='20261017e';
+const APP_VERSION='2.14.52';
+const APP_BUILD='20261017f';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Allocation / Transaction Log: saving a log edit (or an Issue/Return, category change, or delete) no longer jumps the page back to the top — your scroll position is kept, so you can edit several entries in a row. Also this week: a searchable "Link to Allocation" box in both the Log Issue/Usage and Edit Log Entry dialogs, and an editable Category dropdown in the Allocation Register.';
+const APP_RELEASE_NOTE='Allocation Register: new usage filter — show only Unused, Partially used, Fully consumed, or Over-used allocations (each with a live count), combinable with the category filter and search. Also this week: the view keeps your scroll position when saving a log edit, searchable "Link to Allocation" boxes, and an editable Category dropdown in the register.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.52',date:'2026-10-17',type:'feat',notes:[
+    'Allocation Register: added a usage filter next to the category filter. Filter by Unused (nothing issued yet), Partially used (some left), Fully consumed (issued exactly the allocated qty), or Over-used (issued more than allocated). Each option shows a live count, and it combines with the category filter and search.',
+  ]},
   {version:'2.14.51',date:'2026-10-17',type:'fix',notes:[
     'Allocation / Transaction Log: saving a log edit (or an Issue/Return, a category change, or a delete) no longer bounces the page back to the top. The view now keeps your scroll position when it re-renders, so you can edit several entries in a row without scrolling back down each time.',
   ]},

@@ -2318,7 +2318,26 @@ function getAllocCat(a){
   return _autoAllocCat(a);
 }
 
-let _aSearch='',_aLogSearch='',_aCatFilter='all';
+let _aSearch='',_aLogSearch='',_aCatFilter='all',_aUsageFilter='all';
+
+// Classify an allocation by how much of it has been consumed (net issued vs
+// allocated), powering the usage filter: unused (nothing out), partial (some
+// left), consumed (exactly used up), over (issued more than allocated).
+const ALLOC_USAGE=[
+  {id:'all',     label:'All usage'},
+  {id:'unused',  label:'Unused'},
+  {id:'partial', label:'Partially used'},
+  {id:'consumed',label:'Fully consumed'},
+  {id:'over',    label:'Over-used'},
+];
+function _allocUsageStatus(a,u){
+  const q=parseFloat(a&&a.allocatedQty)||0;
+  const net=(((u&&u.issued)||0)-((u&&u.returned)||0));
+  if(net>q+1e-9)return 'over';
+  if(q>0&&Math.abs(net-q)<1e-9)return 'consumed';
+  if(net<=1e-9)return 'unused';
+  return 'partial';
+}
 
 
 // ── Clean ghost-project allocations ──────────────────────────────────────
@@ -2369,6 +2388,8 @@ function renderDetailAllocation(){
 
   const catCounts={};
   allocs.forEach(a=>{const c=getAllocCat(a);catCounts[c.id]=(catCounts[c.id]||0)+1;});
+  const usageCounts={};
+  allocs.forEach(a=>{const s=_allocUsageStatus(a,usageMap[a.id]);usageCounts[s]=(usageCounts[s]||0)+1;});
 
   $('#detailTabContent').innerHTML=`
   <div class="grid grid-4" style="margin-bottom:14px">
@@ -2399,7 +2420,10 @@ function renderDetailAllocation(){
         <option value="all">All Categories</option>
         ${ALLOC_CATS.filter(c=>catCounts[c.id]>0).map(c=>`<option value="${c.id}"${_aCatFilter===c.id?' selected':''}>${c.label} (${catCounts[c.id]})</option>`).join('')}
       </select>
-      <button class="btn btn-secondary btn-sm" onclick="_aSearch='';_aCatFilter='all';document.getElementById('allocSrch').value='';document.getElementById('allocCatSel').value='all';renderAllocBody('${pid}')" title="Clear"><i class="fas fa-times"></i></button>
+      <select id="allocUsageSel" class="form-select" style="height:32px;font-size:12px;min-width:150px" title="Filter by how much of each allocation has been consumed" onchange="_aUsageFilter=this.value;renderAllocBody('${pid}')">
+        ${ALLOC_USAGE.map(u=>`<option value="${u.id}"${_aUsageFilter===u.id?' selected':''}>${u.label}${u.id!=='all'?` (${usageCounts[u.id]||0})`:''}</option>`).join('')}
+      </select>
+      <button class="btn btn-secondary btn-sm" onclick="_aSearch='';_aCatFilter='all';_aUsageFilter='all';document.getElementById('allocSrch').value='';document.getElementById('allocCatSel').value='all';document.getElementById('allocUsageSel').value='all';renderAllocBody('${pid}')" title="Clear"><i class="fas fa-times"></i></button>
     </div>
     <div style="overflow:auto;max-height:418px;border:1px solid var(--border);border-radius:6px">
       <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:900px">
@@ -2531,9 +2555,11 @@ function renderAllocBody(pid){
   const sym=window._adSym||'₱';
   const srch=(_aSearch||'').toLowerCase();
   const cf=_aCatFilter||'all';
+  const uf=_aUsageFilter||'all';
 
   const filtered=allocs.filter(a=>{
     if(cf!=='all'&&getAllocCat(a).id!==cf)return false;
+    if(uf!=='all'&&_allocUsageStatus(a,umap[a.id])!==uf)return false;
     if(srch){const h=(a.resourceName+' '+a.resourceType+' '+(a.role||'')+' '+a.id).toLowerCase();if(!h.includes(srch))return false;}
     return true;
   });
