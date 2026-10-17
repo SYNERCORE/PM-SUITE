@@ -1492,6 +1492,7 @@ function renderDetailTasks(){
   const done=tasks.filter(t=>t.status==='done').length;
   const inp=tasks.filter(t=>t.status==='inprogress').length;
   const todo=tasks.filter(t=>t.status==='todo').length;
+  const adm=typeof isAdminUser==='function'&&isAdminUser();
   $('#detailTabContent').innerHTML=`
   <div class="grid grid-4" style="margin-bottom:14px">
     ${sc('fas fa-tasks','Total Tasks',tasks.length,'This project','#388bfd','rgba(56,139,253,.15)')}
@@ -1505,6 +1506,7 @@ function renderDetailTasks(){
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-secondary btn-sm" onclick="detailTasksCollapseAll()" title="Collapse all parent tasks"><i class="fas fa-compress-alt"></i> Collapse All</button>
         <button class="btn btn-secondary btn-sm" onclick="detailTasksExpandAll()" title="Expand all parent tasks"><i class="fas fa-expand-alt"></i> Expand All</button>
+        ${adm?`<button id="detailTaskBulkDelBtn" class="btn btn-danger btn-sm" disabled style="opacity:.5" onclick="_detailTaskBulkDelete()" title="Delete the ticked tasks (admin · moves to Trash)"><i class="fas fa-trash"></i> Delete selected</button>`:''}
         <button class="btn btn-secondary btn-sm" onclick="exportTasksExcel('${detailProjectId}')" title="Export tasks to CSV (opens in Excel)"><i class="fas fa-file-export"></i> Export</button>
         <button class="btn btn-secondary btn-sm" onclick="taskProjectFilter='${detailProjectId}';showTaskImport()" title="Import tasks from CSV / Excel"><i class="fas fa-file-import"></i> Import CSV</button>
         <button class="btn btn-secondary btn-sm" onclick="showImportFromProject('${detailProjectId}')"><i class="fas fa-copy"></i> Import from Project</button>
@@ -1512,14 +1514,15 @@ function renderDetailTasks(){
       </div>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>WBS</th><th>Task Name</th><th>Assignee</th><th>Dept</th><th>Start</th><th>End</th><th>Dur (d)</th><th>Planned Hrs</th><th>Actual Hrs</th><th>Progress</th><th>Status</th><th>Priority</th><th>Milestone</th><th></th></tr></thead>
+      <thead><tr>${adm?`<th style="width:28px;text-align:center"><input type="checkbox" id="detailTaskSelAll" title="Select all visible" onchange="document.querySelectorAll('.ddel-chk').forEach(c=>{if(c.closest('tr')&&c.closest('tr').style.display!=='none')c.checked=this.checked;});_detailTaskDelCount()"></th>`:''}<th>WBS</th><th>Task Name</th><th>Assignee</th><th>Dept</th><th>Start</th><th>End</th><th>Dur (d)</th><th>Planned Hrs</th><th>Actual Hrs</th><th>Progress</th><th>Status</th><th>Priority</th><th>Milestone</th><th></th></tr></thead>
       <tbody id="detailTaskBody">${renderDetailTaskRows(tasks)}</tbody>
     </table></div>
   </div>`;
 }
 
 function renderDetailTaskRows(tasks){
-  if(!tasks.length)return`<tr><td colspan="14"><div class="empty-state"><i class="fas fa-tasks"></i><p>No tasks yet. Click "Add Task" to create one.</p></div></td></tr>`;
+  const adm=typeof isAdminUser==='function'&&isAdminUser();
+  if(!tasks.length)return`<tr><td colspan="${adm?15:14}"><div class="empty-state"><i class="fas fa-tasks"></i><p>No tasks yet. Click "Add Task" to create one.</p></div></td></tr>`;
   const ordered=typeof _orderTasksHier==='function'?_orderTasksHier(tasks):tasks.map(t=>({t,depth:0}));
   // Collapsed parents (per session, keyed by task id). A row is hidden when any
   // of its ancestors is collapsed; the ancestor's own chevron stays visible so
@@ -1535,6 +1538,7 @@ function renderDetailTaskRows(tasks){
       ?`<i class="fas fa-chevron-${collapsed?'right':'down'}" style="font-size:8px;color:var(--text-muted);margin-right:6px;cursor:pointer;width:9px" title="${collapsed?'Expand':'Collapse'}" onclick="event.stopPropagation();toggleDetailTask('${t.id}')"></i>`
       :'';
     return`<tr data-tid="${t.id}"${hidden?' style="display:none"':''}>
+    ${adm?`<td style="text-align:center"><input type="checkbox" class="ddel-chk" data-id="${t.id}" onchange="_detailTaskDelCount()"></td>`:''}
     <td style="font-size:10px;font-family:var(--font-mono);color:var(--text-muted)">${t.wbs||t.id}</td>
     <td><div style="font-weight:${isSum?'700':'500'};font-size:12px;padding-left:${depth*18}px">${chevron}${isSum?'<i class="fas fa-folder-open" style="font-size:9px;color:var(--accent-cyan);margin-right:5px"></i>':depth>0?'<i class="fas fa-level-up-alt fa-rotate-90" style="font-size:8px;color:var(--text-muted);margin-right:5px"></i>':''}${esc(t.name)}</div></td>
     <td><div style="display:flex;align-items:center;gap:5px">${avatarH(t.assignee,22)}<span style="font-size:11px">${t.assignee}</span></div></td>
@@ -1561,6 +1565,7 @@ function _rerenderDetailTaskBody(){
   if(!body)return;
   const tasks=(AppState.data.tasks||[]).filter(t=>t.projectId===detailProjectId&&!t._deleted);
   body.innerHTML=renderDetailTaskRows(tasks);
+  if(typeof _detailTaskDelCount==='function')_detailTaskDelCount();
 }
 function toggleDetailTask(id){
   const s=window._detailTaskCollapsed||(window._detailTaskCollapsed=new Set());
@@ -1581,6 +1586,32 @@ function detailTasksCollapseAll(){
 
 function deleteDetailTask(id){
   requestOrDelete('tasks', id);
+}
+
+// Admin bulk-delete for the project-detail Task List (mirrors the Task page).
+// Soft-deletes each ticked task to Trash, then re-rolls project progress.
+function _detailTaskDelCount(){
+  const n=document.querySelectorAll('.ddel-chk:checked').length;
+  const btn=document.getElementById('detailTaskBulkDelBtn');
+  if(btn){btn.disabled=!n;btn.style.opacity=n?'1':'.5';btn.innerHTML='<i class="fas fa-trash"></i> Delete selected'+(n?' ('+n+')':'');}
+  const sa=document.getElementById('detailTaskSelAll');
+  if(sa){const vis=[...document.querySelectorAll('.ddel-chk')].filter(c=>c.closest('tr')&&c.closest('tr').style.display!=='none');const cn=vis.filter(c=>c.checked).length;sa.checked=cn>0&&cn===vis.length;sa.indeterminate=cn>0&&cn<vis.length;}
+}
+function _detailTaskBulkDelete(){
+  if(!(typeof isAdminUser==='function'&&isAdminUser())){showToast('Only admins can delete tasks','error');return;}
+  const ids=[...document.querySelectorAll('.ddel-chk:checked')].map(c=>c.getAttribute('data-id'));
+  if(!ids.length){showToast('No tasks selected','info');return;}
+  const days=(typeof SOFT_DELETE_RETENTION_DAYS!=='undefined')?SOFT_DELETE_RETENTION_DAYS:30;
+  if(!confirm('Delete '+ids.length+' task'+(ids.length>1?'s':'')+'?\n\nThey will be moved to Trash and can be restored within '+days+' days.'))return;
+  let n=0;
+  ids.forEach(id=>{ if(typeof softDelete==='function'&&softDelete('tasks',id))n++; });
+  if(!n){showToast('Nothing deleted','error');return;}
+  if(typeof _applySummaryRollups==='function')_applySummaryRollups(detailProjectId);
+  if(typeof _recalcProjectProgress==='function')_recalcProjectProgress(detailProjectId);
+  AppState.save();
+  if(typeof auditLog==='function')auditLog('delete','Admin bulk soft-deleted '+n+' task'+(n>1?'s':'')+' (project '+detailProjectId+')',{ids:ids});
+  renderDetailTasks();
+  showToast(n+' task'+(n>1?'s':'')+' moved to Trash','warning');
 }
 
 

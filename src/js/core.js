@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.54';
-const APP_BUILD='20261017h';
+const APP_VERSION='2.14.55';
+const APP_BUILD='20261017i';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Task Management list view: admins can now tick multiple tasks and "Delete selected" in one go (moves them to Trash, restorable for 30 days). Also recently: task import reads Actual Start/Finish + % Complete and sets status from progress; an Allocation Register usage filter; kept scroll position on log edits; and searchable "Link to Allocation" pickers.';
+const APP_RELEASE_NOTE='Admin bulk-delete for tasks is now in BOTH the Task Management list and each Project Details → Task List: tick multiple tasks and "Delete selected" to move them to Trash (restorable 30 days); select-all skips rows hidden under a collapsed parent. Also recently: task import reads Actual Start/Finish + % Complete and sets status from progress, plus an Allocation Register usage filter and searchable allocation pickers.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.55',date:'2026-10-17',type:'feat',notes:[
+    'Project Details → Task List: admin bulk-delete added here too. Tick the checkboxes (or the header "select all"), then "Delete selected (N)" moves them to Trash (restorable 30 days). Select-all only picks visible rows, so tasks hidden under a collapsed parent are never deleted unseen.',
+  ]},
   {version:'2.14.54',date:'2026-10-17',type:'feat',notes:[
     'Task Management (list view): admins can now delete several tasks at once. Tick the checkboxes in the new left column (or the header "select all"), then click "Delete selected (N)". Like single delete, it moves the tasks to Trash (restorable for 30 days). Non-admins still use the deletion-request flow.',
   ]},
