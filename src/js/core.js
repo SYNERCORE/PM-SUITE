@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.47';
-const APP_BUILD='20261017a';
+const APP_VERSION='2.14.48';
+const APP_BUILD='20261017b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -20,6 +20,9 @@ const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.48',date:'2026-10-17',type:'fix',notes:[
+    'Allocation Register: fixed the new Category dropdown whose text was vertically clipped (half-height). It inherited the form control\'s large vertical padding against a short fixed height; the category select now uses its own padding/line-height so the label is fully visible.',
+  ]},
   {version:'2.14.47',date:'2026-10-17',type:'feat',notes:[
     'Resource Allocation Register: the Category column is now an editable dropdown. Pick any category to override the auto-detected one and the line immediately moves to that group; choosing the category auto-detection would pick anyway clears the override so the row stays dynamic.',
     'Transaction Log → Edit Log Entry: added a "Linked Allocation" picker. Re-point a transaction to the right allocation register line and its quantity and cost move to that line\'s Net Used / Remaining / Actual (both the old and new line are recalculated). "None (unlinked)" is also available.',
