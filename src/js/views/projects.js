@@ -501,6 +501,27 @@ ${(AppState.data.businessUnits||[]).map(bu=>`<option value="${bu.id}" ${p?.busin
 <button class="btn btn-primary" onclick="saveProject('${id||''}')"><i class="fas fa-save"></i> ${id?'Update':'Create'}</button>
 </div>`; openModal('projectModal');}
 
+// Create the WBS "0" project-summary root task for a project, unless one already
+// exists. Mirrors the MS Project convention where WBS 0 is the whole job and the
+// ancestor of every phase; the import's WBS→parent pass hangs WBS 1,2,3… under it
+// and _applySummaryRollups keeps its progress as the duration-weighted project total.
+function _seedProjectRootTask(pr){
+  try{
+    if(!pr||!pr.id)return;
+    if(!AppState.data.tasks)AppState.data.tasks=[];
+    const dup=(AppState.data.tasks||[]).some(t=>t&&t.projectId===pr.id&&String(t.wbs||'').trim()==='0'&&!t._deleted);
+    if(dup)return;
+    AppState.data.tasks.push({
+      id:'TSK-'+(Date.now()%100000).toString().padStart(5,'0')+'-'+Math.random().toString(36).slice(2,5),
+      projectId:pr.id,wbs:'0',name:pr.name||pr.id,parentId:'',
+      assignee:'',dept:'',startDate:pr.startDate||'',endDate:pr.endDate||'',
+      actualStart:'',actualEnd:'',plannedHrs:0,actualHrs:0,
+      status:'todo',priority:'normal',progress:0,milestone:false,
+      predecessors:'',durationHrs:0
+    });
+  }catch(e){}
+}
+
 async function saveProject(id){
 const newId=$('#pId').value.trim();
 // Capture duration for storage (computed from start/end if needed)
@@ -554,6 +575,11 @@ if(id){
   // Check uniqueness
   if((AppState.data.projects||[]).some(p=>p.id===pr.id)){showToast('Project ID '+pr.id+' already exists','error');return;}
   AppState.data.projects.push(pr);
+  // Seed the WBS 0 root — the project-summary task that owns every future task.
+  // It becomes the ancestor of all tasks (manual or imported) and its progress
+  // rolls up duration-weighted from them. An MS Project import that carries its own
+  // WBS 0 matches this by WBS and updates it in place, so there's never a duplicate.
+  _seedProjectRootTask(pr);
 }
 AppState.save();closeModal('projectModal');
 if(id){_clearSnapshot('project_'+id);if(typeof unmarkRecordEditing==='function')unmarkRecordEditing('projects',id);}

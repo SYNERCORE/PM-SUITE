@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.57';
-const APP_BUILD='20261017k';
+const APP_VERSION='2.14.58';
+const APP_BUILD='20261017l';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Task import: a WBS "0" row (the MS Project project-summary line) is now treated as the single root that every top-level phase (WBS 1, 2, 3…) hangs under, so the whole outline imports as one tree. Its progress — and the project\'s overall % — is the duration-weighted roll-up of all tasks beneath it, instead of WBS 0 sitting beside the phases and skewing the numbers. Builds on v2.14.56 (clean WBS codes + MS Project task-number predecessors).';
+const APP_RELEASE_NOTE='Every new project now starts with a WBS "0" summary task named after the project — the root that owns all its tasks. Progress rolls up into it, so WBS 0 always shows the whole-project %. An MS Project import that brings its own WBS 0 updates this one instead of adding a duplicate. (Builds on v2.14.56–57: clean WBS codes, MS Project task-number predecessors, and WBS 0 as the weighted project root.)';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.58',date:'2026-10-17',type:'feat',notes:[
+    'New projects now get an initial WBS "0" root task automatically, named after the project. It is the project-summary line that owns every task you add afterwards, so the outline always has a single top-level ancestor and its progress is the whole-project roll-up. Applies when a project (or prospect) is created; existing projects are unaffected.',
+    'If you later import an MS Project file that carries its own WBS 0, the importer matches it to this seeded root (by WBS) and updates it in place — no duplicate summary row. Deleting the seeded WBS 0 and re-saving would re-create it.',
+  ]},
   {version:'2.14.57',date:'2026-10-17',type:'fix',notes:[
     'Task import: when the file has a WBS "0" row (the MS Project project-summary line, e.g. the overall job), it is now made the single root parent of every top-level phase (WBS 1, 2, 3…), so the whole project imports as one outline tree with WBS 0 as the ancestor of all tasks. Previously WBS 0 came in as just another top-level item sitting beside the phases.',
     'Because WBS 0 now has children, its progress (and the project\'s overall %) is the duration-weighted roll-up of every task beneath it — the whole-project progress — rather than whatever single % Complete value was on that summary row. The roll-up now also runs on every import (not only when predecessors were linked), so summary rows and the project percentage are correct straight after importing.',
