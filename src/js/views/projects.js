@@ -2513,6 +2513,17 @@ function renderDetailAllocation(){
   renderLogBody();
 }
 
+// Re-render the allocation/transaction view without losing the user's place.
+// Saving a log edit replaces #detailTabContent (and closeModal returns focus to
+// the now-destroyed Edit button), which bounced the page to the top mid-edit.
+// Capture scroll BEFORE closing/rendering, then restore after layout settles.
+function _allocRerender(closeId){
+  const sy=window.scrollY||window.pageYOffset||0;
+  if(closeId)closeModal(closeId);
+  renderDetailAllocation();
+  requestAnimationFrame(()=>window.scrollTo(0,sy));
+}
+
 function renderAllocBody(pid){
   pid=pid||window._adPid||detailProjectId;
   const allocs=window._adAllocs||(AppState.data.resourceAllocations||[]).filter(a=>a.projectId===pid);
@@ -2679,7 +2690,7 @@ function updateAllocCat(id,catId){
   const auto=_autoAllocCat(a);
   if(catId===auto.id){delete a.categoryOverride;}else{a.categoryOverride=catId;}
   AppState.save();
-  renderDetailAllocation();
+  _allocRerender();
   const lbl=(ALLOC_CATS.find(c=>c.id===catId)||auto).label;
   showToast(a.categoryOverride?`Category set to ${lbl}`:`Category reset to auto (${lbl})`,'success',2500);
 }
@@ -3376,7 +3387,7 @@ function saveUsageLog(){
   });
 
   _syncIssuanceCosts(pid);
-  AppState.save();closeModal('genericModal');renderDetailAllocation();
+  AppState.save();_allocRerender('genericModal');
   const totalValue=lines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.unitCost)||0),0);
   const varCount=lines.filter(l=>l.category!=='Budgeted').length;
   const reqMsg=txType==='Issue'?` · ${lines.length} WH request${lines.length!==1?'s':''} submitted`:'';
@@ -3421,7 +3432,7 @@ function deleteUsageLog(id){
     // Removing an issuance has to walk the cost back out again
     if(allocId)_recalcAllocationActual(allocId);
     if(pid){_syncIssuanceCosts(pid);AppState.save();}
-    renderDetailAllocation();
+    _allocRerender();
   }
 }
 
@@ -3523,7 +3534,7 @@ function _saveEditUsageLog(id){
   if(oldAllocId&&oldAllocId!==newAllocId)_recalcAllocationActual(oldAllocId);
   if(newAllocId)_recalcAllocationActual(newAllocId);
   _syncIssuanceCosts(l.projectId);
-  AppState.save();closeModal('genericModal');renderDetailAllocation();
+  AppState.save();_allocRerender('genericModal');
   showToast('Log entry updated','success');
 }
 

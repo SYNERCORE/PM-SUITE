@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.50';
-const APP_BUILD='20261017d';
+const APP_VERSION='2.14.51';
+const APP_BUILD='20261017e';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Both the Log Issue / Usage dialog and the Edit Log Entry dialog now use a searchable "Link to Allocation" box — type part of an allocation ID, resource name or role to filter instantly instead of scrolling the whole register (arrow keys + Enter to pick, ✕ to unlink). Picking still prefills the unit/cost and shows the allocation balance. Builds on the editable Category dropdown added to the Allocation Register this week.';
+const APP_RELEASE_NOTE='Allocation / Transaction Log: saving a log edit (or an Issue/Return, category change, or delete) no longer jumps the page back to the top — your scroll position is kept, so you can edit several entries in a row. Also this week: a searchable "Link to Allocation" box in both the Log Issue/Usage and Edit Log Entry dialogs, and an editable Category dropdown in the Allocation Register.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.51',date:'2026-10-17',type:'fix',notes:[
+    'Allocation / Transaction Log: saving a log edit (or an Issue/Return, a category change, or a delete) no longer bounces the page back to the top. The view now keeps your scroll position when it re-renders, so you can edit several entries in a row without scrolling back down each time.',
+  ]},
   {version:'2.14.50',date:'2026-10-17',type:'feat',notes:[
     'Log Issue / Usage dialog: each line\'s "Link to Allocation" field is now the same search box as the Edit Log Entry dialog — type part of an allocation ID, resource name or role to filter instead of scrolling the dropdown (arrow keys + Enter to pick, ✕ to unlink). Picking still prefills the unit/cost and shows the allocation balance exactly as before.',
   ]},
