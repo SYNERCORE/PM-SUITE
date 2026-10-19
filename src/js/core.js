@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.59';
-const APP_BUILD='20261019a';
+const APP_VERSION='2.14.60';
+const APP_BUILD='20261019b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Business Units: fixed the bug where deleted units kept coming back on the next sync (deletions now propagate to SharePoint instead of resurrecting). You can no longer create two units with the same name, and Settings → Business Units shows a "Merge duplicates" button when same-named units exist — it keeps one unit per name, moves the duplicates\' projects onto it, and removes the extras.';
+const APP_RELEASE_NOTE='Excel import: WBS codes that end in a zero (like "4.10") are no longer collapsed to "4.1". The importer now only cleans genuine floating-point noise and leaves real trailing zeros intact, so sibling steps 4.1 and 4.10 stay distinct. (If a WBS still collapses, Excel saved that column as a number — format the WBS column as Text before saving.)';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.60',date:'2026-10-19',type:'fix',notes:[
+    'Excel task import no longer strips a trailing zero from WBS codes: "4.10" was being read as the number 4.1 and collapsing onto its sibling 4.1, breaking the outline. The numeric-cell cleanup added in 2.14.56 (to remove floating-point noise like 4.0999999999999996) now only fires when the value actually has that long noisy fraction; short decimals such as "4.10", "10.20", "38.5" pass through untouched.',
+    'Note: if a WBS still loses its trailing zero after this update, it means Excel stored that column as a plain number (which cannot hold "4.10" — only 4.1). Format the WBS column as Text in Excel before saving, and the importer will keep it exactly.',
+  ]},
   {version:'2.14.59',date:'2026-10-19',type:'fix',notes:[
     'Business Units no longer "keep populating". Deleting a business unit now records a deletion tombstone (like every other record type), so the delete propagates to SharePoint and the unit is not re-added on the next sync. Previously deleteBU removed the unit only locally, so SharePoint kept its copy and every sync resurrected it — which, combined with each device having created its own "SY3", "SHIC-MECHANICAL", etc., is why duplicates piled up.',
     'You can no longer create (or rename) a business unit to a name that already exists (case-insensitive) — this blocks new duplicates at the source.',
