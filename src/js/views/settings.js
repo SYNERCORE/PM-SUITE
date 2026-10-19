@@ -865,7 +865,15 @@ function renderBUList(){
     <i class="fas fa-layer-group" style="font-size:24px;display:block;margin-bottom:8px;opacity:.3"></i>
     No business units yet. Click <strong>Add Business Unit</strong> to create one.
   </div>`;
-  return`<div style="display:flex;flex-direction:column;gap:7px">
+  // Detect same-name duplicates and offer a one-click merge.
+  const _nameCounts={};BUs.forEach(b=>{const k=(b.name||'').trim().toLowerCase();if(k)_nameCounts[k]=(_nameCounts[k]||0)+1;});
+  const _dupExtra=Object.values(_nameCounts).reduce((s,n)=>s+(n>1?n-1:0),0);
+  const _dupBanner=_dupExtra>0?`<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:rgba(240,164,80,.1);border:1px solid rgba(240,164,80,.3);border-radius:8px;margin-bottom:8px">
+    <i class="fas fa-triangle-exclamation" style="color:var(--accent-amber)"></i>
+    <div style="flex:1;font-size:11px;color:var(--text-secondary)">${_dupExtra} duplicate business unit record${_dupExtra!==1?'s':''} detected (same name). Merge to consolidate projects onto one unit per name.</div>
+    <button class="btn btn-sm btn-primary" onclick="mergeDuplicateBUs()"><i class="fas fa-object-group"></i> Merge duplicates</button>
+  </div>`:'';
+  return _dupBanner+`<div style="display:flex;flex-direction:column;gap:7px">
     ${BUs.map((bu,i)=>{
       const projCount=(AppState.data.projects||[]).filter(p=>p.businessUnit===bu.id).length;
       return`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-hover);border-radius:8px;border-left:4px solid ${bu.color||BU_COLORS[i%BU_COLORS.length]}">
@@ -949,10 +957,41 @@ function showEditBU(id){
   openModal('genericModal');
 }
 
+// Consolidate same-name business units: for each duplicated name keep the unit
+// with the most projects, move the other units' projects onto it, tombstone and
+// remove the duplicates so they don't resurrect on the next sync.
+function mergeDuplicateBUs(){
+  const BUs=AppState.data.businessUnits||[];
+  const projects=AppState.data.projects||[];
+  const groups={};
+  BUs.forEach(b=>{const k=(b.name||'').trim().toLowerCase();if(!k)return;(groups[k]=groups[k]||[]).push(b);});
+  const remap={}; // duplicateId -> keeperId
+  Object.values(groups).forEach(g=>{
+    if(g.length<2)return;
+    let keeper=g[0],keepN=projects.filter(p=>p.businessUnit===g[0].id).length;
+    g.forEach(b=>{const n=projects.filter(p=>p.businessUnit===b.id).length;if(n>keepN){keeper=b;keepN=n;}});
+    g.forEach(b=>{if(b.id!==keeper.id)remap[b.id]=keeper.id;});
+  });
+  const dupIds=Object.keys(remap);
+  if(!dupIds.length){showToast('No duplicate business units found','info');return;}
+  const willMove=projects.filter(p=>remap[p.businessUnit]).length;
+  if(!confirm('Found '+dupIds.length+' duplicate business unit record'+(dupIds.length!==1?'s':'')+'. Merge them?\n\n'+willMove+' project'+(willMove!==1?'s':'')+' will be moved onto the matching unit, then the duplicates are removed. This cannot be undone.'))return;
+  projects.forEach(p=>{if(remap[p.businessUnit])p.businessUnit=remap[p.businessUnit];});
+  dupIds.forEach(id=>{if(typeof _spTrackDeletion==='function')_spTrackDeletion('businessUnits',id);});
+  AppState.data.businessUnits=BUs.filter(b=>!dupIds.includes(b.id));
+  AppState.save();
+  showToast('Merged '+dupIds.length+' duplicate unit'+(dupIds.length!==1?'s':'')+'; moved '+willMove+' project'+(willMove!==1?'s':''),'success',5000);
+  const buListEl=$('#buList');if(buListEl)buListEl.innerHTML=renderBUList();
+}
+
 function saveBU(id){
   const name=($('#buName')||{}).value?.trim();
   if(!name){showToast('Name is required','error');return;}
   if(!AppState.data.businessUnits)AppState.data.businessUnits=[];
+  // Block duplicate names (case-insensitive) — the main reason BUs pile up.
+  const _nameKey=name.toLowerCase();
+  const _nameClash=(AppState.data.businessUnits||[]).some(b=>b.id!==id&&(b.name||'').trim().toLowerCase()===_nameKey);
+  if(_nameClash){showToast('A business unit named "'+name+'" already exists','error',4000);return;}
   if(id){
     const idx=AppState.data.businessUnits.findIndex(b=>b.id===id);
     if(idx>=0){
@@ -988,6 +1027,10 @@ function deleteBU(id){
   if(!confirm(msg))return;
   // Unassign projects
   (AppState.data.projects||[]).forEach(p=>{if(p.businessUnit===id)p.businessUnit='';});
+  // Track the deletion so it propagates to SharePoint and the record is NOT
+  // re-added on the next sync (without this tombstone the BU resurrects every
+  // sync — the "business units keep populating" bug).
+  if(typeof _spTrackDeletion==='function')_spTrackDeletion('businessUnits',id);
   AppState.data.businessUnits=(AppState.data.businessUnits||[]).filter(b=>b.id!==id);
   AppState.save();
   const buListEl=$('#buList');

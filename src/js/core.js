@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.58';
-const APP_BUILD='20261017l';
+const APP_VERSION='2.14.59';
+const APP_BUILD='20261019a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Every new project now starts with a WBS "0" summary task named after the project — the root that owns all its tasks. Progress rolls up into it, so WBS 0 always shows the whole-project %. An MS Project import that brings its own WBS 0 updates this one instead of adding a duplicate. (Builds on v2.14.56–57: clean WBS codes, MS Project task-number predecessors, and WBS 0 as the weighted project root.)';
+const APP_RELEASE_NOTE='Business Units: fixed the bug where deleted units kept coming back on the next sync (deletions now propagate to SharePoint instead of resurrecting). You can no longer create two units with the same name, and Settings → Business Units shows a "Merge duplicates" button when same-named units exist — it keeps one unit per name, moves the duplicates\' projects onto it, and removes the extras.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.59',date:'2026-10-19',type:'fix',notes:[
+    'Business Units no longer "keep populating". Deleting a business unit now records a deletion tombstone (like every other record type), so the delete propagates to SharePoint and the unit is not re-added on the next sync. Previously deleteBU removed the unit only locally, so SharePoint kept its copy and every sync resurrected it — which, combined with each device having created its own "SY3", "SHIC-MECHANICAL", etc., is why duplicates piled up.',
+    'You can no longer create (or rename) a business unit to a name that already exists (case-insensitive) — this blocks new duplicates at the source.',
+    'Settings → Business Units now shows a "Merge duplicates" banner when same-named units exist. It keeps the unit with the most projects for each name, moves the other duplicates\' projects onto it, tombstones and removes the extras — so you can clean up an existing pile-up in one click without losing project assignments.',
+  ]},
   {version:'2.14.58',date:'2026-10-17',type:'feat',notes:[
     'New projects now get an initial WBS "0" root task automatically, named after the project. It is the project-summary line that owns every task you add afterwards, so the outline always has a single top-level ancestor and its progress is the whole-project roll-up. Applies when a project (or prospect) is created; existing projects are unaffected.',
     'If you later import an MS Project file that carries its own WBS 0, the importer matches it to this seeded root (by WBS) and updates it in place — no duplicate summary row. Deleting the seeded WBS 0 and re-saving would re-create it.',
