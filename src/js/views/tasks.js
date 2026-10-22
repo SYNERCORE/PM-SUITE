@@ -397,7 +397,7 @@ const _dateRO=(_hasPred||_isSummary)?'readonly style="opacity:.55;cursor:not-all
 const _dateNote=_isSummary?'<span style="font-size:10px;color:var(--accent-cyan);margin-left:6px"><i class="fas fa-sitemap"></i> Rolled up from subtasks</span>':(_hasPred?'<span style="font-size:10px;color:var(--accent-amber);margin-left:6px"><i class="fas fa-calculator"></i> Computed by CPM</span>':'');
 $('#taskModalBody').innerHTML=`<div class="form-grid">
 <div class="form-group"><label class="form-label">Project</label><select class="form-select" id="tProj" onchange="_tRefreshParentOptions('${id||''}')">${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${(t?.projectId===p.id||taskProjectFilter===p.id)?'selected':''}>${p.id}</option>`).join('')}</select></div>
-<div class="form-group"><label class="form-label">WBS Code <span style="font-size:10px;color:var(--text-muted)">auto</span></label><input class="form-input" id="tWbs" value="${t?.wbs||''}" readonly style="opacity:.7;cursor:not-allowed;background:var(--bg-secondary)"></div>
+<div class="form-group"><label class="form-label">WBS Code <span style="font-size:10px;color:var(--text-muted)">— editable; auto-fills from Parent</span></label><input class="form-input" id="tWbs" value="${t?.wbs||''}" placeholder="e.g. 4.10"></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Parent Task <span style="font-size:10px;color:var(--text-muted)">— makes this a subtask (WBS hierarchy)</span></label><select class="form-select" id="tParent" onchange="_tRefreshWbs('${id||''}')">${_tParentOptionsHTML(id,t?.projectId||(taskProjectFilter!=='all'?taskProjectFilter:((AppState.data.projects||[])[0]?.id||'')),t?.parentId||'')}</select></div>
 <div class="form-group" style="grid-column:1/-1"><label class="form-label">Task Name *</label><input class="form-input" id="tName" value="${t?.name||''}" placeholder="Task description"></div>
 <div class="form-group"><label class="form-label">Assigned To</label><input class="form-input" id="tAss" value="${t?.assignee||''}" placeholder="Name"></div>
@@ -504,12 +504,23 @@ if(t.parentId){
   const par=(AppState.data.tasks||[]).find(x=>x.id===t.parentId);
   if(!par||par._deleted||par.projectId!==_tProjId){showToast('Parent task must belong to the same project','error');return;}
 }
+// WBS uniqueness guard — a WBS code must be unique within its project so the
+// outline stays unambiguous. Lets a user correct an imported code (e.g. a "4.10"
+// that collapsed to "4.1") and blocks it if the target code is already taken.
+const _wbsNorm=String(t.wbs||'').trim();
+if(_wbsNorm){
+  const _clash=(AppState.data.tasks||[]).some(x=>x&&!x._deleted&&x.id!==t.id&&x.projectId===_tProjId&&String(x.wbs||'').trim()===_wbsNorm);
+  if(_clash){showToast('WBS "'+_wbsNorm+'" is already used by another task in this project','error',5000);return;}
+  t.wbs=_wbsNorm;
+}
 if(id){const i=(AppState.data.tasks||[]).findIndex(x=>x.id===id);AppState.data.tasks[i]={...AppState.data.tasks[i],...t};}
 else AppState.data.tasks.push(t);
 _applyCPMDates(_tProjId);
 _applySummaryRollups(_tProjId);
 _recalcProjectProgress(_tProjId);
-_recalcAllWbs(_tProjId);
+// Keep a manual/imported WBS exactly as entered; only auto-renumber when the
+// code is blank (legacy behaviour) so an edited code like "4.10" is not wiped.
+if(!_wbsNorm)_recalcAllWbs(_tProjId);
 AppState.save();closeModal('taskModal');
 if(typeof detailProjectId!=='undefined'&&detailProjectId&&typeof renderDetailTasks==='function'){renderDetailTasks();}else{renderTaskView();}
 showToast(id?'Task updated':'Task created','success');}

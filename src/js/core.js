@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.60';
-const APP_BUILD='20261019b';
+const APP_VERSION='2.14.61';
+const APP_BUILD='20261023a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Excel import: WBS codes that end in a zero (like "4.10") are no longer collapsed to "4.1". The importer now only cleans genuine floating-point noise and leaves real trailing zeros intact, so sibling steps 4.1 and 4.10 stay distinct. (If a WBS still collapses, Excel saved that column as a number — format the WBS column as Text before saving.)';
+const APP_RELEASE_NOTE='You can now edit a task\'s WBS Code directly in the task form to correct it (e.g. fix a "4.10" that came in as "4.1"). Saving a code that another task in the same project already uses is blocked with an error, and a code you type is kept exactly as entered instead of being auto-renumbered.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.61',date:'2026-10-23',type:'feat',notes:[
+    'The WBS Code field in the task form is now editable, so you can correct an imported code by hand — e.g. change a "4.10" that was read as "4.1" back to "4.10". It still auto-fills from the Parent Task for new tasks; you only override it when you need to.',
+    'Saving a WBS code that another task in the same project already uses is blocked with a clear error ("WBS \\"4.1\\" is already used by another task in this project"), so you cannot silently create two tasks with the same code. The same code is still allowed in different projects.',
+    'A WBS code you type is now kept exactly as entered. Previously every save re-numbered the whole project positionally, which would overwrite a hand-corrected code; now auto-renumbering only runs when a task has no code at all.',
+  ]},
   {version:'2.14.60',date:'2026-10-19',type:'fix',notes:[
     'Excel task import no longer strips a trailing zero from WBS codes: "4.10" was being read as the number 4.1 and collapsing onto its sibling 4.1, breaking the outline. The numeric-cell cleanup added in 2.14.56 (to remove floating-point noise like 4.0999999999999996) now only fires when the value actually has that long noisy fraction; short decimals such as "4.10", "10.20", "38.5" pass through untouched.',
     'Note: if a WBS still loses its trailing zero after this update, it means Excel stored that column as a plain number (which cannot hold "4.10" — only 4.1). Format the WBS column as Text in Excel before saving, and the importer will keep it exactly.',
