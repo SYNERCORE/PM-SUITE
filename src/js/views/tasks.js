@@ -237,7 +237,7 @@ el.innerHTML=`<div class="section-header" style="margin-bottom:14px">
 <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
 <select class="form-select" style="width:180px;height:32px" id="taskProjSel" onchange="taskProjectFilter=this.value;renderTasks()">
 <option value="all">All Projects</option>
-${(AppState.data.projects||[]).map(p=>`<option value="${p.id}" ${taskProjectFilter===p.id?'selected':''}>${esc(p.id)}</option>`).join('')}
+${(()=>{const _withTasks=new Set((AppState.data.tasks||[]).filter(t=>!t._deleted&&t.projectId).map(t=>t.projectId));return (AppState.data.projects||[]).filter(p=>_withTasks.has(p.id)||p.id===taskProjectFilter).map(p=>`<option value="${p.id}" ${taskProjectFilter===p.id?'selected':''}>${esc(p.id)}</option>`).join('');})()}
 </select>
 <div style="display:flex;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
 <div class="tab ${taskView==='kanban'?'active':''}" style="border:none;padding:5px 10px;margin:0" onclick="taskView='kanban';renderTasks()"><i class="fas fa-columns"></i></div>

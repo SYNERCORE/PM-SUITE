@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.62';
-const APP_BUILD='20261023b';
+const APP_VERSION='2.14.63';
+const APP_BUILD='20261023c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Fixed the repeating "Encrypt failed … exceeded the quota" console error on large datasets. The app now frees space and keeps a lean encrypted copy in browser storage instead of failing every save, and only warns once. Your full data was always safe (IndexedDB mirror + SharePoint); this keeps the fast local copy current so tasks and other records load correctly after a refresh.';
+const APP_RELEASE_NOTE='Task Management: the project filter dropdown now lists only projects that actually have tasks, instead of all projects — so it is short and relevant. (Your currently-selected project stays in the list even if its tasks were all removed.)';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.63',date:'2026-10-23',type:'feat',notes:[
+    'Task Management: the project filter dropdown now shows only projects that have at least one task, not the full project list — so with 60+ projects but tasks on only a handful, the dropdown stays short and relevant. "All Projects" is still at the top. If a project is currently selected it stays listed even if its tasks were all removed, so the selection is never lost.',
+  ]},
   {version:'2.14.62',date:'2026-10-23',type:'fix',notes:[
     'Fixed the "[SHIC] Encrypt failed: … exceeded the quota" error that repeated on every save once a dataset grew past the browser\'s ~5MB localStorage limit (large warehouse/resource/allocation lists). The encrypted save path caught the quota error internally and returned without ever triggering the cleanup fallback, so localStorage stopped updating and the warning fired on every save (including the two saves that run while a project\'s Task tab renders).',
     'The save path now, on a quota hit: frees space (removes the duplicate backup key and stale MSAL cache) and retries; if still full, stores a LEAN encrypted copy with soft-deleted records dropped; and only warns ONCE instead of spamming the console. The full dataset is still mirrored in IndexedDB (no quota) and SharePoint, so nothing is lost — this keeps the fast localStorage bootstrap current so records load correctly on the next refresh.',
