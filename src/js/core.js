@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.61';
-const APP_BUILD='20261023a';
+const APP_VERSION='2.14.62';
+const APP_BUILD='20261023b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='You can now edit a task\'s WBS Code directly in the task form to correct it (e.g. fix a "4.10" that came in as "4.1"). Saving a code that another task in the same project already uses is blocked with an error, and a code you type is kept exactly as entered instead of being auto-renumbered.';
+const APP_RELEASE_NOTE='Fixed the repeating "Encrypt failed … exceeded the quota" console error on large datasets. The app now frees space and keeps a lean encrypted copy in browser storage instead of failing every save, and only warns once. Your full data was always safe (IndexedDB mirror + SharePoint); this keeps the fast local copy current so tasks and other records load correctly after a refresh.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.62',date:'2026-10-23',type:'fix',notes:[
+    'Fixed the "[SHIC] Encrypt failed: … exceeded the quota" error that repeated on every save once a dataset grew past the browser\'s ~5MB localStorage limit (large warehouse/resource/allocation lists). The encrypted save path caught the quota error internally and returned without ever triggering the cleanup fallback, so localStorage stopped updating and the warning fired on every save (including the two saves that run while a project\'s Task tab renders).',
+    'The save path now, on a quota hit: frees space (removes the duplicate backup key and stale MSAL cache) and retries; if still full, stores a LEAN encrypted copy with soft-deleted records dropped; and only warns ONCE instead of spamming the console. The full dataset is still mirrored in IndexedDB (no quota) and SharePoint, so nothing is lost — this keeps the fast localStorage bootstrap current so records load correctly on the next refresh.',
+    'If a project\'s tasks looked missing, it was this: localStorage had frozen at an older copy because every save was failing. After updating, hard-refresh (Ctrl+Shift+R); the app reloads the full dataset from the IndexedDB mirror / SharePoint. Settings → Clean Up Storage also clears the warning.',
+  ]},
   {version:'2.14.61',date:'2026-10-23',type:'feat',notes:[
     'The WBS Code field in the task form is now editable, so you can correct an imported code by hand — e.g. change a "4.10" that was read as "4.1" back to "4.10". It still auto-fills from the Parent Task for new tasks; you only override it when you need to.',
     'Saving a WBS code that another task in the same project already uses is blocked with a clear error ("WBS \\"4.1\\" is already used by another task in this project"), so you cannot silently create two tasks with the same code. The same code is still allowed in different projects.',
@@ -473,21 +478,62 @@ async function _initEncryption(uid) {
   }
 }
 
+// Encrypt a JSON string to the at-rest envelope stored under pm_data.
+async function _encryptJson(json){
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({name:'AES-GCM',iv}, _cryptoKey, new TextEncoder().encode(json));
+  const ivHex = Array.from(iv).map(b=>b.toString(16).padStart(2,'0')).join('');
+  const u8=new Uint8Array(ct);let bin='';for(let i=0;i<u8.length;i++)bin+=String.fromCharCode(u8[i]);
+  return JSON.stringify({__enc:1,iv:ivHex,ct:btoa(bin)});
+}
+// True if an error is a storage-quota error (cross-browser).
+function _isQuotaErr(e){return !!e&&(e.name==='QuotaExceededError'||e.name==='NS_ERROR_DOM_QUOTA_REACHED'||e.code===22);}
+// setItem that reports quota failure as false instead of throwing (other errors rethrow).
+function _lsSetItem(k,v){try{localStorage.setItem(k,v);return true;}catch(e){if(_isQuotaErr(e))return false;throw e;}}
+// A copy of the data JSON with soft-deleted records dropped, to fit a tighter budget.
+function _leanJson(json){
+  try{
+    const d=JSON.parse(json);
+    ['projects','tasks','costs','qaqc','risks','actions','documents','libraryDocs',
+     'resourceAllocations','dailyMeetingLogs','procurement','procurementLogs','materials',
+     'manpower','equipment','tools','vehicles','consumables','thirdParty',
+     'warehouseItems','stockTransactions','issuanceRequests','notifications','activities']
+      .forEach(k=>{if(Array.isArray(d[k]))d[k]=d[k].filter(r=>!r||!r._deleted);});
+    return JSON.stringify(d);
+  }catch(e){return json;}
+}
+// Encryption active — drop any stale PLAINTEXT copies of the data.
+function _dropStalePlaintext(){
+  try{const b=localStorage.getItem('shic_data_backup');if(b&&b.indexOf('"__enc"')<0)localStorage.removeItem('shic_data_backup');}catch(e){}
+  try{const o=localStorage.getItem('shic_offline_data');if(o&&o.indexOf('"__enc"')<0)localStorage.removeItem('shic_offline_data');}catch(e){}
+}
+let _encQuotaNotified=false;
 async function _encryptAndStore(json) {
   if (!_cryptoKey) return false;
-  try {
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const ct = await crypto.subtle.encrypt({name:'AES-GCM',iv}, _cryptoKey, new TextEncoder().encode(json));
-    const ivHex = Array.from(iv).map(b=>b.toString(16).padStart(2,'0')).join('');
-    const u8=new Uint8Array(ct);let bin='';for(let i=0;i<u8.length;i++)bin+=String.fromCharCode(u8[i]);
-    const ctB64 = btoa(bin);
-    const enc = JSON.stringify({__enc:1,iv:ivHex,ct:ctB64});
-    localStorage.setItem('pm_data', enc);
-    // Encryption is active — remove any stale PLAINTEXT copies of the data
-    try{const b=localStorage.getItem('shic_data_backup');if(b&&b.indexOf('"__enc"')<0)localStorage.removeItem('shic_data_backup');}catch(e){}
-    try{const o=localStorage.getItem('shic_offline_data');if(o&&o.indexOf('"__enc"')<0)localStorage.removeItem('shic_offline_data');}catch(e){}
-    return true;
-  } catch(e) { console.warn('[SHIC] Encrypt failed:', e.message); return false; }
+  let enc;
+  try { enc = await _encryptJson(json); }
+  catch(e) { console.warn('[SHIC] Encrypt failed:', e.message); return false; }
+  // 1) Normal write.
+  if(_lsSetItem('pm_data', enc)){ _dropStalePlaintext(); _encQuotaNotified=false; return true; }
+  // 2) Quota hit — free space (duplicate backup + MSAL cache) and retry.
+  try{localStorage.removeItem('shic_data_backup');}catch(e){}
+  try{Object.keys(localStorage).filter(k=>k.startsWith('msal.')).forEach(k=>localStorage.removeItem(k));}catch(e){}
+  if(_lsSetItem('pm_data', enc)){ _dropStalePlaintext(); _encQuotaNotified=false; return true; }
+  // 3) Still full — store a LEAN encrypted copy (drop soft-deleted records). Boot
+  //    adopts the full set from the IndexedDB mirror, so this is only a bootstrap.
+  try{
+    const leanEnc=await _encryptJson(_leanJson(json));
+    if(_lsSetItem('pm_data', leanEnc)){ _dropStalePlaintext(); _encQuotaNotified=false; return true; }
+  }catch(e){}
+  // 4) localStorage genuinely cannot hold it — the full dataset is still in the
+  //    IndexedDB mirror (no quota) + SharePoint, so nothing is lost. Warn ONCE
+  //    so this does not spam the console on every save.
+  if(!_encQuotaNotified){
+    _encQuotaNotified=true;
+    console.warn('[SHIC] localStorage full — relying on IndexedDB mirror + SharePoint (data safe).');
+    setTimeout(()=>{try{showToast('Browser storage is full — your data is safe (kept in IndexedDB + SharePoint). Settings → Clean Up Storage to clear the warning.','warning',8000);}catch(e){}},200);
+  }
+  return false;
 }
 
 async function _decryptFromStorage() {
