@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.63';
-const APP_BUILD='20261023c';
+const APP_VERSION='2.14.64';
+const APP_BUILD='20261024a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Task Management: the project filter dropdown now lists only projects that actually have tasks, instead of all projects — so it is short and relevant. (Your currently-selected project stays in the list even if its tasks were all removed.)';
+const APP_RELEASE_NOTE='Removed the floating "+" quick-add button in the bottom-right corner. The "+ New" button in the top bar still opens Quick Add, so nothing is lost — the screen is just less cluttered.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.64',date:'2026-10-24',type:'fix',notes:[
+    'Removed the floating "+" quick-add button that sat in the bottom-right corner of every page (it overlapped content and the footer version label). The "+ New" button in the top bar still opens the same Quick Add menu, so no functionality is lost.',
+  ]},
   {version:'2.14.63',date:'2026-10-23',type:'feat',notes:[
     'Task Management: the project filter dropdown now shows only projects that have at least one task, not the full project list — so with 60+ projects but tasks on only a handful, the dropdown stays short and relevant. "All Projects" is still at the top. If a project is currently selected it stays listed even if its tasks were all removed, so the selection is never lost.',
   ]},

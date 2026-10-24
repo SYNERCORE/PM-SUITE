@@ -1,1 +1,1 @@
-{"version":"2.14.63","note":"Task Management: the project filter dropdown now lists only projects that actually have tasks, instead of all projects — so it is short and relevant. (Your currently-selected project stays in the list even if its tasks were all removed.)","released":"2026-10-23 12:30"}
+{"version":"2.14.64","note":"Removed the floating \"+\" quick-add button in the bottom-right corner. The \"+ New\" button in the top bar still opens Quick Add, so nothing is lost — the screen is just less cluttered.","released":"2026-10-24 14:30"}
