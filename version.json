@@ -1,1 +1,1 @@
-{"version":"2.14.64","note":"Removed the floating \"+\" quick-add button in the bottom-right corner. The \"+ New\" button in the top bar still opens Quick Add, so nothing is lost — the screen is just less cluttered.","released":"2026-10-24 14:30"}
+{"version":"2.14.65","note":"Gantt Chart now opens collapsed — showing just each project's overall timeline. Click a project row (or the chevron) to expand and see its tasks; use the new Expand All / Collapse All buttons to do every project at once.","released":"2026-11-07 14:30"}

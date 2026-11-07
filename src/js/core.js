@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.64';
-const APP_BUILD='20261024a';
+const APP_VERSION='2.14.65';
+const APP_BUILD='20261107a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Removed the floating "+" quick-add button in the bottom-right corner. The "+ New" button in the top bar still opens Quick Add, so nothing is lost — the screen is just less cluttered.';
+const APP_RELEASE_NOTE='Gantt Chart now opens collapsed — showing just each project\'s overall timeline. Click a project row (or the chevron) to expand and see its tasks; use the new Expand All / Collapse All buttons to do every project at once.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.65',date:'2026-11-07',type:'feat',notes:[
+    'Gantt Chart now defaults to a collapsed view: each project shows only its overall timeline row, so with many projects the chart is readable at a glance instead of scrolling through hundreds of task bars.',
+    'Click a project row (or its chevron ▸) to expand it and reveal the tasks underneath; click again to collapse. New "Expand All" and "Collapse All" buttons toggle every project at once. The expanded/collapsed state is remembered while you stay on the page.',
+    'Dependency arrows, CPM, baselines and PDF/print are unaffected — arrows simply skip tasks that are currently collapsed, and Print/Export still include every task.',
+  ]},
   {version:'2.14.64',date:'2026-10-24',type:'fix',notes:[
     'Removed the floating "+" quick-add button that sat in the bottom-right corner of every page (it overlapped content and the footer version label). The "+ New" button in the top bar still opens the same Quick Add menu, so no functionality is lost.',
   ]},

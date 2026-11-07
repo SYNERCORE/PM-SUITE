@@ -4,6 +4,14 @@ let _ganttShowBaseline=true;
 // predecessor arrows can read as clutter, so users can switch them off.
 let _ganttShowLinks=true;
 
+// Per-project collapse on the main Gantt. DEFAULT = collapsed: only the project
+// timeline rows show; expanding a project reveals its task rows. We track the
+// EXPANDED project ids, so the empty default Set means "everything collapsed".
+let _ganttExpanded=new Set();
+function toggleGanttProject(pid){ if(_ganttExpanded.has(pid))_ganttExpanded.delete(pid); else _ganttExpanded.add(pid); renderGantt(); }
+function ganttExpandAll(){ (AppState.data.projects||[]).forEach(p=>_ganttExpanded.add(p.id)); renderGantt(); }
+function ganttCollapseAll(){ _ganttExpanded.clear(); renderGantt(); }
+
 function renderGantt(){
   AppState.ensureData();
   const{projects,tasks}=AppState.data;
@@ -112,6 +120,7 @@ function renderGantt(){
 
   filteredProjects.forEach((p,pi)=>{
     const pc=projColors[pi%projColors.length];
+    const expanded=_ganttExpanded.has(p.id);
     const pt=tasks.filter(t=>{
       if(t.projectId!==p.id)return false;
       if(t._deleted)return false;
@@ -160,7 +169,8 @@ function renderGantt(){
     }
 
     rows+=`<div style="display:flex;background:${pc}11;border-bottom:2px solid ${pc}55" title="${esc(p.name)}">
-      <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:6px 10px;font-weight:700;font-size:12px;color:${pc};border-right:1px solid var(--border);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:flex;align-items:center;gap:6px">
+      <div onclick="toggleGanttProject('${esc(p.id)}')" style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:6px 10px;font-weight:700;font-size:12px;color:${pc};border-right:1px solid var(--border);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:flex;align-items:center;gap:6px;cursor:pointer" title="Click to ${expanded?'collapse':'expand'} ${pt.length} task(s)">
+        <i class="fas fa-chevron-${expanded?'down':'right'}" style="font-size:9px;flex-shrink:0;width:9px"></i>
         <i class="fas fa-folder" style="font-size:10px;flex-shrink:0"></i>${p.id} — ${p.name.substring(0,22)}
         <span style="margin-left:auto;font-size:9px;font-weight:400;color:var(--text-muted)">${pt.length} tasks</span>
       </div>
@@ -181,6 +191,8 @@ function renderGantt(){
     </div>`;
     currentY+=PROJ_H+2; // +2px: row border-bottom, so arrow Y stays aligned with bars
 
+    // Collapsed project → show only its timeline row above; skip task rows.
+    if(expanded){
     if(!pt.length){
       rows+=`<div style="display:flex;border-bottom:1px solid var(--border)">
         <div style="width:${LABEL_W}px;min-width:${LABEL_W}px;padding:5px 10px 5px 26px;font-size:10px;color:var(--text-muted);border-right:1px solid var(--border);font-style:italic">No tasks match filter</div>
@@ -304,6 +316,7 @@ function renderGantt(){
       </div>`;
       currentY+=TASK_H+1; // +1px: row border-bottom
     });
+    } // end if(expanded)
   });
 
   const totalRowsH=currentY;
@@ -383,6 +396,8 @@ function renderGantt(){
       <div class="section-sub">${totalTasksShown} tasks shown (${totalTaskCount} total) · ${critCount>0?`<span style="color:var(--accent-red);font-weight:600">${critCount} critical</span> · `:''}${filteredProjects.length} project(s)</div>
     </div>
     <div style="display:flex;gap:6px">
+      <button class="btn btn-secondary btn-sm" onclick="ganttExpandAll()" title="Expand every project to show its tasks"><i class="fas fa-expand-alt"></i> Expand All</button>
+      <button class="btn btn-secondary btn-sm" onclick="ganttCollapseAll()" title="Collapse every project to show only its timeline"><i class="fas fa-compress-alt"></i> Collapse All</button>
       ${hasBL?`<button class="btn btn-secondary btn-sm" onclick="showBaselineManager()" title="Manage baselines"><i class="fas fa-layer-group"></i> Baselines</button>`:''}
       <label style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--text-secondary);margin-right:2px" title="Include a finish-variance column (late/early) in the printout"><input type="checkbox" ${window.ganttPrintVariance?'checked':''} onchange="window.ganttPrintVariance=this.checked" style="accent-color:var(--accent-blue)">Variance</label>
       <button class="btn btn-secondary btn-sm" onclick="printGantt(ganttProjFilter)" title="Print the Gantt — planned vs actual dates + progress (works offline)"><i class="fas fa-print"></i> Print</button>
