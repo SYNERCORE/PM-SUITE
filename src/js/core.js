@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.65';
-const APP_BUILD='20261107a';
+const APP_VERSION='2.14.66';
+const APP_BUILD='20261107b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Gantt Chart now opens collapsed — showing just each project\'s overall timeline. Click a project row (or the chevron) to expand and see its tasks; use the new Expand All / Collapse All buttons to do every project at once.';
+const APP_RELEASE_NOTE='Projects table: the Name column now wraps to show the full project name instead of cutting it off with "…", so long names are readable at a glance.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.66',date:'2026-11-07',type:'fix',notes:[
+    'Projects (Table view): the Name column now wraps onto multiple lines to show the full project name, instead of truncating it with "…". Long supply/repair titles are readable at a glance without having to hover for the tooltip.',
+  ]},
   {version:'2.14.65',date:'2026-11-07',type:'feat',notes:[
     'Gantt Chart now defaults to a collapsed view: each project shows only its overall timeline row, so with many projects the chart is readable at a glance instead of scrolling through hundreds of task bars.',
     'Click a project row (or its chevron ▸) to expand it and reveal the tasks underneath; click again to collapse. New "Expand All" and "Collapse All" buttons toggle every project at once. The expanded/collapsed state is remembered while you stay on the page.',

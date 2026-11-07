@@ -142,7 +142,7 @@ function _renderProjTable(projects) {
             const progColor = (typeof pColor === 'function') ? pColor(p.progress) : '#388bfd';
             return `<tr style="border-bottom:1px solid var(--border);transition:background .15s" onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background=''">
               <td style="padding:8px 10px;font-family:var(--font-mono);font-size:10px;color:var(--accent-blue);font-weight:700;cursor:pointer;white-space:nowrap" onclick="showProjectDetail('${p.id}')" title="Open project detail">${p.id}</td>
-              <td style="padding:8px 10px;font-weight:600;cursor:pointer;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="showProjectDetail('${p.id}')" title="${esc(p.name||'')}">${esc(p.name||'-')}</td>
+              <td style="padding:8px 10px;font-weight:600;cursor:pointer;min-width:200px;max-width:360px;white-space:normal;word-break:break-word;line-height:1.35" onclick="showProjectDetail('${p.id}')" title="${esc(p.name||'')}">${esc(p.name||'-')}</td>
               <td style="padding:8px 10px;color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.client||'')}">${esc(p.client||'-')}</td>
               <td style="padding:8px 10px"><span style="font-size:9px;padding:2px 7px;border-radius:8px;background:var(--bg-hover);color:var(--text-secondary);text-transform:capitalize">${esc(p.phase||'-')}</span></td>
               <td style="padding:8px 10px"><span style="font-size:9px;padding:2px 8px;border-radius:8px;background:${statusColor}22;color:${statusColor};font-weight:700;text-transform:uppercase">${p.status||'-'}</span></td>

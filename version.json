@@ -1,1 +1,1 @@
-{"version":"2.14.65","note":"Gantt Chart now opens collapsed — showing just each project's overall timeline. Click a project row (or the chevron) to expand and see its tasks; use the new Expand All / Collapse All buttons to do every project at once.","released":"2026-11-07 14:30"}
+{"version":"2.14.66","note":"Projects table: the Name column now wraps to show the full project name instead of cutting it off with \"…\", so long names are readable at a glance.","released":"2026-11-07 15:00"}
