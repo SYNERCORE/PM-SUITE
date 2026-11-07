@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.66';
-const APP_BUILD='20261107b';
+const APP_VERSION='2.14.67';
+const APP_BUILD='20261107c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Projects table: the Name column now wraps to show the full project name instead of cutting it off with "…", so long names are readable at a glance.';
+const APP_RELEASE_NOTE='Settings: every section (Local Server (LAN), User Management, etc.) is now a collapsible card. The page opens minimized to a short list of section headers — click one to expand it, so you no longer scroll past the long LAN card to reach Users.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.14.67',date:'2026-11-07',type:'feat',notes:[
+    'Settings page: every section is now a collapsible card with a clickable title strip and a chevron. The page opens minimized — just a short list of section headers — so you no longer have to scroll past the long Local Server (LAN) card to reach User Management.',
+    'Click any section header to expand it; click again to minimize. New "Expand all" and "Collapse all" buttons toggle every section at once. Your expanded/collapsed choices are remembered on this device.',
+  ]},
   {version:'2.14.66',date:'2026-11-07',type:'fix',notes:[
     'Projects (Table view): the Name column now wraps onto multiple lines to show the full project name, instead of truncating it with "…". Long supply/repair titles are readable at a glance without having to hover for the tooltip.',
   ]},

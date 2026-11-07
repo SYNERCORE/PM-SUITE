@@ -1,3 +1,70 @@
+// ── Collapsible settings cards ───────────────────────────────
+// Each .card group in Settings gets a clickable title strip that
+// minimizes it. Default on first visit: everything collapsed, so the
+// page is a short list of section headers (no more long scroll past
+// the Local Server (LAN) card to reach Users). Choice persists per
+// device in localStorage.
+function _settingsCollapseState(){
+  try{const s=localStorage.getItem('pm_settings_collapsed');if(s===null)return null;return new Set(JSON.parse(s)||[]);}catch(e){return new Set();}
+}
+function _settingsSaveCollapse(set){
+  try{localStorage.setItem('pm_settings_collapsed',JSON.stringify([...set]));}catch(e){}
+}
+function _initSettingsCollapse(){
+  try{
+    const root=document.getElementById('settings');if(!root)return;
+    // top-level cards only (skip any card nested inside another card)
+    const cards=[...root.querySelectorAll('.card')].filter(c=>!(c.parentElement&&c.parentElement.closest('.card')));
+    const stored=_settingsCollapseState();          // null => first visit
+    const defaultAll=(stored===null);
+    const collapsed=stored||new Set();
+    const seen={};
+    cards.forEach((card,i)=>{
+      if(card.dataset.scInit)return;
+      const header=card.firstElementChild;if(!header)return;
+      // derive a title from the card's header
+      const cand=header.querySelector('[style*="font-weight:6"],[style*="font-weight:7"]');
+      let title=((cand?cand.textContent:header.textContent)||'').replace(/\s+/g,' ').trim().slice(0,64);
+      if(!title)title='Section '+(i+1);
+      if(seen[title]){title=title+' ('+(++seen[title])+')';}else seen[title]=1;
+      card.dataset.scInit='1';card.dataset.scKey=title;card.style.alignSelf='start';
+      // move all current children into a body wrapper
+      const body=document.createElement('div');body.className='sc-body';
+      [...card.childNodes].forEach(k=>body.appendChild(k));
+      card.appendChild(body);
+      // avoid showing the title twice when expanded
+      if(cand)cand.style.display='none';
+      else if(!header.querySelector('button,input,select,a,textarea'))header.style.display='none';
+      // clickable title strip
+      const strip=document.createElement('div');strip.className='sc-strip';
+      strip.style.cssText='display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;padding:2px 0';
+      const chev=document.createElement('i');chev.className='fas fa-chevron-down sc-chev';
+      chev.style.cssText='font-size:12px;color:var(--text-secondary);width:14px;transition:transform .15s';
+      const label=document.createElement('span');label.style.cssText='font-size:14px;font-weight:600';label.textContent=title;
+      strip.appendChild(chev);strip.appendChild(label);
+      card.insertBefore(strip,body);
+      const apply=(c)=>{body.style.display=c?'none':'';chev.style.transform=c?'rotate(-90deg)':'';card.classList.toggle('sc-collapsed',c);};
+      let isC=defaultAll?true:collapsed.has(title);
+      if(defaultAll)collapsed.add(title);
+      apply(isC);
+      strip.addEventListener('click',()=>{isC=!isC;apply(isC);if(isC)collapsed.add(title);else collapsed.delete(title);_settingsSaveCollapse(collapsed);});
+    });
+    if(defaultAll)_settingsSaveCollapse(collapsed);
+  }catch(e){console.warn('settings collapse init failed',e);}
+}
+function _settingsExpandAll(){
+  const root=document.getElementById('settings');if(!root)return;
+  const set=_settingsCollapseState()||new Set();
+  root.querySelectorAll('.card[data-sc-init]').forEach(c=>{const b=c.querySelector(':scope>.sc-body');const chev=c.querySelector(':scope>.sc-strip .sc-chev');if(b)b.style.display='';if(chev)chev.style.transform='';c.classList.remove('sc-collapsed');set.delete(c.dataset.scKey);});
+  _settingsSaveCollapse(set);
+}
+function _settingsCollapseAll(){
+  const root=document.getElementById('settings');if(!root)return;
+  const set=new Set();
+  root.querySelectorAll('.card[data-sc-init]').forEach(c=>{const b=c.querySelector(':scope>.sc-body');const chev=c.querySelector(':scope>.sc-strip .sc-chev');if(b)b.style.display='none';if(chev)chev.style.transform='rotate(-90deg)';c.classList.add('sc-collapsed');set.add(c.dataset.scKey);});
+  _settingsSaveCollapse(set);
+}
+
 function renderSettings(){
 AppState.ensureData();
   // Inject offline status into placeholder
@@ -5,6 +72,8 @@ AppState.ensureData();
   setTimeout(()=>{const b=document.getElementById('storageUsageBar');if(b&&typeof _storageUsageHTML==='function')b.innerHTML=_storageUsageHTML();},100);
   // Render palette picker
   setTimeout(()=>{const p=document.getElementById('palettePicker');if(p&&typeof _renderPalettePicker==='function')_renderPalettePicker(p);},90);
+  // Make every settings card group collapsible (runs after async injections above)
+  setTimeout(()=>{if(typeof _initSettingsCollapse==='function')_initSettingsCollapse();},160);
   // Show admin-only buttons only to admins
   setTimeout(()=>{
     const adminDiv=document.getElementById('adminOnlyBtns');
@@ -28,7 +97,11 @@ const redirectUri=window.location.href.split('#')[0].split('?')[0];
 $('#settings').innerHTML=`
 <div class="section-header" style="margin-bottom:14px">
   <div class="section-title">Application Settings</div>
-  <button class="btn btn-primary btn-sm" onclick="saveSettings()"><i class="fas fa-save"></i> Save Settings</button>
+  <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+    <button class="btn btn-secondary btn-sm" onclick="_settingsExpandAll()" title="Open every section"><i class="fas fa-angles-down"></i> Expand all</button>
+    <button class="btn btn-secondary btn-sm" onclick="_settingsCollapseAll()" title="Minimize every section"><i class="fas fa-angles-up"></i> Collapse all</button>
+    <button class="btn btn-primary btn-sm" onclick="saveSettings()"><i class="fas fa-save"></i> Save Settings</button>
+  </div>
 </div>
 
 <!-- ── OFFLINE STATUS ── -->

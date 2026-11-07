@@ -1,1 +1,1 @@
-{"version":"2.14.66","note":"Projects table: the Name column now wraps to show the full project name instead of cutting it off with \"…\", so long names are readable at a glance.","released":"2026-11-07 15:00"}
+{"version":"2.14.67","note":"Settings sections are now collapsible cards. The page opens minimized to a short list of section headers — click one to expand it — so you no longer scroll past the long Local Server (LAN) card to reach User Management.","released":"2026-11-07 15:40"}
