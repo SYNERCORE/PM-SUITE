@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.16.1';
-const APP_BUILD='20261112i';
+const APP_VERSION='2.16.2';
+const APP_BUILD='20261112j';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='The Execution Dashboard Print / Export PDF is now a purpose-built ONE-PAGE A4 landscape report — a Business-Unit letterhead (logo pulled from the project\'s assigned BU), a 7-tile KPI strip, budget/man-hours/CPM/procurement/actions/planned-work/risk sections, and progress-photo thumbnails, all on a single readable page instead of a multi-page dump.';
+const APP_RELEASE_NOTE='Tidied the Execution Dashboard one-page printout — removed the redundant "BU:" pill from the letterhead, since the Business-Unit logo, company name and address already show which unit it is.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.16.2',date:'2026-11-12',type:'fix',notes:[
+    'Execution Dashboard one-page printout: removed the "BU:" pill from the letterhead — the Business-Unit logo, company name and address already convey it.',
+  ]},
   {version:'2.16.1',date:'2026-11-12',type:'feat',notes:[
     'Execution Dashboard Print / Export PDF is now a purpose-built ONE-PAGE A4 landscape report instead of dumping the whole scrolling dashboard across several pages.',
     'It carries a Business-Unit letterhead — the company logo, name and address are pulled from the project\'s assigned Business Unit (falling back to the Main Company), plus a document-control number and revision.',

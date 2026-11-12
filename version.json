@@ -1,1 +1,1 @@
-{"version":"2.16.1","note":"Execution Dashboard Print / Export PDF is now a purpose-built one-page A4 landscape report with a Business-Unit letterhead (logo from the project BU), a 7-tile KPI strip, condensed budget/man-hours/CPM/procurement/actions/planned-work/risk sections, and progress-photo thumbnails.","released":"2026-11-12 21:10"}
+{"version":"2.16.2","note":"Removed the redundant BU pill from the Execution Dashboard one-page printout letterhead.","released":"2026-11-12 21:40"}

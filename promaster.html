@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.16.1';
-const APP_BUILD='20261112i';
+const APP_VERSION='2.16.2';
+const APP_BUILD='20261112j';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='The Execution Dashboard Print / Export PDF is now a purpose-built ONE-PAGE A4 landscape report — a Business-Unit letterhead (logo pulled from the project\'s assigned BU), a 7-tile KPI strip, budget/man-hours/CPM/procurement/actions/planned-work/risk sections, and progress-photo thumbnails, all on a single readable page instead of a multi-page dump.';
+const APP_RELEASE_NOTE='Tidied the Execution Dashboard one-page printout — removed the redundant "BU:" pill from the letterhead, since the Business-Unit logo, company name and address already show which unit it is.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.16.2',date:'2026-11-12',type:'fix',notes:[
+    'Execution Dashboard one-page printout: removed the "BU:" pill from the letterhead — the Business-Unit logo, company name and address already convey it.',
+  ]},
   {version:'2.16.1',date:'2026-11-12',type:'feat',notes:[
     'Execution Dashboard Print / Export PDF is now a purpose-built ONE-PAGE A4 landscape report instead of dumping the whole scrolling dashboard across several pages.',
     'It carries a Business-Unit letterhead — the company logo, name and address are pulled from the project\'s assigned Business Unit (falling back to the Main Company), plus a document-control number and revision.',
@@ -21214,8 +21217,6 @@ function _pRating(v){ const[l,c]=_edRating(v); return `<span class="pill ${c}">$
 
 function _edPrintHTML(m,p,lh,doc,photos,live){
   const esc2=s=>esc(s==null?'':s);
-  const bu=(AppState.data.businessUnits||[]).find(b=>b.id===(m.project&&m.project.bu))||null;
-  const buName=(bu&&bu.name)||'';
   const logo=lh.logoDataUrl||'';
   const company=lh.companyName||(AppState.data.settings&&AppState.data.settings.companyName)||'Company';
   const addr=[lh.addressLine,lh.contactLine].filter(Boolean).join(' · ');
@@ -21254,7 +21255,6 @@ function _edPrintHTML(m,p,lh,doc,photos,live){
   .logo-ph{width:116px;height:48px;border:1px dashed #9db3d6;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:8px;color:#5a7bb5;background:#f5f9ff;font-weight:700;text-align:center}
   .co .nm{font-size:14.5px;font-weight:800}
   .co .ad{font-size:9px;color:var(--muted)}
-  .bu-chip{display:inline-block;font-size:8.5px;font-weight:800;color:#fff;background:var(--cyan);border-radius:4px;padding:1.5px 7px;margin-top:3px}
   .lh-r{text-align:right;line-height:1.35}
   .lh-r .dt{font-size:14.5px;font-weight:800;color:var(--blue);letter-spacing:.5px}
   .lh-r .mt{font-size:9px;color:var(--muted)} .lh-r .mt b{color:var(--ink)}
@@ -21304,7 +21304,7 @@ function _edPrintHTML(m,p,lh,doc,photos,live){
   <div class="lh">
     <div class="lh-l">
       ${logo?`<img class="logo" src="${logo}" alt="logo">`:`<div class="logo-ph">BU LOGO<br>(set in Business Unit)</div>`}
-      <div class="co"><div class="nm">${esc2(company)}</div>${addr?`<div class="ad">${esc2(addr)}</div>`:''}${buName?`<span class="bu-chip">BU: ${esc2(buName).toUpperCase()}</span>`:''}</div>
+      <div class="co"><div class="nm">${esc2(company)}</div>${addr?`<div class="ad">${esc2(addr)}</div>`:''}</div>
     </div>
     <div class="lh-r">
       <div class="dt">EXECUTION DASHBOARD</div>

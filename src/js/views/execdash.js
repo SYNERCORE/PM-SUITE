@@ -699,8 +699,6 @@ function _pRating(v){ const[l,c]=_edRating(v); return `<span class="pill ${c}">$
 
 function _edPrintHTML(m,p,lh,doc,photos,live){
   const esc2=s=>esc(s==null?'':s);
-  const bu=(AppState.data.businessUnits||[]).find(b=>b.id===(m.project&&m.project.bu))||null;
-  const buName=(bu&&bu.name)||'';
   const logo=lh.logoDataUrl||'';
   const company=lh.companyName||(AppState.data.settings&&AppState.data.settings.companyName)||'Company';
   const addr=[lh.addressLine,lh.contactLine].filter(Boolean).join(' · ');
@@ -739,7 +737,6 @@ function _edPrintHTML(m,p,lh,doc,photos,live){
   .logo-ph{width:116px;height:48px;border:1px dashed #9db3d6;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:8px;color:#5a7bb5;background:#f5f9ff;font-weight:700;text-align:center}
   .co .nm{font-size:14.5px;font-weight:800}
   .co .ad{font-size:9px;color:var(--muted)}
-  .bu-chip{display:inline-block;font-size:8.5px;font-weight:800;color:#fff;background:var(--cyan);border-radius:4px;padding:1.5px 7px;margin-top:3px}
   .lh-r{text-align:right;line-height:1.35}
   .lh-r .dt{font-size:14.5px;font-weight:800;color:var(--blue);letter-spacing:.5px}
   .lh-r .mt{font-size:9px;color:var(--muted)} .lh-r .mt b{color:var(--ink)}
@@ -789,7 +786,7 @@ function _edPrintHTML(m,p,lh,doc,photos,live){
   <div class="lh">
     <div class="lh-l">
       ${logo?`<img class="logo" src="${logo}" alt="logo">`:`<div class="logo-ph">BU LOGO<br>(set in Business Unit)</div>`}
-      <div class="co"><div class="nm">${esc2(company)}</div>${addr?`<div class="ad">${esc2(addr)}</div>`:''}${buName?`<span class="bu-chip">BU: ${esc2(buName).toUpperCase()}</span>`:''}</div>
+      <div class="co"><div class="nm">${esc2(company)}</div>${addr?`<div class="ad">${esc2(addr)}</div>`:''}</div>
     </div>
     <div class="lh-r">
       <div class="dt">EXECUTION DASHBOARD</div>
