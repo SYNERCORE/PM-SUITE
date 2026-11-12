@@ -318,6 +318,29 @@ function _edToolbar(model,live,pid){
   </div>`;
 }
 
+// ── Latest Photos strip (reads live, not from snapshot, to keep snapshots small) ──
+function _edPhotoStrip(pid){
+  const photos=(AppState.data.progressPhotos||[])
+    .filter(p=>p.projectId===pid && !p._deleted)
+    .sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(b._lastModified||'').localeCompare(a._lastModified||''))
+    .slice(0,6);
+  const viewAll=(_edCtx==='detail')
+    ? `<button class="btn btn-secondary btn-sm" onclick="detailTab='photos';renderDetailTab()" style="margin-left:auto"><i class="fas fa-images"></i> View all</button>`
+    : '';
+  const body = photos.length
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">
+        ${photos.map(ph=>`<div style="border:1px solid var(--border-subtle,rgba(255,255,255,.08));border-radius:8px;overflow:hidden">
+          <img src="${ph.img}" loading="lazy" ${typeof _ppViewFull==='function'?`onclick="_ppViewFull('${ph.id}')"`:''} style="width:100%;aspect-ratio:4/3;object-fit:cover;cursor:pointer;display:block;background:#0b0f16">
+          <div style="padding:5px 7px;font-size:10px;line-height:1.3">${esc(ph.caption||'')||'<span style="color:var(--text-muted)">—</span>'}<div style="color:var(--text-muted);font-size:9px;margin-top:2px">${esc(ph.date||'')}${ph.tag?' · '+esc(ph.tag):''}</div></div>
+        </div>`).join('')}
+      </div>`
+    : `<div class="ed-empty">No progress photos yet. Add them in the Progress Photos tab.</div>`;
+  return `<div class="card ed-mb">
+    <div class="ed-h3" style="display:flex;align-items:center">Latest Photos <span class="ed-src" style="margin:0 0 0 8px">newest site photos</span>${viewAll}</div>
+    ${body}
+  </div>`;
+}
+
 // ── Full HTML render from model ───────────────────────────────────
 function _edRender(m,opts){
   const live=opts.live, pid=opts.pid;
@@ -494,6 +517,8 @@ function _edRender(m,opts){
     ${m.phaseRows.map(ph=>`<div class="ed-phase"><div class="ed-pn">${esc(ph.phase)} <span class="ed-sub2">(${ph.n})</span></div><div style="flex:1">${bar(ph.pct,'var(--accent-green)')}</div><div class="ed-mono" style="width:40px;text-align:right">${ph.pct}%</div></div>`).join('')||'<div class="ed-empty">No task phases defined.</div>'}
     <div class="ed-src">Average % complete per phase (tasks grouped by Phase).</div>
   </div>
+
+  ${_edPhotoStrip(pid)}
 
   <!-- OPEN ACTION ITEMS -->
   <div class="card ed-mb" style="border:1px solid rgba(240,164,80,.5)">

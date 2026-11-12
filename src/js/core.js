@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.15.6';
-const APP_BUILD='20261112g';
+const APP_VERSION='2.16.0';
+const APP_BUILD='20261112h';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Daily Manpower Log now warns when the selected person has no hourly rate (cost would be ₱0) — an inline note in the form and a confirm on save — so zero-cost entries are not logged by accident.';
+const APP_RELEASE_NOTE='New Progress Photos tab on every project — upload one or many site photos per day, each with a caption and optional area/task tag, in a date-grouped gallery. Photos are compressed for fast display and the full-resolution originals upload to SharePoint when connected. The newest photos also appear on the Execution Dashboard and its printout.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.16.0',date:'2026-11-12',type:'feat',notes:[
+    'New Progress Photos tab on every project: a date-grouped site-photo gallery. Upload one or many images at once, each with a caption and an optional area/task tag (the tag picker lists the project\'s tasks).',
+    'Photos are downscaled in-browser to ~1024px for fast, offline-safe display; when SharePoint is connected the full-resolution originals are also uploaded (marked "SP", with an "Open original" link in the full-size viewer).',
+    'The Execution Dashboard now shows a "Latest Photos" strip of the newest site photos, included in the Print / Export PDF.',
+  ]},
   {version:'2.15.6',date:'2026-11-12',type:'fix',notes:[
     'Daily Manpower Log: the Log Day form now shows an amber warning when the selected person has no hourly rate (cost would be ₱0), and asks for confirmation on save, so zero-cost entries are not recorded by mistake.',
   ]},

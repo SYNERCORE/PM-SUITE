@@ -30,6 +30,7 @@
     "js/views/ganttExport.js",
     "js/views/execdash.js",
     "js/views/dailylog.js",
+    "js/views/photos.js",
     "js/views/resources.js",
     "js/views/manpower.js",
     "js/views/materials.js",

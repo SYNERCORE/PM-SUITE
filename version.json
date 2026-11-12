@@ -1,1 +1,1 @@
-{"version":"2.15.6","note":"Daily Manpower Log now warns when the selected person has no hourly rate (cost would be ₱0): an inline note in the form and a confirm on save, so zero-cost entries are not logged by accident.","released":"2026-11-12 20:00"}
+{"version":"2.16.0","note":"New Progress Photos tab on every project: a date-grouped gallery, upload one or many per day with caption + optional tag; compressed for display with full-res to SharePoint when connected. Newest photos also show on the Execution Dashboard and its printout.","released":"2026-11-12 20:40"}
