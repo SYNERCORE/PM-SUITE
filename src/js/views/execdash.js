@@ -6,6 +6,12 @@
 
 // View state: null = live; otherwise a snapshot date string 'YYYY-MM-DD'.
 let _edViewSnap = null;
+// Where the dashboard is being shown: 'detail' = inside a project tab,
+// 'global' = the top-level sidebar page (its own project picker).
+let _edCtx = 'detail';
+let _edGlobalPid = null;
+// Re-render whichever context is currently active (used by snapshot/manual actions).
+function _edRerender(){ _edCtx==='global' ? renderExecDashboardPage() : renderExecDashboard(); }
 
 // ── Per-project manual settings (things no module stores) ──────────
 function _edSettings(pid){
@@ -206,10 +212,13 @@ function _edModel(pid){
     roleRows, mhPlan, mhAct, onsiteTot, hpd, dpw,
     procRows,
     actRows, riskRows, qualRows, phaseRows, last24,
-    permits:{...st.permits},
     safety:{...st.safety, manHrs:manHrsCum, onsite:onsiteTot},
     contractors:st.contractors||0,
     weather:st.weather||'', weatherFc:st.weatherFc||'',
+    // System Completion is now tracked from TASKS (not manual permits)
+    sysTotal: tasks.length,
+    sysDone: tasks.filter(t=>_taskPct(t)>=100).length,
+    sysOpen: tasks.length - tasks.filter(t=>_taskPct(t)>=100).length,
     sysComplete: tasks.length? Math.round(tasks.filter(t=>_taskPct(t)>=100).length/tasks.length*100):0,
     _taskPct: tasks.reduce((o,t)=>{o[t.id]=_taskPct(t);return o;},{})
   };
@@ -223,6 +232,7 @@ function _taskPct(t){
 
 // ── Main render entry (project detail tab) ────────────────────────
 function renderExecDashboard(){
+  _edCtx='detail';
   const pid=detailProjectId;
   // Guard: a snapshot selected for another project doesn't apply here.
   if(_edViewSnap!==null && !_edSnaps(pid).some(s=>s.date===_edViewSnap)) _edViewSnap=null;
@@ -237,26 +247,46 @@ function renderExecDashboard(){
   $('#detailTabContent').innerHTML=_edRender(model,{live,pid});
 }
 
+// ── Top-level sidebar page (global, with its own project picker) ──
+function renderExecDashboardPage(){
+  _edCtx='global';
+  const el=document.getElementById('execdashboard'); if(!el) return;
+  const projs=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='prospect'&&p.status!=='archived');
+  if(!_edGlobalPid || !projs.some(p=>p.id===_edGlobalPid)) _edGlobalPid=projs.length?projs[0].id:null;
+  if(!_edGlobalPid){ el.innerHTML='<div class="card" style="padding:40px;text-align:center;color:var(--text-muted)"><i class="fas fa-gauge-high" style="font-size:28px;display:block;margin-bottom:12px"></i>No active projects to show. Create a project first.</div>'; return; }
+  const pid=_edGlobalPid;
+  if(_edViewSnap!==null && !_edSnaps(pid).some(s=>s.date===_edViewSnap)) _edViewSnap=null;
+  const live=_edViewSnap===null;
+  let model;
+  if(live){ model=_edModel(pid); }
+  else { const snap=_edSnaps(pid).find(s=>s.date===_edViewSnap); model=snap?snap.data:_edModel(pid); }
+  if(!model){ el.innerHTML='<div class="card" style="padding:24px;text-align:center;color:var(--text-muted)">Project not found.</div>'; return; }
+  el.innerHTML=`<div style="margin-bottom:14px"><h1 class="page-title" style="margin:0"><i class="fas fa-gauge-high" style="margin-right:8px;color:var(--accent-cyan)"></i>Execution Dashboard</h1></div>`+_edRender(model,{live,pid});
+}
+
 // ── Toolbar ───────────────────────────────────────────────────────
 function _edToolbar(model,live,pid){
   const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='prospect'&&p.status!=='archived');
   const snaps=_edSnaps(pid);
+  const pickCode = _edCtx==='global'
+    ? `_edGlobalPid=this.value;_edViewSnap=null;renderExecDashboardPage()`
+    : `detailProjectId=this.value;_edViewSnap=null;detailTab='execdash';renderProjectDetail()`;
   return `<div class="card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;padding:10px 12px">
     <div style="display:flex;align-items:center;gap:6px">
       <span style="font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-muted);font-weight:700">Project</span>
-      <select class="form-select" style="height:30px;font-size:12px;max-width:280px" onchange="detailProjectId=this.value;_edViewSnap=null;detailTab='execdash';renderProjectDetail()">
+      <select class="form-select" style="height:30px;font-size:12px;max-width:280px" onchange="${pickCode}">
         ${projects.map(p=>`<option value="${esc(p.id)}" ${p.id===pid?'selected':''}>${esc(p.id)} — ${esc(p.name)}</option>`).join('')}
       </select>
     </div>
     <div style="display:flex;align-items:center;gap:6px">
       <span style="font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-muted);font-weight:700">View</span>
-      <select class="form-select" style="height:30px;font-size:12px" onchange="_edViewSnap=this.value==='live'?null:this.value;renderExecDashboard()">
+      <select class="form-select" style="height:30px;font-size:12px" onchange="_edViewSnap=this.value==='live'?null:this.value;_edRerender()">
         <option value="live" ${live?'selected':''}>● Live (today)</option>
         ${snaps.map(s=>`<option value="${esc(s.date)}" ${(!live&&_edViewSnap===s.date)?'selected':''}>Snapshot · ${esc(s.date)}</option>`).join('')}
       </select>
     </div>
     <div style="margin-left:auto;display:flex;gap:7px;flex-wrap:wrap">
-      <button class="btn btn-secondary btn-sm" onclick="renderExecDashboard()"><i class="fas fa-sync"></i> Refresh</button>
+      <button class="btn btn-secondary btn-sm" onclick="_edRerender()"><i class="fas fa-sync"></i> Refresh</button>
       ${live?`<button class="btn btn-secondary btn-sm" style="border-color:rgba(63,185,80,.5);color:var(--accent-green)" onclick="_edSaveSnapshot('${esc(pid)}')"><i class="fas fa-camera"></i> Save Today's Snapshot</button>`:`<button class="btn btn-secondary btn-sm" style="border-color:var(--accent-red);color:var(--accent-red)" onclick="_edDeleteSnapshot('${esc(pid)}','${esc(_edViewSnap)}')"><i class="fas fa-trash"></i> Delete Snapshot</button>`}
       <button class="btn btn-primary btn-sm" onclick="_edPrint()"><i class="fas fa-print"></i> Print / Export PDF</button>
     </div>
@@ -460,11 +490,11 @@ function _edRender(m,opts){
       <ul class="ed-list">${m.riskRows.map(r=>`<li><i class="ed-dot" style="background:${/high|crit/i.test(r.sev)?'var(--accent-red)':/med/i.test(r.sev)?'var(--accent-amber)':'var(--accent-green)'}"></i><div>${esc(r.desc)} <span class="ed-tag ${/high|crit/i.test(r.sev)?'t-hi':/med/i.test(r.sev)?'t-md':'t-lo'}">${esc(r.sev)}</span></div></li>`).join('')||'<li style="color:var(--text-muted)">No open risks.</li>'}</ul>
     </div>
     <div class="card">
-      <div class="ed-h3">System Completion</div>
+      <div class="ed-h3">System Completion <span class="ed-src" style="margin:0">from Tasks</span></div>
       <div class="ed-g2">
-        <div class="ed-kpi"><div class="ed-lbl">Total Permits</div><div class="ed-num">${m.permits.total||0}</div></div>
-        <div class="ed-kpi"><div class="ed-lbl">Permits Complete</div><div class="ed-num" style="color:var(--accent-green)">${m.permits.complete||0}</div></div>
-        <div class="ed-kpi"><div class="ed-lbl">Open Activities</div><div class="ed-num" style="color:var(--accent-amber)">${m.permits.openActs||0}</div></div>
+        <div class="ed-kpi"><div class="ed-lbl">Total Activities</div><div class="ed-num">${m.sysTotal||0}</div></div>
+        <div class="ed-kpi"><div class="ed-lbl">Completed</div><div class="ed-num" style="color:var(--accent-green)">${m.sysDone||0}</div></div>
+        <div class="ed-kpi"><div class="ed-lbl">Open Activities</div><div class="ed-num" style="color:var(--accent-amber)">${m.sysOpen||0}</div></div>
         <div class="ed-kpi"><div class="ed-lbl">System Complete</div><div class="ed-num" style="color:var(--accent-green)">${m.sysComplete}%</div></div>
       </div>
     </div>
@@ -498,7 +528,7 @@ function _edRender(m,opts){
 
 // ── Manual inputs panel ───────────────────────────────────────────
 function _edManualPanel(st,pid){
-  const r=st.ratings, s=st.safety, pm=st.permits;
+  const r=st.ratings, s=st.safety;
   const sel=(id,val,cur)=>`<select class="form-select" style="height:28px;font-size:11px" onchange="_edSetManual('${pid}','${id}',this.value)">${['','good','moderate','low'].map(o=>`<option value="${o}" ${cur===o?'selected':''}>${o?o[0].toUpperCase()+o.slice(1):'(auto)'}</option>`).join('')}</select>`;
   const numI=(path,val)=>`<input class="form-input" type="number" style="height:28px;font-size:11px;width:90px" value="${val||0}" onchange="_edSetManual('${pid}','${path}',this.value)">`;
   const txtI=(path,val,ph)=>`<input class="form-input" style="height:28px;font-size:11px" value="${esc(val||'')}" placeholder="${ph||''}" onchange="_edSetManual('${pid}','${path}',this.value)">`;
@@ -513,26 +543,23 @@ function _edManualPanel(st,pid){
     <div class="ed-g4" style="margin-top:10px">
       <div><div class="ed-lbl">Hours / day</div>${numI('hoursPerDay',st.hoursPerDay)}</div>
       <div><div class="ed-lbl">Days / week</div>${numI('daysPerWeek',st.daysPerWeek)}</div>
-      <div><div class="ed-lbl">Permits — total</div>${numI('permits.total',pm.total)}</div>
-      <div><div class="ed-lbl">Permits — complete</div>${numI('permits.complete',pm.complete)}</div>
-    </div>
-    <div class="ed-g4" style="margin-top:10px">
-      <div><div class="ed-lbl">Open activities</div>${numI('permits.openActs',pm.openActs)}</div>
       <div><div class="ed-lbl">Unsafe condition</div>${numI('safety.unsafeCond',s.unsafeCond)}</div>
       <div><div class="ed-lbl">Unsafe act</div>${numI('safety.unsafeAct',s.unsafeAct)}</div>
-      <div><div class="ed-lbl">Near miss</div>${numI('safety.nearMiss',s.nearMiss)}</div>
     </div>
     <div class="ed-g4" style="margin-top:10px">
+      <div><div class="ed-lbl">Near miss</div>${numI('safety.nearMiss',s.nearMiss)}</div>
       <div><div class="ed-lbl">First aid</div>${numI('safety.firstAid',s.firstAid)}</div>
       <div><div class="ed-lbl">Medical treatment</div>${numI('safety.mtc',s.mtc)}</div>
       <div><div class="ed-lbl">Lost-time injury</div>${numI('safety.lti',s.lti)}</div>
+    </div>
+    <div class="ed-g4" style="margin-top:10px">
       <div><div class="ed-lbl">LTIFR</div>${numI('safety.ltifr',s.ltifr)}</div>
     </div>
     <div class="ed-g2" style="margin-top:10px">
       <div><div class="ed-lbl">Weather — today</div>${txtI('weather',st.weather,'e.g. Sunny, 32°C')}</div>
       <div><div class="ed-lbl">Weather — forecast</div>${txtI('weatherFc',st.weatherFc,'e.g. Rain expected PM')}</div>
     </div>
-    <div style="margin-top:10px"><button class="btn btn-secondary btn-sm" onclick="renderExecDashboard()"><i class="fas fa-sync"></i> Apply to dashboard</button></div>
+    <div style="margin-top:10px"><button class="btn btn-secondary btn-sm" onclick="_edRerender()"><i class="fas fa-sync"></i> Apply to dashboard</button></div>
   </div>`;
 }
 
@@ -558,13 +585,13 @@ function _edSaveSnapshot(pid){
   if(idx>=0){ AppState.data.execDashSnapshots[idx]=rec; showToast('Snapshot for '+date+' updated','success'); }
   else { AppState.data.execDashSnapshots.push(rec); showToast('Snapshot saved for '+date,'success'); }
   AppState.save();
-  _edViewSnap=null; renderExecDashboard();
+  _edViewSnap=null; _edRerender();
 }
 function _edDeleteSnapshot(pid,date){
   if(!confirm('Delete the snapshot for '+date+'? This cannot be undone.')) return;
   AppState.data.execDashSnapshots=(AppState.data.execDashSnapshots||[]).filter(s=>!(s.projectId===pid&&s.date===date));
   AppState.save();
-  _edViewSnap=null; renderExecDashboard();
+  _edViewSnap=null; _edRerender();
   showToast('Snapshot '+date+' deleted','warning');
 }
 

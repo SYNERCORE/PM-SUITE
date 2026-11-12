@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.15.0';
-const APP_BUILD='20261112a';
+const APP_VERSION='2.15.1';
+const APP_BUILD='20261112b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='New per-project Execution Dashboard (OMT-style one-page view): live SPI/progress, CPM critical path, itemized budget by category and man-hours by role from Resource Allocation, procurement items with request age & assignee, open action items, last-24h accomplishments, plus daily snapshots and Print/Export PDF.';
+const APP_RELEASE_NOTE='Execution Dashboard is now also a top-level page in the sidebar (OVERVIEW group) with its own project picker — open it without drilling into a project first. The per-project tab stays. System Completion\'s permit counts are manual inputs; System Complete % is auto from task completion.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.15.1',date:'2026-11-12',type:'feat',notes:[
+    'Execution Dashboard is now also available as a top-level page in the sidebar (OVERVIEW group), with its own project picker — so you can open it directly without first drilling into a project. The per-project Execution Dashboard tab is unchanged.',
+    'Both views share the same live data, snapshots and Print/Export PDF; switching the project or snapshot stays on whichever view you opened.',
+  ]},
   {version:'2.15.0',date:'2026-11-12',type:'major',notes:[
     'New Execution Dashboard tab on every project — a one-page, OMT-style execution view that reads live from the project\'s own modules. Includes a project picker, Live view, Save Today\'s Snapshot, and Print / Export PDF (A4 one-page form).',
     'Budget & Cost is itemized by category (Manpower, Tools & Equipment, PPE, Mob/Demob, Consumables & Materials, Procurement, Misc) grouped straight from Resource Allocation — planned vs actual cost, variance and % used, reconciling to the allocation screen.',
@@ -1290,6 +1294,7 @@ const NAV_ITEMS=[
 {id:'myWork',label:'My Work',icon:'fas fa-inbox',section:'Overview'},
 {id:'teamLoad',label:'Team Load',icon:'fas fa-users-cog',section:'Overview'},
 {id:'projects',label:'Projects',icon:'fas fa-briefcase',section:'Overview'},
+{id:'execdashboard',label:'Execution Dashboard',icon:'fas fa-gauge-high',section:'Overview'},
 {id:'prospects',label:'Prospects',icon:'fas fa-search-dollar',section:'Overview'},
 {id:'tasks',label:'Task Management',icon:'fas fa-tasks',section:'Planning'},
 {id:'gantt',label:'Gantt Chart',icon:'fas fa-stream',section:'Planning'},
