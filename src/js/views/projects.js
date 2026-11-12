@@ -762,6 +762,7 @@ function renderProjectDetail(){
   const _rdColor=_rdScore.overall==='go'?'var(--accent-green)':_rdScore.overall==='caution'?'var(--accent-amber)':'var(--accent-red)';
   const tabs=[
     {id:'overview',label:'Overview',icon:'fa-info-circle'},
+    {id:'execdash',label:'Execution Dashboard',icon:'fa-gauge-high',color:'var(--accent-cyan)'},
     {id:'readiness',label:'Readiness',icon:_rdIcon,color:_rdColor},
     {id:'tasks',label:`Tasks (${tasks.length})`,icon:'fa-tasks'},
     {id:'resources',label:'Resources',icon:'fa-users'},
@@ -863,6 +864,7 @@ function renderProjectDetail(){
 function renderDetailTab(){
   const map={
     overview:renderDetailOverview,
+    execdash:renderExecDashboard,
     readiness:renderDetailReadiness,
     tasks:renderDetailTasks,
     resources:renderDetailResources,

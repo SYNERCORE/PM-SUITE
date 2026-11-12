@@ -28,6 +28,7 @@
     "js/views/tasks.js",
     "js/views/gantt.js",
     "js/views/ganttExport.js",
+    "js/views/execdash.js",
     "js/views/resources.js",
     "js/views/manpower.js",
     "js/views/materials.js",

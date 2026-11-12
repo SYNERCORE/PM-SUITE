@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.14.67';
-const APP_BUILD='20261107c';
+const APP_VERSION='2.15.0';
+const APP_BUILD='20261112a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,19 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Settings: every section (Local Server (LAN), User Management, etc.) is now a collapsible card. The page opens minimized to a short list of section headers — click one to expand it, so you no longer scroll past the long LAN card to reach Users.';
+const APP_RELEASE_NOTE='New per-project Execution Dashboard (OMT-style one-page view): live SPI/progress, CPM critical path, itemized budget by category and man-hours by role from Resource Allocation, procurement items with request age & assignee, open action items, last-24h accomplishments, plus daily snapshots and Print/Export PDF.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.15.0',date:'2026-11-12',type:'major',notes:[
+    'New Execution Dashboard tab on every project — a one-page, OMT-style execution view that reads live from the project\'s own modules. Includes a project picker, Live view, Save Today\'s Snapshot, and Print / Export PDF (A4 one-page form).',
+    'Budget & Cost is itemized by category (Manpower, Tools & Equipment, PPE, Mob/Demob, Consumables & Materials, Procurement, Misc) grouped straight from Resource Allocation — planned vs actual cost, variance and % used, reconciling to the allocation screen.',
+    'Man-hours by Role groups the Manpower register by trade: planned vs actual man-hours (headcount × hours/day × days/week + OT), on-site headcount and % used per role.',
+    'Procurement section lists each item with its request age (red ≥30d / amber 15–29d / green <15d), amount, status and who it is assigned to (flags Unassigned).',
+    'Critical Path Method (CPM) card shows the zero-float driving chain with dates, float and %, near-critical tasks and a forecast-vs-baseline finish; plus SPI, progress %, open action items, last-24h accomplishments (diffed against the previous snapshot), phase progress, risks, quality, system completion, safety statistics and weather.',
+    'Daily snapshots freeze the whole page per project per day for the official record; manual-input fields (ratings, permits, safety stats, weather, hours/day) cover what no module tracks.',
+  ]},
   {version:'2.14.67',date:'2026-11-07',type:'feat',notes:[
     'Settings page: every section is now a collapsible card with a clickable title strip and a chevron. The page opens minimized — just a short list of section headers — so you no longer have to scroll past the long Local Server (LAN) card to reach User Management.',
     'Click any section header to expand it; click again to minimize. New "Expand all" and "Collapse all" buttons toggle every section at once. Your expanded/collapsed choices are remembered on this device.',
