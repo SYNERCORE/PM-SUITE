@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.15.5';
-const APP_BUILD='20261112f';
+const APP_VERSION='2.15.6';
+const APP_BUILD='20261112g';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='The Execution Dashboard now shows a "Planned Work — Next 3 Days" card — not-yet-complete tasks whose schedule (CPM early dates, else task dates) overlaps the next three days, with the critical path flagged in red.';
+const APP_RELEASE_NOTE='Daily Manpower Log now warns when the selected person has no hourly rate (cost would be ₱0) — an inline note in the form and a confirm on save — so zero-cost entries are not logged by accident.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.15.6',date:'2026-11-12',type:'fix',notes:[
+    'Daily Manpower Log: the Log Day form now shows an amber warning when the selected person has no hourly rate (cost would be ₱0), and asks for confirmation on save, so zero-cost entries are not recorded by mistake.',
+  ]},
   {version:'2.15.5',date:'2026-11-12',type:'feat',notes:[
     'Execution Dashboard: added the "Planned Work — Next 3 Days" card (it was in the design but missing from the build). It lists not-yet-complete tasks whose schedule overlaps the next three days, using CPM early-start dates when available and falling back to each task\'s own start/end dates.',
     'Critical-path tasks are flagged in red; each line shows the scheduled window, owner and current %. Phase Progress moved to its own full-width card below.',
@@ -21413,7 +21416,8 @@ function showManpowerLogForm(id){
     <div class="form-group"><label class="form-label">Overtime Hours</label><input class="form-input" type="number" id="mplOT" min="0" step="0.5" value="${edit?edit.otHrs:0}"></div>
     <div class="form-group"><label class="form-label">Night Hours <span style="font-weight:400;color:var(--text-muted)">(10pm–6am, +${(_mplMult().nightDiff*100)}%)</span></label><input class="form-input" type="number" id="mplNight" min="0" step="0.5" value="${edit?edit.nightHrs:0}"></div>
     <div class="form-group"><label class="form-label">Day Type *</label><select class="form-select" id="mplDayType">${_MPL_DAYTYPES.map(d=>`<option value="${d.k}" ${((edit&&edit.dayType)||'ordinary')===d.k?'selected':''}>${d.label}</option>`).join('')}</select></div>
-    <div class="form-group"><label class="form-label">Hourly Rate (₱) *</label><input class="form-input" type="number" id="mplRate" min="0" step="0.01" value="${edit?edit.rate:0}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px">Auto-filled from the person's salary; override if needed.</div></div>
+    <div class="form-group"><label class="form-label">Hourly Rate (₱) *</label><input class="form-input" type="number" id="mplRate" min="0" step="0.01" value="${edit?edit.rate:0}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px">Auto-filled from the person's salary; override if needed.</div>
+      <div id="mplRateWarn" style="display:none;margin-top:5px;font-size:10.5px;color:var(--accent-amber)"><i class="fas fa-exclamation-triangle"></i> This person has no hourly rate — cost will be ₱0. Set their salary in Masterlist → Personnel, or type a rate here.</div></div>
   </div>
   <div style="margin-top:10px;padding:10px 12px;background:rgba(56,139,253,.08);border-radius:8px;font-size:11.5px">
     Estimated cost: <b id="mplPreview" style="font-family:var(--font-mono)">₱0.00</b>
@@ -21438,11 +21442,13 @@ function _mplSyncRate(){
 function _mplPreview(){
   const e={regHrs:+$('#mplReg').value||0, otHrs:+$('#mplOT').value||0, nightHrs:+$('#mplNight').value||0, dayType:$('#mplDayType').value, rate:+$('#mplRate').value||0};
   if($('#mplPreview'))$('#mplPreview').textContent=_mplMoney(_mplCost(e));
+  const w=$('#mplRateWarn'); if(w) w.style.display=(e.rate>0)?'none':'block';
 }
 function saveManpowerLog(id){
   const sel=$('#mplPerson'); const resId=sel?sel.value:'';
   if(!resId){showToast('Select a person','error');return;}
   if(!$('#mplDate').value){showToast('Pick a date','error');return;}
+  if((+$('#mplRate').value||0)<=0 && !confirm('Hourly rate is ₱0 — this entry will have no labour cost.\n\nSave anyway? (Set the person\'s salary in Masterlist → Personnel to avoid this.)')) return;
   const opt=sel.options[sel.selectedIndex];
   const personName=opt?opt.textContent.replace(/\s*\(.*\)$/,''):'';
   const role=($('#mplRole')&&$('#mplRole').value.trim())||(opt?(opt.getAttribute('data-role')||''):'');

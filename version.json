@@ -1,1 +1,1 @@
-{"version":"2.15.5","note":"Execution Dashboard now shows a 'Planned Work — Next 3 Days' card: not-yet-complete tasks whose schedule (CPM early dates, else task dates) overlaps the next three days, with the critical path flagged in red.","released":"2026-11-12 19:30"}
+{"version":"2.15.6","note":"Daily Manpower Log now warns when the selected person has no hourly rate (cost would be ₱0): an inline note in the form and a confirm on save, so zero-cost entries are not logged by accident.","released":"2026-11-12 20:00"}

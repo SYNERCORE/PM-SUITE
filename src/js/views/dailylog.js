@@ -213,7 +213,8 @@ function showManpowerLogForm(id){
     <div class="form-group"><label class="form-label">Overtime Hours</label><input class="form-input" type="number" id="mplOT" min="0" step="0.5" value="${edit?edit.otHrs:0}"></div>
     <div class="form-group"><label class="form-label">Night Hours <span style="font-weight:400;color:var(--text-muted)">(10pm–6am, +${(_mplMult().nightDiff*100)}%)</span></label><input class="form-input" type="number" id="mplNight" min="0" step="0.5" value="${edit?edit.nightHrs:0}"></div>
     <div class="form-group"><label class="form-label">Day Type *</label><select class="form-select" id="mplDayType">${_MPL_DAYTYPES.map(d=>`<option value="${d.k}" ${((edit&&edit.dayType)||'ordinary')===d.k?'selected':''}>${d.label}</option>`).join('')}</select></div>
-    <div class="form-group"><label class="form-label">Hourly Rate (₱) *</label><input class="form-input" type="number" id="mplRate" min="0" step="0.01" value="${edit?edit.rate:0}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px">Auto-filled from the person's salary; override if needed.</div></div>
+    <div class="form-group"><label class="form-label">Hourly Rate (₱) *</label><input class="form-input" type="number" id="mplRate" min="0" step="0.01" value="${edit?edit.rate:0}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px">Auto-filled from the person's salary; override if needed.</div>
+      <div id="mplRateWarn" style="display:none;margin-top:5px;font-size:10.5px;color:var(--accent-amber)"><i class="fas fa-exclamation-triangle"></i> This person has no hourly rate — cost will be ₱0. Set their salary in Masterlist → Personnel, or type a rate here.</div></div>
   </div>
   <div style="margin-top:10px;padding:10px 12px;background:rgba(56,139,253,.08);border-radius:8px;font-size:11.5px">
     Estimated cost: <b id="mplPreview" style="font-family:var(--font-mono)">₱0.00</b>
@@ -238,11 +239,13 @@ function _mplSyncRate(){
 function _mplPreview(){
   const e={regHrs:+$('#mplReg').value||0, otHrs:+$('#mplOT').value||0, nightHrs:+$('#mplNight').value||0, dayType:$('#mplDayType').value, rate:+$('#mplRate').value||0};
   if($('#mplPreview'))$('#mplPreview').textContent=_mplMoney(_mplCost(e));
+  const w=$('#mplRateWarn'); if(w) w.style.display=(e.rate>0)?'none':'block';
 }
 function saveManpowerLog(id){
   const sel=$('#mplPerson'); const resId=sel?sel.value:'';
   if(!resId){showToast('Select a person','error');return;}
   if(!$('#mplDate').value){showToast('Pick a date','error');return;}
+  if((+$('#mplRate').value||0)<=0 && !confirm('Hourly rate is ₱0 — this entry will have no labour cost.\n\nSave anyway? (Set the person\'s salary in Masterlist → Personnel to avoid this.)')) return;
   const opt=sel.options[sel.selectedIndex];
   const personName=opt?opt.textContent.replace(/\s*\(.*\)$/,''):'';
   const role=($('#mplRole')&&$('#mplRole').value.trim())||(opt?(opt.getAttribute('data-role')||''):'');

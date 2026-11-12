@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.15.5';
-const APP_BUILD='20261112f';
+const APP_VERSION='2.15.6';
+const APP_BUILD='20261112g';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,14 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='The Execution Dashboard now shows a "Planned Work — Next 3 Days" card — not-yet-complete tasks whose schedule (CPM early dates, else task dates) overlaps the next three days, with the critical path flagged in red.';
+const APP_RELEASE_NOTE='Daily Manpower Log now warns when the selected person has no hourly rate (cost would be ₱0) — an inline note in the form and a confirm on save — so zero-cost entries are not logged by accident.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.15.6',date:'2026-11-12',type:'fix',notes:[
+    'Daily Manpower Log: the Log Day form now shows an amber warning when the selected person has no hourly rate (cost would be ₱0), and asks for confirmation on save, so zero-cost entries are not recorded by mistake.',
+  ]},
   {version:'2.15.5',date:'2026-11-12',type:'feat',notes:[
     'Execution Dashboard: added the "Planned Work — Next 3 Days" card (it was in the design but missing from the build). It lists not-yet-complete tasks whose schedule overlaps the next three days, using CPM early-start dates when available and falling back to each task\'s own start/end dates.',
     'Critical-path tasks are flagged in red; each line shows the scheduled window, owner and current %. Phase Progress moved to its own full-width card below.',
