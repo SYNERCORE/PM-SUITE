@@ -81,12 +81,14 @@ function _edModel(pid){
   const prevSpi = prevSnap&&prevSnap.data? prevSnap.data.spi : spi;
 
   // ── CPM ──
+  const _esef={};   // taskId -> {es,ef,crit,tf} from CPM (shared with Planned Work below)
   let cpm={len:0,driving:'—',nearCrit:0,forecast:null,baseline:p.endDate||null,rows:[]};
   try{
     if(window.SHICCPMEngine && tasks.length){
       const r=SHICCPMEngine.runFullCPM(tasks,p);
       const cm=r.tasks||[];
       const toStr=d=>d? (typeof d==='object'?d.toISOString().split('T')[0]:String(d)):'';
+      cm.forEach(t=>{ _esef[t.id]={es:toStr(t._ES),ef:toStr(t._EF),crit:!!t._isCritical,tf:+(t._TF||0)}; });
       const crit=cm.filter(t=>t._isCritical && !(t.isSummary||t.summary))
         .sort((a,b)=>(toStr(a._ES)).localeCompare(toStr(b._ES)));
       cpm.nearCrit=cm.filter(t=>t._TF>0&&t._TF<=2).length;
@@ -107,6 +109,18 @@ function _edModel(pid){
     }
   }catch(e){ console.warn('ExecDash CPM failed',e); }
   const fcVar = (cpm.forecast&&cpm.baseline)? daysBetween(cpm.forecast,cpm.baseline):null; // + = early
+
+  // ── Planned Work — Next 3 Days ──
+  const _win3=(function(){const d=new Date(today+'T00:00:00');d.setDate(d.getDate()+3);return d.toISOString().split('T')[0];})();
+  const planned3=tasks.filter(t=>!(t.isSummary||t.summary||t.milestone)).map(t=>{
+    const ref=_esef[t.id]||{};
+    const start=ref.es||t.startDate||'';
+    const finish=ref.ef||t.endDate||t.dueDate||'';
+    return {name:t.name||'(untitled)', start, finish, pct:_taskPct(t), crit:!!ref.crit, owner:t.assignee||t.owner||t.responsiblePerson||''};
+  })
+  .filter(x=>x.pct<100 && x.start && x.start<=_win3 && (!x.finish || x.finish>=today))  // not done & overlaps the next 3 days
+  .sort((a,b)=>(a.start||'').localeCompare(b.start||'')||(a.finish||'').localeCompare(b.finish||''))
+  .slice(0,10);
 
   // ── Budget by category (Resource Allocation) ──
   const cats=(typeof ALLOC_CATS!=='undefined')?ALLOC_CATS:[{id:'misc',label:'Miscellaneous',color:'#8b949e',test:()=>true}];
@@ -214,7 +228,7 @@ function _edModel(pid){
     budgetRows, budTotB, budTotA,
     roleRows, mhPlan, mhAct, onsiteTot, hpd, dpw,
     procRows,
-    actRows, riskRows, qualRows, phaseRows, last24,
+    actRows, riskRows, qualRows, phaseRows, last24, planned3,
     safety:{...st.safety, manHrs:manHrsCum, onsite:onsiteTot},
     contractors:st.contractors||0,
     weather:st.weather||'', weatherFc:st.weatherFc||'',
@@ -467,10 +481,18 @@ function _edRender(m,opts){
       <div class="ed-src">Computed by diffing task % against the previous daily snapshot.</div>
     </div>
     <div class="card">
-      <div class="ed-h3">Phase Progress</div>
-      ${m.phaseRows.map(ph=>`<div class="ed-phase"><div class="ed-pn">${esc(ph.phase)} <span class="ed-sub2">(${ph.n})</span></div><div style="flex:1">${bar(ph.pct,'var(--accent-green)')}</div><div class="ed-mono" style="width:40px;text-align:right">${ph.pct}%</div></div>`).join('')||'<div class="ed-empty">No task phases defined.</div>'}
-      <div class="ed-src">Average % complete per phase (tasks grouped by Phase).</div>
+      <div class="ed-h3">Planned Work — Next 3 Days <span class="ed-src" style="margin:0">tasks scheduled today → +3 days</span></div>
+      <ul class="ed-list">
+        ${(m.planned3||[]).map(x=>`<li><i class="ed-dot" style="background:${x.crit?'var(--accent-red)':'var(--accent-blue)'}"></i><div><b>${esc(x.name)}</b> <span class="ed-sub2">${esc(x.start)}${x.finish&&x.finish!==x.start?' → '+esc(x.finish):''}${x.crit?' · Critical':''}${x.owner?' · '+esc(x.owner):''}</span> <span class="ed-tag t-lo">${x.pct}%</span></div></li>`).join('')||'<li style="color:var(--text-muted)">No tasks scheduled in the next 3 days.</li>'}
+      </ul>
+      <div class="ed-src">Not-yet-complete tasks whose schedule (CPM early dates, else task dates) overlaps the next 3 days; critical path in red.</div>
     </div>
+  </div>
+
+  <div class="card ed-mb">
+    <div class="ed-h3">Phase Progress</div>
+    ${m.phaseRows.map(ph=>`<div class="ed-phase"><div class="ed-pn">${esc(ph.phase)} <span class="ed-sub2">(${ph.n})</span></div><div style="flex:1">${bar(ph.pct,'var(--accent-green)')}</div><div class="ed-mono" style="width:40px;text-align:right">${ph.pct}%</div></div>`).join('')||'<div class="ed-empty">No task phases defined.</div>'}
+    <div class="ed-src">Average % complete per phase (tasks grouped by Phase).</div>
   </div>
 
   <!-- OPEN ACTION ITEMS -->

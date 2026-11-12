@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.15.4';
-const APP_BUILD='20261112e';
+const APP_VERSION='2.15.5';
+const APP_BUILD='20261112f';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='The Daily Manpower Log now has an editable Role / Trade field per entry — for multi-skilled crews, set the role each person actually did that day. It defaults to their primary trade and offers a pick-list of your trades, but you can type any role.';
+const APP_RELEASE_NOTE='The Execution Dashboard now shows a "Planned Work — Next 3 Days" card — not-yet-complete tasks whose schedule (CPM early dates, else task dates) overlaps the next three days, with the critical path flagged in red.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.15.5',date:'2026-11-12',type:'feat',notes:[
+    'Execution Dashboard: added the "Planned Work — Next 3 Days" card (it was in the design but missing from the build). It lists not-yet-complete tasks whose schedule overlaps the next three days, using CPM early-start dates when available and falling back to each task\'s own start/end dates.',
+    'Critical-path tasks are flagged in red; each line shows the scheduled window, owner and current %. Phase Progress moved to its own full-width card below.',
+  ]},
   {version:'2.15.4',date:'2026-11-12',type:'feat',notes:[
     'Daily Manpower Log: added an editable Role / Trade field to each entry so multi-skilled personnel can be logged under the role they actually performed that day (not just their register trade).',
     'The field defaults to the person\'s primary trade and offers a pick-list from the trades masterlist, but you can type any role. Leaving it blank falls back to their primary trade.',

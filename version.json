@@ -1,1 +1,1 @@
-{"version":"2.15.4","note":"Daily Manpower Log now has an editable Role / Trade field per entry for multi-skilled crews — set the role each person actually did that day. Defaults to their primary trade, with a pick-list of your trades, and you can type any role.","released":"2026-11-12 19:00"}
+{"version":"2.15.5","note":"Execution Dashboard now shows a 'Planned Work — Next 3 Days' card: not-yet-complete tasks whose schedule (CPM early dates, else task dates) overlaps the next three days, with the critical path flagged in red.","released":"2026-11-12 19:30"}
