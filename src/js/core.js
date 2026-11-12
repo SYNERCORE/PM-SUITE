@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.16.0';
-const APP_BUILD='20261112h';
+const APP_VERSION='2.16.1';
+const APP_BUILD='20261112i';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='New Progress Photos tab on every project — upload one or many site photos per day, each with a caption and optional area/task tag, in a date-grouped gallery. Photos are compressed for fast display and the full-resolution originals upload to SharePoint when connected. The newest photos also appear on the Execution Dashboard and its printout.';
+const APP_RELEASE_NOTE='The Execution Dashboard Print / Export PDF is now a purpose-built ONE-PAGE A4 landscape report — a Business-Unit letterhead (logo pulled from the project\'s assigned BU), a 7-tile KPI strip, budget/man-hours/CPM/procurement/actions/planned-work/risk sections, and progress-photo thumbnails, all on a single readable page instead of a multi-page dump.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.16.1',date:'2026-11-12',type:'feat',notes:[
+    'Execution Dashboard Print / Export PDF is now a purpose-built ONE-PAGE A4 landscape report instead of dumping the whole scrolling dashboard across several pages.',
+    'It carries a Business-Unit letterhead — the company logo, name and address are pulled from the project\'s assigned Business Unit (falling back to the Main Company), plus a document-control number and revision.',
+    'The page packs a 7-tile KPI strip and condensed Budget, Man-hours, Phase Progress, Critical Path, Planned Work, Last 24 Hours, Procurement, Open Actions and Risk/Quality sections, with up to three progress-photo thumbnails in the footer. Row counts are capped so it always stays on one readable page.',
+  ]},
   {version:'2.16.0',date:'2026-11-12',type:'feat',notes:[
     'New Progress Photos tab on every project: a date-grouped site-photo gallery. Upload one or many images at once, each with a caption and an optional area/task tag (the tag picker lists the project\'s tasks).',
     'Photos are downscaled in-browser to ~1024px for fast, offline-safe display; when SharePoint is connected the full-resolution originals are also uploaded (marked "SP", with an "Open original" link in the full-size viewer).',

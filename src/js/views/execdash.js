@@ -654,21 +654,235 @@ function _edDeleteSnapshot(pid,date){
 }
 
 // ── Print / Export PDF ────────────────────────────────────────────
+// Resolve the pid + model for whichever context/snapshot is active.
+function _edCurrentPidModel(){
+  const pid = (_edCtx==='global') ? _edGlobalPid : detailProjectId;
+  if(!pid) return null;
+  const live = _edViewSnap===null;
+  let model;
+  if(live){ model=_edModel(pid); }
+  else { const snap=_edSnaps(pid).find(s=>s.date===_edViewSnap); model=snap?snap.data:_edModel(pid); }
+  return {pid, live, model};
+}
+
+// ── Print / Export PDF — purpose-built ONE-PAGE A4 landscape report ──
 function _edPrint(){
-  const root=document.getElementById('execDashRoot');
-  if(!root){showToast('Open the dashboard first','error');return;}
-  const w=window.open('','_edprint','width=1100,height=800');
+  const ctx=_edCurrentPidModel();
+  if(!ctx||!ctx.model){showToast('Open the dashboard first','error');return;}
+  const {pid,live,model:m}=ctx;
+  const p=(AppState.data.projects||[]).find(x=>x.id===pid)||{};
+  let lh={}, doc={docNo:'',rev:'0'};
+  try{ if(typeof _pdfLetterheadForProject==='function') lh=_pdfLetterheadForProject(p)||{}; }catch(e){}
+  try{ if(typeof _pdfDocCtrlForProject==='function') doc=_pdfDocCtrlForProject(p,'execdash')||doc; }catch(e){}
+  const photos=(AppState.data.progressPhotos||[])
+    .filter(x=>x.projectId===pid&&!x._deleted)
+    .sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(b._lastModified||'').localeCompare(a._lastModified||''))
+    .slice(0,3);
+  const w=window.open('','_edprint','width=1200,height=850');
   if(!w){showToast('Pop-up blocked — allow pop-ups to print','error');return;}
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Execution Dashboard</title>
-  ${_edStyle(true)}
-  <style>body{background:#fff;color:#111;padding:14px;font-family:system-ui,Segoe UI,sans-serif}
-  .card{background:#fff;border:1px solid #ccc;break-inside:avoid}
-  .ed-tbl th{color:#555;border-bottom:1px solid #bbb}.ed-tbl td{border-bottom:1px solid #eee}
-  .ed-hdr{background:#f3f6fb;border:1px solid #cdd9ec}.ed-title{color:#111}
-  @page{size:A4 landscape;margin:10mm}</style></head>
-  <body>${root.innerHTML}</body></html>`);
+  w.document.write(_edPrintHTML(m,p,lh,doc,photos,live));
   w.document.close();
-  setTimeout(()=>{ try{w.focus();w.print();}catch(e){} },300);
+  setTimeout(()=>{ try{w.focus();w.print();}catch(e){} },350);
+}
+
+// money/number/date helpers for the print
+function _pMoneyShort(n){ n=Number(n)||0; const a=Math.abs(n);
+  if(a>=1e6) return (n/1e6).toFixed(a>=1e8?0:1)+'M';
+  if(a>=1e3) return (n/1e3).toFixed(0)+'K';
+  return n.toLocaleString(); }
+function _pPctUsed(a,b){ b=Number(b)||0; return b? Math.round((Number(a)||0)/b*100)+'%':'—'; }
+function _pDateShort(s){ if(!s)return '—'; const d=new Date((''+s).length<=10?s+'T00:00:00':s); if(isNaN(d))return esc(s);
+  return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'}); }
+function _pMd(s){ if(!s)return '—'; const d=new Date((''+s).length<=10?s+'T00:00:00':s); if(isNaN(d))return esc(s);
+  return (''+(d.getMonth()+1)).padStart(2,'0')+'/'+(''+d.getDate()).padStart(2,'0'); }
+function _pRating(v){ const[l,c]=_edRating(v); return `<span class="pill ${c}">${l[0]+l.slice(1).toLowerCase()}</span>`; }
+
+function _edPrintHTML(m,p,lh,doc,photos,live){
+  const esc2=s=>esc(s==null?'':s);
+  const bu=(AppState.data.businessUnits||[]).find(b=>b.id===(m.project&&m.project.bu))||null;
+  const buName=(bu&&bu.name)||'';
+  const logo=lh.logoDataUrl||'';
+  const company=lh.companyName||(AppState.data.settings&&AppState.data.settings.companyName)||'Company';
+  const addr=[lh.addressLine,lh.contactLine].filter(Boolean).join(' · ');
+  const now=new Date();
+  const by=(AppState.currentUser&&AppState.currentUser.name)||'';
+  const ver=(typeof APP_VERSION!=='undefined')?('v'+APP_VERSION):'';
+  const pVar=(Number(m.actualPct)||0)-(Number(m.plannedPct)||0);
+  const fc=m.cpm||{};
+  const fcVar=fc.fcVar;
+  const fcTxt = (fcVar==null)?'' : (fcVar>0?`${fcVar}d early`:(fcVar<0?`${-fcVar}d late`:'on time'));
+  const fcCls = (fcVar==null)?'':(fcVar>0?'var(--green)':(fcVar<0?'var(--red)':'var(--muted)'));
+  const openNcr=(m.qualRows||[]).filter(q=>/ncr/i.test(q.type||'')&&/open/i.test(q.status||'')).length;
+  const cpmRows=(fc.rows||[]).slice(0,4);
+  const budRows=(m.budgetRows||[]).slice(0,6);
+  const roleRows=(m.roleRows||[]).slice(0,5);
+  const procRows=(m.procRows||[]).slice(0,4);
+  const actRows=(m.actRows||[]).slice(0,4);
+  const planned=(m.planned3||[]).slice(0,4);
+  const phases=(m.phaseRows||[]).slice(0,4);
+  const risks=(m.riskRows||[]).slice(0,3);
+  const quals=(m.qualRows||[]).slice(0,2);
+  const last=[].concat((m.last24&&m.last24.completed||[]).map(x=>({t:'Completed',n:x.name,x:x.from!=null?x.from+'%→100%':'→100%',c:'var(--green)'})),
+                       (m.last24&&m.last24.advanced||[]).map(x=>({t:'Advanced',n:x.name,x:x.from+'%→'+x.to+'%',c:'var(--blue)'}))).slice(0,3);
+  const sevCls=s=>/high|critical/i.test(s)?'t-red':/low|obs/i.test(s)?'t-green':'t-amber';
+  const sevLbl=s=>{s=(s||'').toLowerCase();return s?s[0].toUpperCase()+s.slice(1):'Med';};
+  const stat=m.safety||{};
+
+  const css=`<style>
+  :root{--ink:#14181f;--muted:#5b6672;--line:#d4dae3;--soft:#eef2f8;--blue:#1f6feb;--green:#1a7f37;--amber:#9a6700;--red:#cf222e;--cyan:#0b7285}
+  *{box-sizing:border-box}
+  body{margin:0;background:#fff;color:var(--ink);font-family:"Segoe UI",system-ui,Arial,sans-serif}
+  .page{padding:4mm 5mm;display:flex;flex-direction:column;min-height:0}
+  .lh{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid var(--blue);padding-bottom:7px;margin-bottom:7px}
+  .lh-l{display:flex;gap:11px;align-items:center}
+  .logo{height:50px;max-width:150px;object-fit:contain}
+  .logo-ph{width:116px;height:48px;border:1px dashed #9db3d6;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:8px;color:#5a7bb5;background:#f5f9ff;font-weight:700;text-align:center}
+  .co .nm{font-size:14.5px;font-weight:800}
+  .co .ad{font-size:9px;color:var(--muted)}
+  .bu-chip{display:inline-block;font-size:8.5px;font-weight:800;color:#fff;background:var(--cyan);border-radius:4px;padding:1.5px 7px;margin-top:3px}
+  .lh-r{text-align:right;line-height:1.35}
+  .lh-r .dt{font-size:14.5px;font-weight:800;color:var(--blue);letter-spacing:.5px}
+  .lh-r .mt{font-size:9px;color:var(--muted)} .lh-r .mt b{color:var(--ink)}
+  .titlebar{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;gap:12px}
+  .titlebar .pj{font-size:12.5px;font-weight:800;line-height:1.2}
+  .titlebar .pj small{font-weight:600;color:var(--muted);font-size:9.5px}
+  .live{font-size:8.5px;font-weight:800;border-radius:999px;padding:2px 8px;white-space:nowrap}
+  .live.on{color:var(--green);border:1px solid #9fd8af;background:#eafaf0}
+  .live.snap{color:var(--amber);border:1px solid #e6c88a;background:#fff5e6}
+  .kpis{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:8px}
+  .kpi{border:1px solid var(--line);border-radius:7px;padding:6px 7px;text-align:center;background:var(--soft)}
+  .kpi .l{font-size:7.5px;text-transform:uppercase;letter-spacing:.3px;color:var(--muted);font-weight:800;margin-bottom:2px}
+  .kpi .v{font-size:15px;font-weight:800;font-family:"Consolas",monospace;line-height:1}
+  .kpi .s{font-size:7.5px;color:var(--muted);margin-top:2px}
+  .pill{display:inline-block;font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px}
+  .p-good{background:#eafaf0;color:var(--green)}.p-mod{background:#fff5e6;color:var(--amber)}.p-low{background:#fdecee;color:var(--red)}.p-na{background:#eef1f5;color:var(--muted)}
+  .body{display:grid;grid-template-columns:1.15fr 1fr 1.05fr;gap:9px;flex:1;min-height:0}
+  .col{display:flex;flex-direction:column;gap:8px;min-height:0}
+  .box{border:1px solid var(--line);border-radius:7px;padding:6px 8px}
+  .h{font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:#39424e;margin:0 0 4px;display:flex;justify-content:space-between;align-items:center}
+  .h .src{font-size:7px;color:#93a0ad;font-weight:700;text-transform:none}
+  table{width:100%;border-collapse:collapse;font-size:8.8px}
+  th{text-align:left;color:var(--muted);font-weight:700;font-size:7px;text-transform:uppercase;letter-spacing:.2px;padding:2px 4px;border-bottom:1px solid var(--line)}
+  td{padding:2.3px 4px;border-bottom:1px solid #eef1f5;line-height:1.2}
+  td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
+  tr:last-child td{border-bottom:none}
+  .tot td{font-weight:800;border-top:1.5px solid var(--line)}
+  .mono{font-family:"Consolas",monospace}
+  .tag{font-size:7px;font-weight:800;padding:1px 6px;border-radius:999px;white-space:nowrap}
+  .t-red{background:#fdecee;color:var(--red)}.t-blue{background:#eaf2fe;color:var(--blue)}.t-amber{background:#fff5e6;color:var(--amber)}.t-green{background:#eafaf0;color:var(--green)}
+  .bar{height:6px;border-radius:999px;background:#e7ebf1;overflow:hidden}.bar>i{display:block;height:100%}
+  ul.list{margin:0;padding:0;list-style:none;font-size:8.8px}
+  ul.list li{padding:2.3px 0;border-bottom:1px solid #eef1f5;display:flex;gap:6px;align-items:flex-start;line-height:1.25}
+  ul.list li:last-child{border-bottom:none}
+  .dot{width:6px;height:6px;border-radius:50%;margin-top:3px;flex-shrink:0}
+  .foot{display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--line);margin-top:7px;padding-top:5px}
+  .photos{display:flex;gap:6px}
+  .ph{width:80px;height:52px;border:1px solid var(--line);border-radius:4px;object-fit:cover;background:#dfe7f2}
+  .ph-cap{font-size:6.5px;color:#43505f;text-align:center;max-width:80px;line-height:1.1;margin-top:1px}
+  .foot .gen{font-size:7.5px;color:var(--muted);text-align:right;line-height:1.4}
+  @page{size:A4 landscape;margin:7mm}
+  </style>`;
+
+  const kpi=(l,v,s,vcol)=>`<div class="kpi"><div class="l">${l}</div><div class="v"${vcol?` style="color:${vcol}"`:''}>${v}</div><div class="s">${s||''}</div></div>`;
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Execution Dashboard — ${esc2(m.project.id)}</title>${css}</head><body><div class="page">
+  <div class="lh">
+    <div class="lh-l">
+      ${logo?`<img class="logo" src="${logo}" alt="logo">`:`<div class="logo-ph">BU LOGO<br>(set in Business Unit)</div>`}
+      <div class="co"><div class="nm">${esc2(company)}</div>${addr?`<div class="ad">${esc2(addr)}</div>`:''}${buName?`<span class="bu-chip">BU: ${esc2(buName).toUpperCase()}</span>`:''}</div>
+    </div>
+    <div class="lh-r">
+      <div class="dt">EXECUTION DASHBOARD</div>
+      <div class="mt"><b>Doc No:</b> ${esc2(doc.docNo||'—')} · <b>Rev:</b> ${esc2(doc.rev||'0')}</div>
+      <div class="mt"><b>Report date:</b> ${now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} · ${now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</div>
+    </div>
+  </div>
+
+  <div class="titlebar">
+    <div class="pj">${esc2(m.project.id)} — ${esc2(m.project.name)}<small>${m.project.client?' · Client: '+esc2(m.project.client):''}${m.dayNo?' · Project Day No. '+m.dayNo+(m.daysLeft!=null?' ('+m.daysLeft+' left)':''):''}</small></div>
+    <span class="live ${live?'on':'snap'}">${live?'● LIVE (today)':'◧ SNAPSHOT '+esc2(m.date||'')}</span>
+  </div>
+
+  <div class="kpis">
+    ${kpi('Overall %',(m.actualPct||0)+'%','plan '+(m.plannedPct||0)+'% · <span style="color:'+(pVar>=0?'var(--green)':'var(--amber)')+'">'+(pVar>=0?'+':'')+pVar+'</span>')}
+    ${kpi('SPI',(m.spi!=null?m.spi:'—'),(m.spi>=1?'on/above plan':'behind'),(m.spi>=1?'var(--green)':'var(--amber)'))}
+    ${kpi('Forecast Finish',_pDateShort(fc.forecast),fcTxt,fcCls)}
+    ${kpi('System Compl.',(m.sysComplete||0)+'%',(m.sysDone||0)+' / '+(m.sysTotal||0)+' tasks')}
+    ${kpi('Open Actions',(m.actRows||[]).length,(m.actRows||[]).filter(a=>a.overdue).length+' overdue',((m.actRows||[]).filter(a=>a.overdue).length?'var(--red)':''))}
+    <div class="kpi"><div class="l">Safety</div><div style="margin-top:3px">${_pRating(m.perf.safety)}</div><div class="s">${(stat.lti||0)} LTI · ${(stat.nearMiss||0)} NM</div></div>
+    <div class="kpi"><div class="l">Quality</div><div style="margin-top:3px">${_pRating(m.perf.quality)}</div><div class="s">${openNcr} open NCR</div></div>
+  </div>
+
+  <div class="body">
+    <div class="col">
+      <div class="box">
+        <div class="h">Budget &amp; Cost <span class="src">Resource Allocation (₱)</span></div>
+        <table><thead><tr><th>Category</th><th class="r">Budget</th><th class="r">Actual</th><th class="r">%</th></tr></thead><tbody>
+          ${budRows.map(r=>`<tr><td>${esc2(r.label)}</td><td class="r mono">${_pMoneyShort(r.budget)}</td><td class="r mono">${_pMoneyShort(r.actual)}</td><td class="r">${_pPctUsed(r.actual,r.budget)}</td></tr>`).join('')||'<tr><td colspan="4" style="color:#93a0ad">No allocation data.</td></tr>'}
+          ${budRows.length?`<tr class="tot"><td>TOTAL</td><td class="r mono">${_pMoneyShort(m.budTotB)}</td><td class="r mono">${_pMoneyShort(m.budTotA)}</td><td class="r">${_pPctUsed(m.budTotA,m.budTotB)}</td></tr>`:''}
+        </tbody></table>
+      </div>
+      <div class="box" style="flex:1">
+        <div class="h">Man-hours by Role <span class="src">${m.hpd}h/d × ${m.dpw}d + OT</span></div>
+        <table><thead><tr><th>Role</th><th class="r">Site</th><th class="r">Plan</th><th class="r">Act</th><th class="r">%</th></tr></thead><tbody>
+          ${roleRows.map(r=>`<tr><td>${esc2(r.role)}</td><td class="r mono">${r.onsite}</td><td class="r mono">${Math.round(r.planHrs).toLocaleString()}</td><td class="r mono">${Math.round(r.actHrs).toLocaleString()}</td><td class="r">${_pPctUsed(r.actHrs,r.planHrs)}</td></tr>`).join('')||'<tr><td colspan="5" style="color:#93a0ad">No manpower records.</td></tr>'}
+          ${roleRows.length?`<tr class="tot"><td>TOTAL</td><td class="r mono">${m.onsiteTot}</td><td class="r mono">${Math.round(m.mhPlan).toLocaleString()}</td><td class="r mono">${Math.round(m.mhAct).toLocaleString()}</td><td class="r">${_pPctUsed(m.mhAct,m.mhPlan)}</td></tr>`:''}
+        </tbody></table>
+        <div class="h" style="margin-top:6px">Phase Progress</div>
+        ${phases.map(ph=>`<div style="display:flex;align-items:center;gap:7px;margin:2.5px 0"><span style="width:78px;font-size:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc2(ph.phase)}</span><div class="bar" style="flex:1"><i style="width:${ph.pct}%;background:var(--green)"></i></div><span class="mono" style="font-size:8px;width:30px;text-align:right">${ph.pct}%</span></div>`).join('')||'<div style="font-size:8px;color:#93a0ad">No phases.</div>'}
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="box">
+        <div class="h">Critical Path (CPM) <span class="src">${fc.forecast?'finish '+_pDateShort(fc.forecast):''}${fc.nearCrit?' · '+fc.nearCrit+' near':''}</span></div>
+        <table><thead><tr><th>Driving Task</th><th class="r">Start</th><th class="r">Finish</th><th class="r">%</th></tr></thead><tbody>
+          ${cpmRows.map(t=>`<tr><td>${esc2(t.name)} ${t.near?'<span class="tag t-amber">TF'+t.tf+'</span>':'<span class="tag t-red">crit</span>'}</td><td class="r mono">${_pMd(t.start)}</td><td class="r mono">${_pMd(t.finish)}</td><td class="r">${t.pct}%</td></tr>`).join('')||'<tr><td colspan="4" style="color:#93a0ad">No critical path — add task dependencies.</td></tr>'}
+        </tbody></table>
+      </div>
+      <div class="box" style="flex:1">
+        <div class="h">Planned Work — Next 3 Days</div>
+        <ul class="list">
+          ${planned.map(x=>`<li><span class="dot" style="background:${x.crit?'var(--red)':'var(--blue)'}"></span><div><b>${esc2(x.name)}</b> <span style="color:var(--muted)">${_pMd(x.start)}${x.finish&&x.finish!==x.start?' → '+_pMd(x.finish):''}${x.crit?' · Critical':''}${x.owner?' · '+esc2(x.owner):''}</span> <span class="tag t-green">${x.pct}%</span></div></li>`).join('')||'<li style="color:#93a0ad">No tasks scheduled in the next 3 days.</li>'}
+        </ul>
+        <div class="h" style="margin-top:6px">Last 24 Hours</div>
+        <ul class="list">
+          ${last.map(x=>`<li><span class="dot" style="background:${x.c}"></span><div><b>${x.t}:</b> ${esc2(x.n)} <span class="mono" style="font-size:7.5px">${x.x}</span></div></li>`).join('')||'<li style="color:#93a0ad">No changes logged (save a daily snapshot to track).</li>'}
+        </ul>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="box">
+        <div class="h">Procurement — Aged <span class="src">oldest first</span></div>
+        <table><thead><tr><th>Ref</th><th>Item</th><th class="r">Age</th><th>Assignee</th></tr></thead><tbody>
+          ${procRows.map(r=>`<tr><td class="mono">${esc2(r.ref)}</td><td>${esc2((r.desc||'').slice(0,22))}</td><td class="r">${r.age!=null?'<span class="tag '+_edAgeCls(r.age)+'">'+r.age+'d</span>':'—'}</td><td>${r.assignee?esc2(r.assignee):'<span style="color:var(--amber)">Unassigned</span>'}</td></tr>`).join('')||'<tr><td colspan="4" style="color:#93a0ad">No procurement items.</td></tr>'}
+        </tbody></table>
+      </div>
+      <div class="box">
+        <div class="h">★ Open Action Items <span class="src">${(m.actRows||[]).length} open · ${(m.actRows||[]).filter(a=>a.overdue).length} overdue</span></div>
+        <table><thead><tr><th>Action</th><th>Owner</th><th>Due</th><th>Status</th></tr></thead><tbody>
+          ${actRows.map(a=>`<tr><td>${esc2((a.desc||'').slice(0,26))}</td><td>${esc2(a.owner||'—')}</td><td class="mono">${a.due?_pMd(a.due):'—'}</td><td><span class="tag ${a.overdue?'t-amber':a.status==='inprogress'?'t-blue':'t-red'}">${a.overdue?'Overdue':esc2(a.status||'open')}</span></td></tr>`).join('')||'<tr><td colspan="4" style="color:#93a0ad">No open actions. 🎉</td></tr>'}
+        </tbody></table>
+      </div>
+      <div class="box" style="flex:1">
+        <div class="h">Risks / Quality</div>
+        <ul class="list">
+          ${risks.map(r=>`<li><span class="dot" style="background:${/high|critical/i.test(r.sev)?'var(--red)':/low/i.test(r.sev)?'var(--green)':'var(--amber)'}"></span><div>${esc2(r.desc)} <span class="tag ${sevCls(r.sev)}">${sevLbl(r.sev)}</span></div></li>`).join('')}
+          ${quals.map(q=>`<li><span class="dot" style="background:${/ncr/i.test(q.type)?'var(--red)':'var(--green)'}"></span><div>${esc2(q.desc)} <span class="tag ${/ncr/i.test(q.type)?'t-red':'t-green'}">${esc2(q.type)}</span></div></li>`).join('')}
+          ${(!risks.length&&!quals.length)?'<li style="color:#93a0ad">No open risks or quality items.</li>':''}
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="photos">
+      ${photos.map(ph=>`<div><img class="ph" src="${ph.img}"><div class="ph-cap">${esc2((ph.caption||'').slice(0,26))}${ph.date?' · '+_pMd(ph.date):''}</div></div>`).join('')||'<span style="font-size:8px;color:#93a0ad">No progress photos — add them in the Progress Photos tab.</span>'}
+    </div>
+    <div class="gen">Generated ${now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} ${now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}${by?' by '+esc2(by):''} · SHIC Enterprise PM Suite ${ver}<br>Confidential — internal project management use · Page 1 / 1</div>
+  </div>
+  </div></body></html>`;
 }
 
 // ── Scoped styles (light=true for print) ──────────────────────────
