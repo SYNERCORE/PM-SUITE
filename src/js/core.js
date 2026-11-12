@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.15.2';
-const APP_BUILD='20261112c';
+const APP_VERSION='2.15.3';
+const APP_BUILD='20261112d';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='New Daily Manpower Log tab on every project: record the actual named personnel who worked each day, the work they did, and their regular / OT / night hours. Labour cost is computed from each person\'s hourly salary using editable premium multipliers (OT, rest day, holidays, and a 20% night differential).';
+const APP_RELEASE_NOTE='The Execution Dashboard project picker now hides completed and closed projects by default and defaults to an active one; tick "Show completed" to include them (finished projects are marked with a ✓).';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.15.3',date:'2026-11-12',type:'fix',notes:[
+    'Execution Dashboard project picker now shows only in-progress projects by default (completed and closed projects are hidden) and defaults to an active project instead of whichever sorts first.',
+    'Added a "Show completed (N)" toggle next to the picker to bring finished projects back when you need them; completed/closed projects are tagged with a ✓. A completed project you open directly still appears even while the toggle is off.',
+  ]},
   {version:'2.15.2',date:'2026-11-12',type:'feat',notes:[
     'New Daily Manpower Log tab on every project — a daily timesheet of the actual named personnel who worked, what they did, and their regular / overtime / night hours.',
     'Labour cost is computed from each person\'s hourly salary (from the Personnel register) using premium multipliers: ordinary OT 1.25×, rest day / special holiday 1.30× (OT 1.69×), regular holiday 2.00× (OT 2.60×), plus a 20% night differential on hours worked in the 10pm–6am window.',

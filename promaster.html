@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.15.2';
-const APP_BUILD='20261112c';
+const APP_VERSION='2.15.3';
+const APP_BUILD='20261112d';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='New Daily Manpower Log tab on every project: record the actual named personnel who worked each day, the work they did, and their regular / OT / night hours. Labour cost is computed from each person\'s hourly salary using editable premium multipliers (OT, rest day, holidays, and a 20% night differential).';
+const APP_RELEASE_NOTE='The Execution Dashboard project picker now hides completed and closed projects by default and defaults to an active one; tick "Show completed" to include them (finished projects are marked with a ✓).';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.15.3',date:'2026-11-12',type:'fix',notes:[
+    'Execution Dashboard project picker now shows only in-progress projects by default (completed and closed projects are hidden) and defaults to an active project instead of whichever sorts first.',
+    'Added a "Show completed (N)" toggle next to the picker to bring finished projects back when you need them; completed/closed projects are tagged with a ✓. A completed project you open directly still appears even while the toggle is off.',
+  ]},
   {version:'2.15.2',date:'2026-11-12',type:'feat',notes:[
     'New Daily Manpower Log tab on every project — a daily timesheet of the actual named personnel who worked, what they did, and their regular / overtime / night hours.',
     'Labour cost is computed from each person\'s hourly salary (from the Personnel register) using premium multipliers: ordinary OT 1.25×, rest day / special holiday 1.30× (OT 1.69×), regular holiday 2.00× (OT 2.60×), plus a 20% night differential on hours worked in the 10pm–6am window.',
@@ -20498,6 +20502,9 @@ let _edViewSnap = null;
 // 'global' = the top-level sidebar page (its own project picker).
 let _edCtx = 'detail';
 let _edGlobalPid = null;
+// Project picker hides finished projects by default; toggle to include them.
+let _edShowCompleted = false;
+function _edIsDone(p){ return p && (p.status==='completed' || p.status==='closed'); }
 // Re-render whichever context is currently active (used by snapshot/manual actions).
 function _edRerender(){ _edCtx==='global' ? renderExecDashboardPage() : renderExecDashboard(); }
 
@@ -20740,7 +20747,10 @@ function renderExecDashboardPage(){
   _edCtx='global';
   const el=document.getElementById('execdashboard'); if(!el) return;
   const projs=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='prospect'&&p.status!=='archived');
-  if(!_edGlobalPid || !projs.some(p=>p.id===_edGlobalPid)) _edGlobalPid=projs.length?projs[0].id:null;
+  if(!_edGlobalPid || !projs.some(p=>p.id===_edGlobalPid)){
+    const active=projs.filter(p=>!_edIsDone(p));   // prefer a not-completed project by default
+    _edGlobalPid=(active[0]||projs[0]||{}).id||null;
+  }
   if(!_edGlobalPid){ el.innerHTML='<div class="card" style="padding:40px;text-align:center;color:var(--text-muted)"><i class="fas fa-gauge-high" style="font-size:28px;display:block;margin-bottom:12px"></i>No active projects to show. Create a project first.</div>'; return; }
   const pid=_edGlobalPid;
   if(_edViewSnap!==null && !_edSnaps(pid).some(s=>s.date===_edViewSnap)) _edViewSnap=null;
@@ -20754,7 +20764,10 @@ function renderExecDashboardPage(){
 
 // ── Toolbar ───────────────────────────────────────────────────────
 function _edToolbar(model,live,pid){
-  const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='prospect'&&p.status!=='archived');
+  const all=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='prospect'&&p.status!=='archived');
+  const doneCount=all.filter(_edIsDone).length;
+  // Hide finished projects unless the toggle is on; always keep the one being viewed.
+  const projects=all.filter(p=>_edShowCompleted||!_edIsDone(p)||p.id===pid);
   const snaps=_edSnaps(pid);
   const pickCode = _edCtx==='global'
     ? `_edGlobalPid=this.value;_edViewSnap=null;renderExecDashboardPage()`
@@ -20763,8 +20776,10 @@ function _edToolbar(model,live,pid){
     <div style="display:flex;align-items:center;gap:6px">
       <span style="font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-muted);font-weight:700">Project</span>
       <select class="form-select" style="height:30px;font-size:12px;max-width:280px" onchange="${pickCode}">
-        ${projects.map(p=>`<option value="${esc(p.id)}" ${p.id===pid?'selected':''}>${esc(p.id)} — ${esc(p.name)}</option>`).join('')}
+        ${projects.map(p=>`<option value="${esc(p.id)}" ${p.id===pid?'selected':''}>${esc(p.id)} — ${esc(p.name)}${_edIsDone(p)?' ✓':''}</option>`).join('')}
       </select>
+      ${doneCount?`<label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-secondary);cursor:pointer;white-space:nowrap" title="Show ${doneCount} completed/closed project${doneCount>1?'s':''}">
+        <input type="checkbox" ${_edShowCompleted?'checked':''} onchange="_edShowCompleted=this.checked;_edRerender()" style="cursor:pointer"> Show completed (${doneCount})</label>`:''}
     </div>
     <div style="display:flex;align-items:center;gap:6px">
       <span style="font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-muted);font-weight:700">View</span>

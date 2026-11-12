@@ -10,6 +10,9 @@ let _edViewSnap = null;
 // 'global' = the top-level sidebar page (its own project picker).
 let _edCtx = 'detail';
 let _edGlobalPid = null;
+// Project picker hides finished projects by default; toggle to include them.
+let _edShowCompleted = false;
+function _edIsDone(p){ return p && (p.status==='completed' || p.status==='closed'); }
 // Re-render whichever context is currently active (used by snapshot/manual actions).
 function _edRerender(){ _edCtx==='global' ? renderExecDashboardPage() : renderExecDashboard(); }
 
@@ -252,7 +255,10 @@ function renderExecDashboardPage(){
   _edCtx='global';
   const el=document.getElementById('execdashboard'); if(!el) return;
   const projs=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='prospect'&&p.status!=='archived');
-  if(!_edGlobalPid || !projs.some(p=>p.id===_edGlobalPid)) _edGlobalPid=projs.length?projs[0].id:null;
+  if(!_edGlobalPid || !projs.some(p=>p.id===_edGlobalPid)){
+    const active=projs.filter(p=>!_edIsDone(p));   // prefer a not-completed project by default
+    _edGlobalPid=(active[0]||projs[0]||{}).id||null;
+  }
   if(!_edGlobalPid){ el.innerHTML='<div class="card" style="padding:40px;text-align:center;color:var(--text-muted)"><i class="fas fa-gauge-high" style="font-size:28px;display:block;margin-bottom:12px"></i>No active projects to show. Create a project first.</div>'; return; }
   const pid=_edGlobalPid;
   if(_edViewSnap!==null && !_edSnaps(pid).some(s=>s.date===_edViewSnap)) _edViewSnap=null;
@@ -266,7 +272,10 @@ function renderExecDashboardPage(){
 
 // ── Toolbar ───────────────────────────────────────────────────────
 function _edToolbar(model,live,pid){
-  const projects=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='prospect'&&p.status!=='archived');
+  const all=(AppState.data.projects||[]).filter(p=>!p._deleted&&p.status!=='prospect'&&p.status!=='archived');
+  const doneCount=all.filter(_edIsDone).length;
+  // Hide finished projects unless the toggle is on; always keep the one being viewed.
+  const projects=all.filter(p=>_edShowCompleted||!_edIsDone(p)||p.id===pid);
   const snaps=_edSnaps(pid);
   const pickCode = _edCtx==='global'
     ? `_edGlobalPid=this.value;_edViewSnap=null;renderExecDashboardPage()`
@@ -275,8 +284,10 @@ function _edToolbar(model,live,pid){
     <div style="display:flex;align-items:center;gap:6px">
       <span style="font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-muted);font-weight:700">Project</span>
       <select class="form-select" style="height:30px;font-size:12px;max-width:280px" onchange="${pickCode}">
-        ${projects.map(p=>`<option value="${esc(p.id)}" ${p.id===pid?'selected':''}>${esc(p.id)} — ${esc(p.name)}</option>`).join('')}
+        ${projects.map(p=>`<option value="${esc(p.id)}" ${p.id===pid?'selected':''}>${esc(p.id)} — ${esc(p.name)}${_edIsDone(p)?' ✓':''}</option>`).join('')}
       </select>
+      ${doneCount?`<label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-secondary);cursor:pointer;white-space:nowrap" title="Show ${doneCount} completed/closed project${doneCount>1?'s':''}">
+        <input type="checkbox" ${_edShowCompleted?'checked':''} onchange="_edShowCompleted=this.checked;_edRerender()" style="cursor:pointer"> Show completed (${doneCount})</label>`:''}
     </div>
     <div style="display:flex;align-items:center;gap:6px">
       <span style="font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-muted);font-weight:700">View</span>
