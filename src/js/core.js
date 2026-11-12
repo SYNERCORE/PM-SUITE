@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.15.1';
-const APP_BUILD='20261112b';
+const APP_VERSION='2.15.2';
+const APP_BUILD='20261112c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Execution Dashboard is now also a top-level page in the sidebar (OVERVIEW group) with its own project picker — open it without drilling into a project first. The per-project tab stays. System Completion\'s permit counts are manual inputs; System Complete % is auto from task completion.';
+const APP_RELEASE_NOTE='New Daily Manpower Log tab on every project: record the actual named personnel who worked each day, the work they did, and their regular / OT / night hours. Labour cost is computed from each person\'s hourly salary using editable premium multipliers (OT, rest day, holidays, and a 20% night differential).';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.15.2',date:'2026-11-12',type:'feat',notes:[
+    'New Daily Manpower Log tab on every project — a daily timesheet of the actual named personnel who worked, what they did, and their regular / overtime / night hours.',
+    'Labour cost is computed from each person\'s hourly salary (from the Personnel register) using premium multipliers: ordinary OT 1.25×, rest day / special holiday 1.30× (OT 1.69×), regular holiday 2.00× (OT 2.60×), plus a 20% night differential on hours worked in the 10pm–6am window.',
+    'Multipliers are editable per the company\'s policy via the Multipliers button; the per-person rate is captured at entry time so later salary changes don\'t rewrite history. Entries export to CSV.',
+  ]},
   {version:'2.15.1',date:'2026-11-12',type:'feat',notes:[
     'Execution Dashboard is now also available as a top-level page in the sidebar (OVERVIEW group), with its own project picker — so you can open it directly without first drilling into a project. The per-project Execution Dashboard tab is unchanged.',
     'Both views share the same live data, snapshots and Print/Export PDF; switching the project or snapshot stays on whichever view you opened.',
