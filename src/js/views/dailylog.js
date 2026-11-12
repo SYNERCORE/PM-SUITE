@@ -189,6 +189,11 @@ function showManpowerLogForm(id){
   const people=_mplPersonnel();
   const today=new Date().toISOString().slice(0,10);
   const curRes=edit?edit.resourceId:'';
+  // Role / trade options = trades masterlist + any roles on personnel (multi-skilled crews pick per day)
+  const roleOpts=[...new Set([
+    ...(AppState.data.trades||[]).map(t=>typeof t==='string'?t:(t&&t.name)).filter(Boolean),
+    ...people.map(r=>r.role).filter(Boolean)
+  ])].sort();
   $('#genericModalTitle').textContent=edit?'Edit Daily Log':'Log Day — Manpower';
   $('#genericModalBody').innerHTML=`<div class="form-grid">
     <div class="form-group"><label class="form-label">Date *</label><input class="form-input" type="date" id="mplDate" value="${edit?edit.date:today}"></div>
@@ -197,6 +202,11 @@ function showManpowerLogForm(id){
         <option value="">— select —</option>
         ${people.map(r=>`<option value="${r.id}" data-role="${esc(r.role||'')}" data-rate="${r.hourlyRate||0}" ${curRes===r.id?'selected':''}>${esc(r.name)}${r.role?' ('+esc(r.role)+')':''}</option>`).join('')}
       </select>
+    </div>
+    <div class="form-group" style="grid-column:1/-1"><label class="form-label">Role / Trade done this day *</label>
+      <input class="form-input" id="mplRole" list="mplRoleList" placeholder="e.g., Welder, Fitter, Rigger" value="${edit?esc(edit.role||''):''}" oninput="window._mplRoleTouched=true">
+      <datalist id="mplRoleList">${roleOpts.map(o=>`<option value="${esc(o)}"></option>`).join('')}</datalist>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:3px">Defaults to the person's primary trade — change it to the role they actually did today.</div>
     </div>
     <div class="form-group" style="grid-column:1/-1"><label class="form-label">Work Done</label><input class="form-input" id="mplWork" placeholder="e.g., Boiler tube welding — 12 joints" value="${edit?esc(edit.workDone||''):''}"></div>
     <div class="form-group"><label class="form-label">Regular Hours *</label><input class="form-input" type="number" id="mplReg" min="0" step="0.5" value="${edit?edit.regHrs:8}"></div>
@@ -210,13 +220,19 @@ function showManpowerLogForm(id){
   </div>`;
   $('#genericModalFooter').innerHTML=`<button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button><button class="btn btn-primary" onclick="saveManpowerLog(${edit?`'${edit.id}'`:'null'})"><i class="fas fa-save"></i> ${edit?'Save':'Add Entry'}</button>`;
   openModal('genericModal');
+  window._mplRoleTouched=!!edit;   // in edit mode the existing role is user-chosen; don't auto-overwrite
   ['mplReg','mplOT','mplNight','mplRate','mplDayType'].forEach(fid=>{const el=$('#'+fid);if(el)el.addEventListener('input',_mplPreview);});
   if(!edit)_mplSyncRate(); else _mplPreview();
 }
 function _mplSyncRate(){
   const sel=$('#mplPerson'); if(!sel)return;
   const opt=sel.options[sel.selectedIndex];
-  if(opt&&opt.value){ const rate=+opt.getAttribute('data-rate')||0; if($('#mplRate'))$('#mplRate').value=rate; }
+  if(opt&&opt.value){
+    const rate=+opt.getAttribute('data-rate')||0; if($('#mplRate'))$('#mplRate').value=rate;
+    // prefill role with the person's primary trade unless the user has edited it
+    const roleEl=$('#mplRole');
+    if(roleEl && (!window._mplRoleTouched || !roleEl.value)) roleEl.value=opt.getAttribute('data-role')||'';
+  }
   _mplPreview();
 }
 function _mplPreview(){
@@ -229,7 +245,7 @@ function saveManpowerLog(id){
   if(!$('#mplDate').value){showToast('Pick a date','error');return;}
   const opt=sel.options[sel.selectedIndex];
   const personName=opt?opt.textContent.replace(/\s*\(.*\)$/,''):'';
-  const role=opt?(opt.getAttribute('data-role')||''):'';
+  const role=($('#mplRole')&&$('#mplRole').value.trim())||(opt?(opt.getAttribute('data-role')||''):'');
   const rec={
     projectId:detailProjectId,
     date:$('#mplDate').value,

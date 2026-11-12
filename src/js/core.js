@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.15.3';
-const APP_BUILD='20261112d';
+const APP_VERSION='2.15.4';
+const APP_BUILD='20261112e';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,15 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='The Execution Dashboard project picker now hides completed and closed projects by default and defaults to an active one; tick "Show completed" to include them (finished projects are marked with a ✓).';
+const APP_RELEASE_NOTE='The Daily Manpower Log now has an editable Role / Trade field per entry — for multi-skilled crews, set the role each person actually did that day. It defaults to their primary trade and offers a pick-list of your trades, but you can type any role.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.15.4',date:'2026-11-12',type:'feat',notes:[
+    'Daily Manpower Log: added an editable Role / Trade field to each entry so multi-skilled personnel can be logged under the role they actually performed that day (not just their register trade).',
+    'The field defaults to the person\'s primary trade and offers a pick-list from the trades masterlist, but you can type any role. Leaving it blank falls back to their primary trade.',
+  ]},
   {version:'2.15.3',date:'2026-11-12',type:'fix',notes:[
     'Execution Dashboard project picker now shows only in-progress projects by default (completed and closed projects are hidden) and defaults to an active project instead of whichever sorts first.',
     'Added a "Show completed (N)" toggle next to the picker to bring finished projects back when you need them; completed/closed projects are tagged with a ✓. A completed project you open directly still appears even while the toggle is off.',

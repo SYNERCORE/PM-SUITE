@@ -1,1 +1,1 @@
-{"version":"2.15.3","note":"Execution Dashboard project picker now hides completed/closed projects by default and defaults to an active one; tick 'Show completed' to include them (finished projects marked with a ✓).","released":"2026-11-12 18:30"}
+{"version":"2.15.4","note":"Daily Manpower Log now has an editable Role / Trade field per entry for multi-skilled crews — set the role each person actually did that day. Defaults to their primary trade, with a pick-list of your trades, and you can type any role.","released":"2026-11-12 19:00"}
