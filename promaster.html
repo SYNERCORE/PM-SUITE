@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.16.2';
-const APP_BUILD='20261112j';
+const APP_VERSION='2.16.3';
+const APP_BUILD='20261113a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Tidied the Execution Dashboard one-page printout — removed the redundant "BU:" pill from the letterhead, since the Business-Unit logo, company name and address already show which unit it is.';
+const APP_RELEASE_NOTE='Daily Manpower Log now supports logging a crew by role + headcount (man-hours = hours × headcount) without naming each person, plus a manual "Total Manpower Cost" you can enter while per-role salaries are confidential — so man-hours and total cost stay tracked today and convert to computed cost automatically once rates are available.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.16.3',date:'2026-11-13',type:'feat',notes:[
+    'Daily Manpower Log: new "By role (headcount)" logging mode — record a whole crew for a trade with a headcount instead of naming each person. Man-hours = (Reg + OT) × headcount, so man-hours per role are tracked even while individual salaries are confidential.',
+    'Hourly rate is now optional in role mode; the log shows an HC column and a "Man-hours by Role" breakdown, and totals are headcount-weighted man-hours.',
+    'New "Total Cost" button lets you enter the actual total manpower cost utilised for the project. It drives the Labour Cost tile (flagged "manual") while per-role rates are unavailable, and clears back to the computed-from-rates total once rates are entered.',
+  ]},
   {version:'2.16.2',date:'2026-11-12',type:'fix',notes:[
     'Execution Dashboard one-page printout: removed the "BU:" pill from the letterhead — the Business-Unit logo, company name and address already convey it.',
   ]},
@@ -21514,6 +21519,14 @@ function _mplCost(e){
 }
 function _mplMoney(n){ return '₱'+(Number(n)||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function _mplNum(n){ return (Number(n)||0).toLocaleString(undefined,{maximumFractionDigits:2}); }
+// headcount for an entry (role-mode entries carry headcount; named-person entries = 1)
+function _mplHC(e){ const h=+(e&&e.headcount); return h>0?h:1; }
+// man-hours for an entry = (reg + ot) × headcount
+function _mplManhrs(e){ return ((+e.regHrs||0)+(+e.otHrs||0))*_mplHC(e); }
+// full entry cost = per-person cost × headcount
+function _mplEntryCost(e){ return _mplCost(e)*_mplHC(e); }
+// manual project-level total manpower cost override (used while per-role rates are confidential)
+function _mplManual(pid){ return (AppState.data.mplManualCost||{})[pid]||null; }
 
 /* ---- per-project entries, newest first ---- */
 function _mplEntries(pid){
@@ -21533,12 +21546,22 @@ function renderManpowerLog(){
   const flt=window._mplDateFilter||'';
   if(flt) entries=entries.filter(e=>e.date===flt);
 
-  const totReg=entries.reduce((s,e)=>s+(+e.regHrs||0),0);
-  const totOT =entries.reduce((s,e)=>s+(+e.otHrs||0),0);
-  const totNight=entries.reduce((s,e)=>s+(+e.nightHrs||0),0);
+  // man-hour totals are headcount-weighted (role-mode entries log a crew, not one person)
+  const totReg=entries.reduce((s,e)=>s+(+e.regHrs||0)*_mplHC(e),0);
+  const totOT =entries.reduce((s,e)=>s+(+e.otHrs||0)*_mplHC(e),0);
+  const totNight=entries.reduce((s,e)=>s+(+e.nightHrs||0)*_mplHC(e),0);
   const totHrs=totReg+totOT;
-  const totCost=entries.reduce((s,e)=>s+_mplCost(e),0);
-  const headcount=new Set(entries.map(e=>e.resourceId||e.personName)).size;
+  const computedCost=entries.reduce((s,e)=>s+_mplEntryCost(e),0);
+  const manualCost=_mplManual(pid);                 // project-level actual total (while per-role rates are confidential)
+  const costIsManual=(manualCost!=null && !flt);    // manual total covers the whole project, not a single filtered date
+  const totCost=costIsManual?manualCost:computedCost;
+  // workers = distinct named persons + sum of role-mode crew sizes
+  const headcount=new Set(entries.filter(e=>e.resourceId).map(e=>e.resourceId)).size
+                  + entries.filter(e=>!e.resourceId).reduce((s,e)=>s+_mplHC(e),0);
+  // man-hours per role (so the breakdown is updated even without per-role cost)
+  const byRole={};
+  entries.forEach(e=>{ const r=(e.role||'Unassigned'); byRole[r]=(byRole[r]||0)+_mplManhrs(e); });
+  const roleRows=Object.keys(byRole).sort((a,b)=>byRole[b]-byRole[a]);
   const noPersonnel=_mplPersonnel().length===0;
 
   const tile=(lbl,val,color)=>`<div class="mpl-kpi"><div class="mpl-lbl">${lbl}</div><div class="mpl-num" style="${color?'color:'+color:''}">${val}</div></div>`;
@@ -21573,6 +21596,7 @@ function renderManpowerLog(){
           <option value="">All dates (${dates.length})</option>
           ${dates.map(d=>`<option value="${d}" ${flt===d?'selected':''}>${d}</option>`).join('')}
         </select>
+        <button class="btn btn-secondary btn-sm" onclick="showMplManualCost()" title="Enter the actual total manpower cost (while per-role rates are confidential)"><i class="fas fa-coins"></i> Total Cost</button>
         <button class="btn btn-secondary btn-sm" onclick="showPayMultipliers()" title="Edit premium pay multipliers"><i class="fas fa-percent"></i> Multipliers</button>
         <button class="btn btn-secondary btn-sm" onclick="exportManpowerLog()"><i class="fas fa-download"></i> Export</button>
         <button class="btn btn-primary btn-sm" onclick="showManpowerLogForm(null)"><i class="fas fa-plus"></i> Log Day</button>
@@ -21584,8 +21608,19 @@ function renderManpowerLog(){
       ${tile('Personnel', headcount)}
       ${tile('Man-hours', _mplNum(totHrs))}
       ${tile('OT / Night hrs', _mplNum(totOT)+' / '+_mplNum(totNight))}
-      ${tile('Labour Cost', _mplMoney(totCost), 'var(--accent-cyan)')}
+      ${tile('Labour Cost'+(costIsManual?' <span style="font-weight:400;color:var(--accent-amber);text-transform:none;letter-spacing:0">(manual)</span>':''), _mplMoney(totCost), 'var(--accent-cyan)')}
     </div>
+
+    ${costIsManual?`<div class="card" style="padding:9px 12px;border-left:3px solid var(--accent-amber);margin-bottom:12px;font-size:11px;color:var(--text-secondary)">
+      <i class="fas fa-coins" style="color:var(--accent-amber);margin-right:6px"></i>
+      Labour Cost shows the <b>manually entered actual total</b> (${_mplMoney(manualCost)}). Computed-from-rates would be ${_mplMoney(computedCost)}. Clear the manual total to switch back to automatic once per-role rates are available.</div>`:''}
+
+    ${roleRows.length?`<div class="card" style="padding:12px 14px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);margin-bottom:8px">Man-hours by Role</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${roleRows.map(r=>`<div style="background:var(--bg-elevated,rgba(255,255,255,.03));border:1px solid var(--border-subtle,rgba(255,255,255,.08));border-radius:8px;padding:6px 11px;font-size:11.5px"><span style="color:var(--text-secondary)">${esc(r)}</span> &middot; <b style="font-family:var(--font-mono)">${_mplNum(byRole[r])}</b> <span style="color:var(--text-muted);font-size:10px">mh</span></div>`).join('')}
+      </div>
+    </div>`:''}
 
     ${noPersonnel?`<div class="card" style="padding:14px;border-left:3px solid var(--accent-amber);margin-bottom:12px;font-size:11.5px">
       <i class="fas fa-exclamation-triangle" style="color:var(--accent-amber);margin-right:6px"></i>
@@ -21594,37 +21629,39 @@ function renderManpowerLog(){
     <div class="card" style="padding:14px;overflow-x:auto">
       <table class="mpl-tbl">
         <thead><tr>
-          <th>Date</th><th>Personnel</th><th>Role</th><th>Work Done</th>
-          <th class="r">Reg</th><th class="r">OT</th><th class="r">Night</th>
+          <th>Date</th><th>Personnel / Crew</th><th>Role</th><th>Work Done</th>
+          <th class="r">HC</th><th class="r">Reg</th><th class="r">OT</th><th class="r">Night</th>
           <th>Day Type</th><th class="r">Rate/hr</th><th class="r">Cost</th><th></th>
         </tr></thead>
         <tbody>
           ${entries.length?entries.map(e=>{
-            const cost=_mplCost(e);
+            const cost=_mplEntryCost(e); const hc=_mplHC(e); const byRoleMode=!e.resourceId;
             return `<tr>
               <td style="white-space:nowrap">${esc(e.date||'')}</td>
-              <td>${esc(e.personName||'')}</td>
+              <td>${byRoleMode?`<span class="mpl-tag" style="background:rgba(56,139,253,.18);margin-right:5px"><i class="fas fa-users" style="font-size:9px"></i> crew</span>${esc(e.personName||e.role||'')}`:esc(e.personName||'')}</td>
               <td style="color:var(--text-secondary)">${esc(e.role||'')}</td>
               <td style="max-width:220px">${esc(e.workDone||'')||'<span style="color:var(--text-muted)">—</span>'}</td>
+              <td class="r" style="${hc>1?'font-weight:700':''}">${hc>1?hc:'<span style="color:var(--text-muted)">1</span>'}</td>
               <td class="r">${_mplNum(e.regHrs)}</td>
               <td class="r" style="${(+e.otHrs)>0?'color:var(--accent-amber)':''}">${_mplNum(e.otHrs)}</td>
               <td class="r" style="${(+e.nightHrs)>0?'color:var(--accent-purple,#bc8cff)':''}">${_mplNum(e.nightHrs)}</td>
               <td><span class="mpl-tag" style="background:${_mplDayColor(e.dayType)}">${_mplDayLabel(e.dayType)}</span></td>
-              <td class="r">${_mplMoney(e.rate)}</td>
-              <td class="r" style="font-weight:600">${_mplMoney(cost)}</td>
+              <td class="r">${(+e.rate)>0?_mplMoney(e.rate):'<span style="color:var(--text-muted)">—</span>'}</td>
+              <td class="r" style="font-weight:600">${(+e.rate)>0?_mplMoney(cost):'<span style="color:var(--text-muted)">—</span>'}</td>
               <td style="white-space:nowrap">
                 <button class="btn btn-secondary btn-sm btn-icon" onclick="showManpowerLogForm('${e.id}')" title="Edit"><i class="fas fa-edit"></i></button>
                 <button class="btn btn-secondary btn-sm btn-icon" onclick="deleteManpowerLog('${e.id}')" title="Delete"><i class="fas fa-trash"></i></button>
               </td>
-            </tr>`;}).join(''):`<tr><td colspan="11"><div class="mpl-empty"><i class="fas fa-user-clock" style="font-size:22px;display:block;margin-bottom:8px"></i>No daily logs yet. Click <b>Log Day</b> to record who worked and what they did.</div></td></tr>`}
+            </tr>`;}).join(''):`<tr><td colspan="12"><div class="mpl-empty"><i class="fas fa-user-clock" style="font-size:22px;display:block;margin-bottom:8px"></i>No daily logs yet. Click <b>Log Day</b> to record who (or which crew) worked and what they did.</div></td></tr>`}
           ${entries.length?`<tr class="mpl-tot">
-            <td colspan="4">TOTAL${flt?' ('+flt+')':''}</td>
+            <td colspan="4">TOTAL${flt?' ('+flt+')':''} <span style="font-weight:400;color:var(--text-muted);font-size:10px">— man-hours (hrs×HC)</span></td>
+            <td></td>
             <td class="r">${_mplNum(totReg)}</td><td class="r">${_mplNum(totOT)}</td><td class="r">${_mplNum(totNight)}</td>
-            <td></td><td></td><td class="r" style="color:var(--accent-cyan)">${_mplMoney(totCost)}</td><td></td>
+            <td></td><td></td><td class="r" style="color:var(--accent-cyan)">${_mplMoney(totCost)}${costIsManual?' <span style="font-size:9px;color:var(--accent-amber);font-weight:400">(manual)</span>':''}</td><td></td>
           </tr>`:''}
         </tbody>
       </table>
-      <div class="mpl-src">Cost = (Reg hrs &times; rate &times; day-type base) + (OT hrs &times; rate &times; day-type OT) + (Night hrs &times; rate &times; base &times; ${(_mplMult().nightDiff*100)}% night diff). Rate is each person's hourly salary, captured when the entry is saved.</div>
+      <div class="mpl-src">Man-hours = (Reg + OT) &times; headcount. Cost = [(Reg &times; rate &times; day base) + (OT &times; rate &times; day OT) + (Night &times; rate &times; base &times; ${(_mplMult().nightDiff*100)}% night diff)] &times; headcount. Rate optional — leave blank to log man-hours only while per-role cost is confidential, then enter the actual total via <b>Total Cost</b>.</div>
     </div>
   </div>`;
 }
@@ -21648,36 +21685,61 @@ function showManpowerLogForm(id){
     ...(AppState.data.trades||[]).map(t=>typeof t==='string'?t:(t&&t.name)).filter(Boolean),
     ...people.map(r=>r.role).filter(Boolean)
   ])].sort();
+  const mode=edit?(edit.resourceId?'person':'role'):'person';
+  window._mplMode=mode;
   $('#genericModalTitle').textContent=edit?'Edit Daily Log':'Log Day — Manpower';
-  $('#genericModalBody').innerHTML=`<div class="form-grid">
+  $('#genericModalBody').innerHTML=`
+  <div style="display:flex;gap:6px;margin-bottom:12px">
+    <button type="button" id="mplModePerson" class="btn btn-sm" onclick="_mplSetMode('person')" style="flex:1"><i class="fas fa-user"></i> Named person</button>
+    <button type="button" id="mplModeRole" class="btn btn-sm" onclick="_mplSetMode('role')" style="flex:1"><i class="fas fa-users"></i> By role (headcount)</button>
+  </div>
+  <div style="font-size:10.5px;color:var(--text-muted);margin:-6px 0 10px"><b>By role</b> logs a crew's man-hours (hours × headcount) without naming each person — use this while per-role salaries are confidential.</div>
+  <div class="form-grid">
     <div class="form-group"><label class="form-label">Date *</label><input class="form-input" type="date" id="mplDate" value="${edit?edit.date:today}"></div>
-    <div class="form-group"><label class="form-label">Personnel *</label>
+    <div class="form-group" id="mplPersonGrp"><label class="form-label">Personnel *</label>
       <select class="form-select" id="mplPerson" onchange="_mplSyncRate()">
         <option value="">— select —</option>
         ${people.map(r=>`<option value="${r.id}" data-role="${esc(r.role||'')}" data-rate="${r.hourlyRate||0}" ${curRes===r.id?'selected':''}>${esc(r.name)}${r.role?' ('+esc(r.role)+')':''}</option>`).join('')}
       </select>
     </div>
+    <div class="form-group" id="mplHCGrp" style="display:none"><label class="form-label">Headcount *</label><input class="form-input" type="number" id="mplHC" min="1" step="1" value="${edit&&edit.headcount?edit.headcount:1}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px">Number of people in this role today.</div></div>
     <div class="form-group" style="grid-column:1/-1"><label class="form-label">Role / Trade done this day *</label>
       <input class="form-input" id="mplRole" list="mplRoleList" placeholder="e.g., Welder, Fitter, Rigger" value="${edit?esc(edit.role||''):''}" oninput="window._mplRoleTouched=true">
       <datalist id="mplRoleList">${roleOpts.map(o=>`<option value="${esc(o)}"></option>`).join('')}</datalist>
-      <div style="font-size:10px;color:var(--text-muted);margin-top:3px">Defaults to the person's primary trade — change it to the role they actually did today.</div>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:3px">Defaults to the person's primary trade — change it to the role actually done today.</div>
     </div>
     <div class="form-group" style="grid-column:1/-1"><label class="form-label">Work Done</label><input class="form-input" id="mplWork" placeholder="e.g., Boiler tube welding — 12 joints" value="${edit?esc(edit.workDone||''):''}"></div>
-    <div class="form-group"><label class="form-label">Regular Hours *</label><input class="form-input" type="number" id="mplReg" min="0" step="0.5" value="${edit?edit.regHrs:8}"></div>
+    <div class="form-group"><label class="form-label" id="mplRegLbl">Regular Hours *</label><input class="form-input" type="number" id="mplReg" min="0" step="0.5" value="${edit?edit.regHrs:8}"></div>
     <div class="form-group"><label class="form-label">Overtime Hours</label><input class="form-input" type="number" id="mplOT" min="0" step="0.5" value="${edit?edit.otHrs:0}"></div>
     <div class="form-group"><label class="form-label">Night Hours <span style="font-weight:400;color:var(--text-muted)">(10pm–6am, +${(_mplMult().nightDiff*100)}%)</span></label><input class="form-input" type="number" id="mplNight" min="0" step="0.5" value="${edit?edit.nightHrs:0}"></div>
     <div class="form-group"><label class="form-label">Day Type *</label><select class="form-select" id="mplDayType">${_MPL_DAYTYPES.map(d=>`<option value="${d.k}" ${((edit&&edit.dayType)||'ordinary')===d.k?'selected':''}>${d.label}</option>`).join('')}</select></div>
-    <div class="form-group"><label class="form-label">Hourly Rate (₱) *</label><input class="form-input" type="number" id="mplRate" min="0" step="0.01" value="${edit?edit.rate:0}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px">Auto-filled from the person's salary; override if needed.</div>
-      <div id="mplRateWarn" style="display:none;margin-top:5px;font-size:10.5px;color:var(--accent-amber)"><i class="fas fa-exclamation-triangle"></i> This person has no hourly rate — cost will be ₱0. Set their salary in Masterlist → Personnel, or type a rate here.</div></div>
+    <div class="form-group"><label class="form-label">Hourly Rate (₱) <span id="mplRateReq">*</span></label><input class="form-input" type="number" id="mplRate" min="0" step="0.01" value="${edit?edit.rate:0}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px" id="mplRateHint">Auto-filled from the person's salary; override if needed.</div>
+      <div id="mplRateWarn" style="display:none;margin-top:5px;font-size:10.5px;color:var(--accent-amber)"><i class="fas fa-exclamation-triangle"></i> No hourly rate — cost will be ₱0. Set a rate here, or leave blank and record the actual total via Total Cost.</div></div>
   </div>
-  <div style="margin-top:10px;padding:10px 12px;background:rgba(56,139,253,.08);border-radius:8px;font-size:11.5px">
-    Estimated cost: <b id="mplPreview" style="font-family:var(--font-mono)">₱0.00</b>
+  <div style="margin-top:10px;padding:10px 12px;background:rgba(56,139,253,.08);border-radius:8px;font-size:11.5px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <span>Man-hours: <b id="mplMhPreview" style="font-family:var(--font-mono)">0</b></span>
+    <span>Estimated cost: <b id="mplPreview" style="font-family:var(--font-mono)">₱0.00</b></span>
   </div>`;
   $('#genericModalFooter').innerHTML=`<button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button><button class="btn btn-primary" onclick="saveManpowerLog(${edit?`'${edit.id}'`:'null'})"><i class="fas fa-save"></i> ${edit?'Save':'Add Entry'}</button>`;
   openModal('genericModal');
   window._mplRoleTouched=!!edit;   // in edit mode the existing role is user-chosen; don't auto-overwrite
-  ['mplReg','mplOT','mplNight','mplRate','mplDayType'].forEach(fid=>{const el=$('#'+fid);if(el)el.addEventListener('input',_mplPreview);});
-  if(!edit)_mplSyncRate(); else _mplPreview();
+  ['mplReg','mplOT','mplNight','mplRate','mplDayType','mplHC'].forEach(fid=>{const el=$('#'+fid);if(el)el.addEventListener('input',_mplPreview);});
+  _mplSetMode(mode);
+  if(!edit && mode==='person')_mplSyncRate(); else _mplPreview();
+}
+function _mplSetMode(m){
+  window._mplMode=m;
+  const pg=$('#mplPersonGrp'), hg=$('#mplHCGrp');
+  if(pg)pg.style.display=(m==='person')?'':'none';
+  if(hg)hg.style.display=(m==='role')?'':'none';
+  const bp=$('#mplModePerson'), br=$('#mplModeRole');
+  if(bp)bp.className='btn btn-sm '+(m==='person'?'btn-primary':'btn-secondary');
+  if(br)br.className='btn btn-sm '+(m==='role'?'btn-primary':'btn-secondary');
+  // rate is optional in role mode (per-role cost may be confidential)
+  const req=$('#mplRateReq'); if(req)req.style.display=(m==='role')?'none':'';
+  const hint=$('#mplRateHint'); if(hint)hint.textContent=(m==='role')?'Optional — leave blank to log man-hours only; enter actual total via Total Cost.':'Auto-filled from the person\'s salary; override if needed.';
+  if(m==='role'){ const roleEl=$('#mplRole'); if(roleEl&&!roleEl.value){} }
+  _mplPreview();
 }
 function _mplSyncRate(){
   const sel=$('#mplPerson'); if(!sel)return;
@@ -21691,24 +21753,33 @@ function _mplSyncRate(){
   _mplPreview();
 }
 function _mplPreview(){
-  const e={regHrs:+$('#mplReg').value||0, otHrs:+$('#mplOT').value||0, nightHrs:+$('#mplNight').value||0, dayType:$('#mplDayType').value, rate:+$('#mplRate').value||0};
-  if($('#mplPreview'))$('#mplPreview').textContent=_mplMoney(_mplCost(e));
-  const w=$('#mplRateWarn'); if(w) w.style.display=(e.rate>0)?'none':'block';
+  const hc=(window._mplMode==='role')?Math.max(1,+($('#mplHC')&&$('#mplHC').value)||1):1;
+  const e={regHrs:+$('#mplReg').value||0, otHrs:+$('#mplOT').value||0, nightHrs:+$('#mplNight').value||0, dayType:$('#mplDayType').value, rate:+$('#mplRate').value||0, headcount:hc};
+  if($('#mplPreview'))$('#mplPreview').textContent=(e.rate>0)?_mplMoney(_mplEntryCost(e)):'—';
+  if($('#mplMhPreview'))$('#mplMhPreview').textContent=_mplNum(_mplManhrs(e));
+  const w=$('#mplRateWarn'); if(w) w.style.display=(e.rate>0||window._mplMode==='role')?'none':'block';
 }
 function saveManpowerLog(id){
-  const sel=$('#mplPerson'); const resId=sel?sel.value:'';
-  if(!resId){showToast('Select a person','error');return;}
+  const mode=window._mplMode||'person';
+  const sel=$('#mplPerson'); const resId=(mode==='person'&&sel)?sel.value:'';
+  const role=($('#mplRole')&&$('#mplRole').value.trim())||'';
+  if(mode==='person'&&!resId){showToast('Select a person','error');return;}
+  if(mode==='role'&&!role){showToast('Enter the role / trade','error');return;}
   if(!$('#mplDate').value){showToast('Pick a date','error');return;}
-  if((+$('#mplRate').value||0)<=0 && !confirm('Hourly rate is ₱0 — this entry will have no labour cost.\n\nSave anyway? (Set the person\'s salary in Masterlist → Personnel to avoid this.)')) return;
-  const opt=sel.options[sel.selectedIndex];
-  const personName=opt?opt.textContent.replace(/\s*\(.*\)$/,''):'';
-  const role=($('#mplRole')&&$('#mplRole').value.trim())||(opt?(opt.getAttribute('data-role')||''):'');
+  const hc=(mode==='role')?Math.max(1,+($('#mplHC')&&$('#mplHC').value)||1):1;
+  if(mode==='role'&&hc<1){showToast('Headcount must be at least 1','error');return;}
+  // in person mode a ₱0 rate is a warning; in role mode a blank rate is expected (cost captured via Total Cost)
+  if(mode==='person'&&(+$('#mplRate').value||0)<=0 && !confirm('Hourly rate is ₱0 — this entry will have no labour cost.\n\nSave anyway? (Set the person\'s salary in Masterlist → Personnel to avoid this.)')) return;
+  const opt=(mode==='person'&&sel)?sel.options[sel.selectedIndex]:null;
+  const personName=(mode==='role')?(role+' crew ×'+hc):(opt?opt.textContent.replace(/\s*\(.*\)$/,''):'');
+  const finalRole=role||(opt?(opt.getAttribute('data-role')||''):'');
   const rec={
     projectId:detailProjectId,
     date:$('#mplDate').value,
     resourceId:resId,
     personName:personName,
-    role:role,
+    role:finalRole,
+    headcount:hc,
     workDone:$('#mplWork').value.trim(),
     regHrs:+$('#mplReg').value||0,
     otHrs:+$('#mplOT').value||0,
@@ -21740,9 +21811,47 @@ function deleteManpowerLog(id){
 }
 function exportManpowerLog(){
   const pid=detailProjectId;
-  const rows=_mplEntries(pid).map(e=>[e.date,e.personName,e.role,e.workDone,e.regHrs,e.otHrs,e.nightHrs,_mplDayLabel(e.dayType),e.rate,_mplCost(e)]);
+  const rows=_mplEntries(pid).map(e=>[e.date,e.personName,e.role,_mplHC(e),e.workDone,e.regHrs,e.otHrs,e.nightHrs,_mplManhrs(e),_mplDayLabel(e.dayType),e.rate,_mplEntryCost(e)]);
   if(typeof exportCSV==='function')
-    exportCSV(rows,['Date','Personnel','Role','Work Done','Reg Hrs','OT Hrs','Night Hrs','Day Type','Rate/hr','Cost'],'daily_manpower_'+pid+'.csv');
+    exportCSV(rows,['Date','Personnel/Crew','Role','Headcount','Work Done','Reg Hrs','OT Hrs','Night Hrs','Man-hours','Day Type','Rate/hr','Cost'],'daily_manpower_'+pid+'.csv');
+}
+
+/* ============================ MANUAL TOTAL MANPOWER COST ============================ */
+/* While per-role rates are confidential, the user can enter the actual total manpower
+   cost for the whole project. It overrides the computed Labour Cost until cleared. */
+function showMplManualCost(){
+  const pid=detailProjectId;
+  const cur=_mplManual(pid);
+  const computed=_mplEntries(pid).reduce((s,e)=>s+_mplEntryCost(e),0);
+  $('#genericModalTitle').textContent='Total Manpower Cost (actual)';
+  $('#genericModalBody').innerHTML=`
+    <div style="font-size:11.5px;color:var(--text-secondary);margin-bottom:12px">
+      Enter the <b>actual total manpower cost utilised</b> for this project. Use this while per-role salaries are confidential — man-hours stay tracked per day/role, and this figure drives the Labour Cost tile. Clear it to revert to the computed-from-rates total once rates are available.
+    </div>
+    <div class="form-group" style="max-width:280px">
+      <label class="form-label">Total Manpower Cost (₱)</label>
+      <input class="form-input" type="number" id="mplManualVal" min="0" step="0.01" value="${cur!=null?cur:''}" placeholder="e.g., 1250000">
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:8px">Computed from entered rates right now: <b style="font-family:var(--font-mono)">${_mplMoney(computed)}</b></div>`;
+  $('#genericModalFooter').innerHTML=`
+    ${cur!=null?`<button class="btn btn-secondary" onclick="saveMplManualCost(true)" style="margin-right:auto"><i class="fas fa-eraser"></i> Clear (use computed)</button>`:''}
+    <button class="btn btn-secondary" onclick="closeModal('genericModal')">Cancel</button>
+    <button class="btn btn-primary" onclick="saveMplManualCost(false)"><i class="fas fa-save"></i> Save</button>`;
+  openModal('genericModal');
+}
+function saveMplManualCost(clear){
+  const pid=detailProjectId;
+  if(!AppState.data.mplManualCost)AppState.data.mplManualCost={};
+  if(clear){ delete AppState.data.mplManualCost[pid]; }
+  else{
+    const v=+($('#mplManualVal')&&$('#mplManualVal').value);
+    if(!(v>0)){ if(!confirm('No amount entered — this will clear the manual total. Continue?')) return; delete AppState.data.mplManualCost[pid]; }
+    else AppState.data.mplManualCost[pid]=Math.round(v*100)/100;
+  }
+  AppState.save();
+  closeModal('genericModal');
+  renderManpowerLog();
+  showToast(clear?'Reverted to computed cost':'Total manpower cost saved','success');
 }
 
 /* ============================ MULTIPLIERS SETTINGS ============================ */

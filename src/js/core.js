@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.16.2';
-const APP_BUILD='20261112j';
+const APP_VERSION='2.16.3';
+const APP_BUILD='20261113a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Tidied the Execution Dashboard one-page printout — removed the redundant "BU:" pill from the letterhead, since the Business-Unit logo, company name and address already show which unit it is.';
+const APP_RELEASE_NOTE='Daily Manpower Log now supports logging a crew by role + headcount (man-hours = hours × headcount) without naming each person, plus a manual "Total Manpower Cost" you can enter while per-role salaries are confidential — so man-hours and total cost stay tracked today and convert to computed cost automatically once rates are available.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.16.3',date:'2026-11-13',type:'feat',notes:[
+    'Daily Manpower Log: new "By role (headcount)" logging mode — record a whole crew for a trade with a headcount instead of naming each person. Man-hours = (Reg + OT) × headcount, so man-hours per role are tracked even while individual salaries are confidential.',
+    'Hourly rate is now optional in role mode; the log shows an HC column and a "Man-hours by Role" breakdown, and totals are headcount-weighted man-hours.',
+    'New "Total Cost" button lets you enter the actual total manpower cost utilised for the project. It drives the Labour Cost tile (flagged "manual") while per-role rates are unavailable, and clears back to the computed-from-rates total once rates are entered.',
+  ]},
   {version:'2.16.2',date:'2026-11-12',type:'fix',notes:[
     'Execution Dashboard one-page printout: removed the "BU:" pill from the letterhead — the Business-Unit logo, company name and address already convey it.',
   ]},
