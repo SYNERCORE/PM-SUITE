@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.16.3';
-const APP_BUILD='20261113a';
+const APP_VERSION='2.16.4';
+const APP_BUILD='20261113b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Daily Manpower Log now supports logging a crew by role + headcount (man-hours = hours × headcount) without naming each person, plus a manual "Total Manpower Cost" you can enter while per-role salaries are confidential — so man-hours and total cost stay tracked today and convert to computed cost automatically once rates are available.';
+const APP_RELEASE_NOTE='The Execution Dashboard now draws its Actual Man-hours from the Daily Manpower Log — when daily entries exist they become the authoritative actuals (per role and total), the Manpower register still supplies the plan, and an Actual Labour Cost tile shows the manual total (or the computed-from-rates sum). Carried into the one-page printout too.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.16.4',date:'2026-11-13',type:'feat',notes:[
+    'Execution Dashboard "Man-hours by Role" now uses the Daily Manpower Log as the source of truth for ACTUAL man-hours whenever daily entries exist — per-role and total actuals come from logged (reg+OT)×headcount, while the Manpower register continues to supply the planned hours.',
+    'Added an "Actual Labour Cost" tile: shows the manually entered Total Manpower Cost (flagged "manual") when set, otherwise the computed-from-rates sum of the day logs.',
+    'The Actual Man-hours tile is flagged "(logged)" and the section source note switches to "Daily Manpower Log (actual)" when logs drive the numbers; falls back to the register estimate when there are no logs. The one-page printout reflects the same.',
+  ]},
   {version:'2.16.3',date:'2026-11-13',type:'feat',notes:[
     'Daily Manpower Log: new "By role (headcount)" logging mode — record a whole crew for a trade with a headcount instead of naming each person. Man-hours = (Reg + OT) × headcount, so man-hours per role are tracked even while individual salaries are confidential.',
     'Hourly rate is now optional in role mode; the log shows an HC column and a "Man-hours by Role" breakdown, and totals are headcount-weighted man-hours.',

@@ -1,1 +1,1 @@
-{"version":"2.16.3","note":"Daily Manpower Log: log a crew by role + headcount (man-hours without naming each person) and enter a manual total manpower cost while per-role salaries are confidential.","released":"2026-11-13 09:00"}
+{"version":"2.16.4","note":"Execution Dashboard draws Actual Man-hours (per role and total) and Actual Labour Cost from the Daily Manpower Log when daily entries exist; register supplies the plan. Reflected in the one-page printout.","released":"2026-11-13 10:30"}

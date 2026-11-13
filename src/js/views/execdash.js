@@ -146,11 +146,38 @@ function _edModel(pid){
     r.actHrs  += ac*hpd*dpw + ot;
     r.onsite = ac; // latest record's actual headcount wins (register is weekly)
   });
+  // ── Actual man-hours from the Daily Manpower Log (richer than the weekly register) ──
+  // When daily logs exist they are the source of truth for ACTUAL man-hours (man-hours =
+  // (reg+ot) × headcount), and the register is used only for the PLAN. Labour cost uses the
+  // manual project total when set, else the computed-from-rates sum of the log entries.
+  const mlogs=(D.manpowerLogs||[]).filter(x=>x.projectId===pid&&!x._deleted);
+  const hasLogs=mlogs.length>0;
+  const logByRole={}; let loggedMh=0;
+  mlogs.forEach(e=>{
+    const hc=(+e.headcount>0)?+e.headcount:1;
+    const mh=((+e.regHrs||0)+(+e.otHrs||0))*hc;
+    const role=(e.role||'Unassigned');
+    logByRole[role]=(logByRole[role]||0)+mh;
+    loggedMh+=mh;
+  });
+  if(hasLogs){
+    Object.values(roleAgg).forEach(r=>{ r.actHrs=0; });     // daily log supersedes register actuals
+    Object.keys(logByRole).forEach(role=>{
+      const r=roleAgg[role]||(roleAgg[role]={role,onsite:0,planHrs:0,actHrs:0});
+      r.actHrs=logByRole[role];
+    });
+  }
   const roleRows=Object.values(roleAgg).filter(r=>r.planHrs||r.actHrs)
     .sort((a,b)=>b.planHrs-a.planHrs);
   const mhPlan=roleRows.reduce((s,r)=>s+r.planHrs,0);
   const mhAct=roleRows.reduce((s,r)=>s+r.actHrs,0);
   const onsiteTot=roleRows.reduce((s,r)=>s+r.onsite,0);
+  // actual labour cost: manual project total overrides the computed-from-rates sum
+  const mhManualCost=(D.mplManualCost||{})[pid];
+  const mhCostManual=(mhManualCost!=null);
+  const mhCost=mhCostManual? +mhManualCost
+             : (typeof _mplEntryCost==='function'? mlogs.reduce((s,e)=>s+_mplEntryCost(e),0) : 0);
+  const mhSrc=hasLogs?'Daily Manpower Log (actual)':('Manpower register · '+hpd+'h/day × '+dpw+'d/wk + OT');
 
   // ── Procurement items + age + assignee ──
   const openStat=['draft','requested','approved','rfq','quoted','evaluated','ordered','partial'];
@@ -226,7 +253,7 @@ function _edModel(pid){
     actualPct, plannedPct,
     cpm:{...cpm,fcVar},
     budgetRows, budTotB, budTotA,
-    roleRows, mhPlan, mhAct, onsiteTot, hpd, dpw,
+    roleRows, mhPlan, mhAct, onsiteTot, hpd, dpw, hasLogs, loggedMh, mhCost, mhCostManual, mhSrc,
     procRows,
     actRows, riskRows, qualRows, phaseRows, last24, planned3,
     safety:{...st.safety, manHrs:manHrsCum, onsite:onsiteTot},
@@ -469,12 +496,12 @@ function _edRender(m,opts){
 
   <!-- MAN-HOURS BY ROLE -->
   <div class="card ed-mb">
-    <div class="ed-h3">Man-hours by Role <span class="ed-src" style="margin:0">Manpower register grouped by trade · ${m.hpd}h/day × ${m.dpw}d/wk + OT</span></div>
+    <div class="ed-h3">Man-hours by Role <span class="ed-src" style="margin:0">Actuals: ${m.mhSrc}</span></div>
     <div class="ed-g4 ed-mb">
-      <div class="ed-kpi"><div class="ed-lbl">Contractors</div><div class="ed-num">${m.contractors||'—'}</div></div>
       <div class="ed-kpi"><div class="ed-lbl">On Site (headcount)</div><div class="ed-num">${m.onsiteTot}</div></div>
       <div class="ed-kpi"><div class="ed-lbl">Planned Man-hours</div><div class="ed-num">${_edNum(Math.round(m.mhPlan))}</div></div>
-      <div class="ed-kpi"><div class="ed-lbl">Actual Man-hours</div><div class="ed-num" style="color:var(--accent-cyan)">${_edNum(Math.round(m.mhAct))}</div></div>
+      <div class="ed-kpi"><div class="ed-lbl">Actual Man-hours${m.hasLogs?' <span style="font-weight:400;color:var(--accent-cyan);text-transform:none;letter-spacing:0">(logged)</span>':''}</div><div class="ed-num" style="color:var(--accent-cyan)">${_edNum(Math.round(m.mhAct))}</div></div>
+      <div class="ed-kpi"><div class="ed-lbl">Actual Labour Cost${m.mhCostManual?' <span style="font-weight:400;color:var(--accent-amber);text-transform:none;letter-spacing:0">(manual)</span>':''}</div><div class="ed-num" style="color:var(--accent-green)">${m.mhCost?_edCur(m.mhCost):'—'}</div></div>
     </div>
     <table class="ed-tbl">
       <thead><tr><th>Role / Trade</th><th class="r">On Site</th><th class="r">Planned Hrs</th><th class="r">Actual Hrs</th><th class="r">Variance</th><th style="width:130px">% Used</th></tr></thead>
@@ -820,7 +847,7 @@ function _edPrintHTML(m,p,lh,doc,photos,live){
         </tbody></table>
       </div>
       <div class="box" style="flex:1">
-        <div class="h">Man-hours by Role <span class="src">${m.hpd}h/d × ${m.dpw}d + OT</span></div>
+        <div class="h">Man-hours by Role <span class="src">${m.hasLogs?'Daily log (actual)':(m.hpd+'h/d × '+m.dpw+'d + OT')}${m.mhCost?' · '+_pMoneyShort(m.mhCost)+(m.mhCostManual?' (manual)':''):''}</span></div>
         <table><thead><tr><th>Role</th><th class="r">Site</th><th class="r">Plan</th><th class="r">Act</th><th class="r">%</th></tr></thead><tbody>
           ${roleRows.map(r=>`<tr><td>${esc2(r.role)}</td><td class="r mono">${r.onsite}</td><td class="r mono">${Math.round(r.planHrs).toLocaleString()}</td><td class="r mono">${Math.round(r.actHrs).toLocaleString()}</td><td class="r">${_pPctUsed(r.actHrs,r.planHrs)}</td></tr>`).join('')||'<tr><td colspan="5" style="color:#93a0ad">No manpower records.</td></tr>'}
           ${roleRows.length?`<tr class="tot"><td>TOTAL</td><td class="r mono">${m.onsiteTot}</td><td class="r mono">${Math.round(m.mhPlan).toLocaleString()}</td><td class="r mono">${Math.round(m.mhAct).toLocaleString()}</td><td class="r">${_pPctUsed(m.mhAct,m.mhPlan)}</td></tr>`:''}
