@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.16.4';
-const APP_BUILD='20261113b';
+const APP_VERSION='2.16.5';
+const APP_BUILD='20261114a';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='The Execution Dashboard now draws its Actual Man-hours from the Daily Manpower Log — when daily entries exist they become the authoritative actuals (per role and total), the Manpower register still supplies the plan, and an Actual Labour Cost tile shows the manual total (or the computed-from-rates sum). Carried into the one-page printout too.';
+const APP_RELEASE_NOTE='New "Budget by Category" sheet in the Cost Control tab: type a budget per your standard cost categories (Mobilization, Demobilization, Labor, Accommodation, Transpo, Requirements, Admin Cost, Third Party, Insurances, Materials, PPE, Tools — editable), with Actual auto-rolled from the Daily Manpower Log and Resource Allocation where tracked (override to manual anytime), Variance, %, and a NET INCOME BASED ON TOTAL DIRECT COST total.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.16.5',date:'2026-11-14',type:'feat',notes:[
+    'New "Budget by Category" sheet at the top of the project Cost Control tab — a top-down cost-control view that mirrors the standard SY3 project cost sheet.',
+    'Type one budget figure per main cost category. Ships with the standard 12 (Mobilization, Demobilization, Labor, Accommodation, Transpo, Requirements, Admin Cost, Third Party, Insurances, Materials, PPE, Tools) and you can add, rename or remove categories per project (or Reset to standard).',
+    'Actual Cost auto-rolls where the app tracks it: Labor from the Daily Manpower Log (manual total or computed), and Materials / Tools / PPE / Mobilization / Demobilization / Third Party from Resource Allocation actuals. Click "override" on any row to enter the actual manually; "auto" switches it back.',
+    'Shows Variance (Budget − Actual, negative in parentheses), % (Variance ÷ Budget) and a NET INCOME BASED ON TOTAL DIRECT COST total row, with CSV Export.',
+  ]},
   {version:'2.16.4',date:'2026-11-13',type:'feat',notes:[
     'Execution Dashboard "Man-hours by Role" now uses the Daily Manpower Log as the source of truth for ACTUAL man-hours whenever daily entries exist — per-role and total actuals come from logged (reg+OT)×headcount, while the Manpower register continues to supply the planned hours.',
     'Added an "Actual Labour Cost" tile: shows the manually entered Total Manpower Cost (flagged "manual") when set, otherwise the computed-from-rates sum of the day logs.',

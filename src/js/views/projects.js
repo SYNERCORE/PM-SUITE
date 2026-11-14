@@ -4172,6 +4172,9 @@ function renderDetailCostControl(){
     </div>
   </div>
 
+  <!-- Budget by Category (standard cost-control sheet) -->
+  ${typeof renderCostBudgetPanel==='function'?renderCostBudgetPanel(pid):''}
+
   <!-- Quick edit budget/spent -->
   <div class="card" style="margin-bottom:14px">
     <div class="card-title" style="margin-bottom:10px">Update Budget & Spent</div>
