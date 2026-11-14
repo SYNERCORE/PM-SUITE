@@ -89,6 +89,8 @@ function _cbPct(bud,v){ return bud>0? (v/bud*100):0; }
 /* returns an HTML string; embedded at the top of the Cost Control tab */
 function renderCostBudgetPanel(pid){
   const rows=_cbRows(pid);
+  const seeB=(typeof canSeeBudget==='function')?canSeeBudget():true;
+  if(!seeB) return _cbPanelMasked(pid,rows);
   let totB=0,totA=0;
   const body=rows.map(r=>{
     const bud=Number(r.budget)||0;
@@ -170,6 +172,57 @@ function renderCostBudgetPanel(pid){
   </div>`;
 }
 
+/* ---- masked panel for NON-CONFIDENTIAL users ----
+   Category names and structure stay visible; every peso figure is hidden and
+   the sheet is read-only (no editing, itemize or export of amounts). */
+function _cbPanelMasked(pid,rows){
+  const M='₱ ••••••';
+  const body=rows.map(r=>`<tr>
+      <td class="cb-part">${esc(r.label)}${r.src?`<span class="cb-srctag">${_CB_SRC_LABEL[r.src]||''}</span>`:''}</td>
+      <td class="cb-r"><span class="cb-mask">${M}</span></td>
+      <td class="cb-r"><span class="cb-mask">${M}</span></td>
+      <td class="cb-r"><span class="cb-mask">••••</span></td>
+      <td class="cb-r"><span class="cb-mask">••%</span></td>
+      <td class="cb-r"></td>
+    </tr>`).join('');
+  return `
+  <style>
+    .cb-wrap{font-size:12px;margin-bottom:16px}
+    .cb-tbl{width:100%;border-collapse:collapse}
+    .cb-tbl th{background:var(--bg-hover,rgba(255,255,255,.04));text-align:left;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);border-bottom:2px solid var(--border-subtle,rgba(255,255,255,.12));white-space:nowrap}
+    .cb-tbl td{padding:5px 10px;border-bottom:1px solid var(--border-subtle,rgba(255,255,255,.06))}
+    .cb-tbl th.cb-r,.cb-tbl td.cb-r{text-align:right}
+    .cb-part{font-weight:600}
+    .cb-srctag{display:block;font-size:9px;font-weight:400;color:var(--text-muted)}
+    .cb-mask{font-family:var(--font-mono);font-size:11.5px;color:var(--text-muted);letter-spacing:1.5px;user-select:none}
+    .cb-net td{font-weight:800;border-top:2px solid var(--border-subtle,rgba(255,255,255,.2));background:var(--bg-hover,rgba(255,255,255,.05));padding:10px}
+    .cb-net .cb-lbl{color:var(--accent-amber)}
+    .cb-note{font-size:10px;color:var(--text-muted);margin-top:7px}
+    .cb-lock{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:600;color:var(--accent-amber);background:rgba(240,164,80,.12);border:1px solid rgba(240,164,80,.3);border-radius:6px;padding:3px 9px}
+  </style>
+  <div class="card cb-wrap">
+    <div class="section-header" style="margin-bottom:10px">
+      <div class="section-title"><i class="fas fa-funnel-dollar" style="margin-right:7px;color:var(--accent-cyan)"></i>Budget by Category</div>
+      <span class="cb-lock"><i class="fas fa-lock"></i> Confidential — budget figures hidden</span>
+    </div>
+    <div class="table-wrap"><table class="cb-tbl">
+      <thead><tr><th>Particular</th><th class="cb-r">Budget</th><th class="cb-r">Actual Cost</th><th class="cb-r">Variance</th><th class="cb-r">%</th><th class="cb-r"></th></tr></thead>
+      <tbody>
+        ${body||'<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:18px">No categories.</td></tr>'}
+        <tr class="cb-net">
+          <td class="cb-lbl">NET INCOME BASED ON TOTAL DIRECT COST</td>
+          <td class="cb-r"><span class="cb-mask">${M}</span></td>
+          <td class="cb-r"><span class="cb-mask">${M}</span></td>
+          <td class="cb-r"><span class="cb-mask">••••</span></td>
+          <td class="cb-r"><span class="cb-mask">••%</span></td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table></div>
+    <div class="cb-note"><i class="fas fa-info-circle" style="margin-right:4px"></i>Budget amounts are restricted to confidential users. Ask an administrator for access if you need to view these figures.</div>
+  </div>`;
+}
+
 /* ============================ EDIT HANDLERS ============================ */
 function _cbReRender(pid){
   // the panel lives inside the Cost Control tab — re-render the whole tab
@@ -218,6 +271,10 @@ function _cbResetStandard(pid){
 }
 /* ============================ ITEMIZED CHARGES (per category) ============================ */
 function showCbItems(pid,rowId){
+  if(typeof canSeeBudget==='function' && !canSeeBudget()){
+    if(typeof showToast==='function')showToast('Budget figures are confidential.','error');
+    return;
+  }
   const r=_cbFind(pid,rowId); if(!r)return;
   if(!Array.isArray(r.items))r.items=[];
   $('#genericModalTitle').textContent='Itemized Charges — '+r.label;
@@ -266,6 +323,10 @@ function _cbItemDel(pid,rowId,itemId){
   if(i>=0)r.items.splice(i,1); _cbTouch(pid); AppState.save(); _cbItemsRefresh(pid,rowId);
 }
 function exportCostBudget(pid){
+  if(typeof canSeeBudget==='function' && !canSeeBudget()){
+    if(typeof showToast==='function')showToast('Budget figures are confidential — export not permitted.','error');
+    return;
+  }
   const rows=_cbRows(pid);
   const out=[];
   rows.forEach(r=>{

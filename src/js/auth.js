@@ -526,7 +526,7 @@ function _renderUserTable(users){
   $('#userMgmtContent').innerHTML=`
   <div style="padding:8px 14px;background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.2);border-radius:7px;margin-bottom:12px;font-size:11px;color:var(--text-secondary);display:flex;align-items:center;gap:8px">
     <i class="fas fa-info-circle" style="color:var(--accent-blue);flex-shrink:0"></i>
-    <span><strong>Module Access</strong> button appears on each user row (except your own). It lets you block specific sidebar modules for that user. Admins always see all modules regardless.</span>
+    <span><strong>Module Access</strong> button appears on each user row (except your own). It lets you block specific sidebar modules for that user. Admins always see all modules regardless. &nbsp;·&nbsp; The <strong>Budget</strong> toggle marks a user <em>Confidential</em> — only confidential users see budget &amp; cost amounts (in Budget by Category and the Execution Dashboard); everyone else sees them masked.</span>
   </div>
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
     ${[['fa-users','Total Users',users.length,'var(--accent-blue)'],
@@ -546,7 +546,7 @@ function _renderUserTable(users){
     <button class="btn btn-primary btn-sm" onclick="showInviteModal()" style="font-size:11px"><i class="fas fa-user-plus"></i> Invite User</button>
   </div>
   <div class="table-wrap"><table>
-    <thead><tr><th>User</th><th>Email</th><th>Dept/Role</th><th>Status</th><th>Registered</th><th>Last Login</th><th>Admin</th><th>Actions</th></tr></thead>
+    <thead><tr><th>User</th><th>Email</th><th>Dept/Role</th><th>Status</th><th>Registered</th><th>Last Login</th><th>Admin</th><th title="Confidential users can see budget &amp; cost amounts">Budget</th><th>Actions</th></tr></thead>
     <tbody>${users.length?_pgSlice('users',users).map(u=>{
       const isMe=_currentUser&&u.uid===_currentUser.uid;
       const sb={approved:'badge-green',pending:'badge-amber',rejected:'badge-red',suspended:'badge-red'};
@@ -561,6 +561,7 @@ function _renderUserTable(users){
         <td style="font-size:10px;font-family:var(--font-mono)">${u.createdAt?new Date(u.createdAt).toLocaleDateString():'-'}</td>
         <td style="font-size:10px;color:var(--text-secondary)">${u.lastLogin?new Date(u.lastLogin).toLocaleDateString():'-'}</td>
         <td><label class="toggle" style="width:34px;height:18px"><input type="checkbox" ${u.isAdmin?'checked':''} ${isMe?'disabled':''} onchange="toggleAdmin('${u.uid}',this.checked)"><span class="toggle-slider"></span></label></td>
+        <td title="${(typeof isUserConfidential==='function'&&isUserConfidential(u.uid,u.isAdmin,u.email))?'Can see budget amounts (Confidential)':'Budget amounts hidden (Non-confidential)'}"><label class="toggle" style="width:34px;height:18px"><input type="checkbox" ${(typeof isUserConfidential==='function'&&isUserConfidential(u.uid,u.isAdmin,u.email))?'checked':''} onchange="toggleConfidential('${u.uid}',this.checked,'${(u.email||'').replace(/'/g,'')}')"><span class="toggle-slider"></span></label></td>
         <td><div style="display:flex;gap:5px;flex-wrap:wrap">
           ${u.status==='pending'?`
           <button class="btn btn-success btn-sm" style="font-size:9px;padding:3px 8px" onclick="approveUser('${u.uid}','${u.name||'User'}','${u.email}')"><i class="fas fa-check"></i> Approve</button>
@@ -570,7 +571,7 @@ function _renderUserTable(users){
           ${!u.isAdmin?`<button class="btn btn-secondary btn-sm" style="font-size:9px;padding:3px 8px;white-space:nowrap;display:block;width:100%;margin-top:3px" onclick="showModuleAccess('${u.uid}','${(u.name||'User').replace(/'/g,'\'')}','${u.email||''}')" title="Module Access"><i class="fas fa-lock" style="margin-right:4px"></i>Module Access</button>`:''}
           ${!isMe?`<button class="btn btn-danger btn-sm btn-icon" onclick="deleteUser('${u.uid}','${u.name||'User'}')" title="Delete"><i class="fas fa-trash"></i></button>`:''}
         </div></td>
-      </tr>`;}).join(''):`<tr><td colspan="8"><div class="empty-state"><p>No users registered yet.</p></div></td></tr>`}
+      </tr>`;}).join(''):`<tr><td colspan="9"><div class="empty-state"><p>No users registered yet.</p></div></td></tr>`}
     </tbody>
   </table></div>
   ${users.length<=1?`<div style="margin-top:12px;padding:14px;background:rgba(56,139,253,.06);border:1px solid rgba(56,139,253,.15);border-radius:8px;font-size:12px;color:var(--text-secondary)">
@@ -613,6 +614,10 @@ function _renderUserTable(users){
           <input type="checkbox" id="inviteAdmin" style="width:14px;height:14px">
           Grant Admin privileges
         </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="inviteConfidential" style="width:14px;height:14px">
+          Confidential — can view budget &amp; cost amounts
+        </label>
       </div>
       <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
         <button class="btn btn-secondary btn-sm" onclick="closeInviteModal()">Cancel</button>
@@ -625,7 +630,7 @@ function _renderUserTable(users){
 
 function showInviteModal(){
   const m=document.getElementById('inviteUserModal');
-  if(m){m.style.display='flex';['inviteName','inviteEmail','inviteDept'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});const r=document.getElementById('inviteRole');if(r)r.value='User';const a=document.getElementById('inviteAdmin');if(a)a.checked=false;}
+  if(m){m.style.display='flex';['inviteName','inviteEmail','inviteDept'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});const r=document.getElementById('inviteRole');if(r)r.value='User';const a=document.getElementById('inviteAdmin');if(a)a.checked=false;const c=document.getElementById('inviteConfidential');if(c)c.checked=false;}
 }
 function closeInviteModal(){
   const m=document.getElementById('inviteUserModal');
@@ -646,6 +651,8 @@ async function saveInvitedUser(){
     if(existing){showToast('A user with that email already exists.','warning');return;}
     const profile={uid:'invited-'+Date.now(),email,name,status:'approved',isAdmin,role:isAdmin?'Admin':role,department:dept,registeredAt:new Date().toISOString(),approvedBy:_currentUser?.email||'admin'};
     await m365SaveUserProfile(token,siteId,profile,null);
+    const conf=document.getElementById('inviteConfidential')?.checked||false;
+    if(typeof setUserConfidential==='function')setUserConfidential(profile.uid,conf,email);
     showToast(name+' added and pre-approved. They can sign in immediately.','success',5000);
     closeInviteModal();
     _userMgmtCache=null;_userMgmtHash='';
@@ -701,6 +708,15 @@ async function toggleAdmin(uid,isAdmin){
   const ok=await m365SetAdmin(uid,isAdmin);
   if(!ok){renderUserManagement();return;} // m365SetAdmin already toasted why
   showToast('Admin status updated','success');
+  _userMgmtCache=null;_userMgmtHash='';
+  renderUserManagement();
+}
+
+// Mark a user Confidential (can see budget amounts) or Non-confidential (masked).
+function toggleConfidential(uid,val,email){
+  if(typeof setUserConfidential!=='function'){showToast('Budget access not available.','error');return;}
+  setUserConfidential(uid,!!val,email||'');
+  showToast(val?'User can now see budget amounts.':'Budget amounts now hidden for this user.','success');
   _userMgmtCache=null;_userMgmtHash='';
   renderUserManagement();
 }

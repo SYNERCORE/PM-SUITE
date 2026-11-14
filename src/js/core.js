@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.16.8';
-const APP_BUILD='20261114d';
+const APP_VERSION='2.17.0';
+const APP_BUILD='20261114e';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,18 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Cost Budget by Category: you can now "itemize" any category — break it into specific charges (date, description, vendor/ref, amount), and their total becomes that category\'s Actual Cost. Great for the manually-typed categories (Accommodation, Transpo, Admin, etc.) so you can track exactly what was charged. Itemized detail is included in the CSV export.';
+const APP_RELEASE_NOTE='Budget confidentiality: users can now be split into Confidential (can see budget & cost amounts) and Non-confidential (amounts shown masked as ₱ ••••). Set the new "Budget" toggle per user in User Management. Budget figures are masked in Budget by Category and the Execution Dashboard for non-confidential users. Secure default: only admins can see budgets until you grant access.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.17.0',date:'2026-11-14',type:'feat',notes:[
+    'Budget confidentiality — users are now split into Confidential and Non-confidential. Only confidential users can see budget & cost amounts; everyone else sees them masked as ₱ ••••.',
+    'New "Budget" toggle on each user row in User Management (Admin → Users) marks a user confidential. It is independent of Admin — an admin can be made non-confidential.',
+    'Secure default: a user who has never been set is confidential only if they are an Admin, so the admin setting this up is never locked out; all other users default to hidden.',
+    'Masking applies to the Budget by Category sheet (Cost Control tab) and the Execution Dashboard budget & cost section + Actual Labour Cost, on screen and in the printed/exported PDF. CSV export of the budget sheet is blocked for non-confidential users.',
+    'The confidential flag rides on the existing SharePoint-synced user permissions record, so an admin\'s change reaches every device.',
+  ]},
   {version:'2.16.8',date:'2026-11-14',type:'feat',notes:[
     'Cost Budget by Category: each category row can now be "itemized" — click itemize (or the item count) to record specific charges with date, description, vendor/reference and amount. The sum of the items becomes that category\'s Actual Cost (overrides the auto/manual value), so you can track exactly what was charged — ideal for Accommodation, Transpo, Admin Cost, Insurances, Requirements.',
     'The CSV export now lists the itemized charges indented under each category.',

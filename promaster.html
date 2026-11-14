@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.16.8';
-const APP_BUILD='20261114d';
+const APP_VERSION='2.17.0';
+const APP_BUILD='20261114e';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,18 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Cost Budget by Category: you can now "itemize" any category — break it into specific charges (date, description, vendor/ref, amount), and their total becomes that category\'s Actual Cost. Great for the manually-typed categories (Accommodation, Transpo, Admin, etc.) so you can track exactly what was charged. Itemized detail is included in the CSV export.';
+const APP_RELEASE_NOTE='Budget confidentiality: users can now be split into Confidential (can see budget & cost amounts) and Non-confidential (amounts shown masked as ₱ ••••). Set the new "Budget" toggle per user in User Management. Budget figures are masked in Budget by Category and the Execution Dashboard for non-confidential users. Secure default: only admins can see budgets until you grant access.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.17.0',date:'2026-11-14',type:'feat',notes:[
+    'Budget confidentiality — users are now split into Confidential and Non-confidential. Only confidential users can see budget & cost amounts; everyone else sees them masked as ₱ ••••.',
+    'New "Budget" toggle on each user row in User Management (Admin → Users) marks a user confidential. It is independent of Admin — an admin can be made non-confidential.',
+    'Secure default: a user who has never been set is confidential only if they are an Admin, so the admin setting this up is never locked out; all other users default to hidden.',
+    'Masking applies to the Budget by Category sheet (Cost Control tab) and the Execution Dashboard budget & cost section + Actual Labour Cost, on screen and in the printed/exported PDF. CSV export of the budget sheet is blocked for non-confidential users.',
+    'The confidential flag rides on the existing SharePoint-synced user permissions record, so an admin\'s change reaches every device.',
+  ]},
   {version:'2.16.8',date:'2026-11-14',type:'feat',notes:[
     'Cost Budget by Category: each category row can now be "itemized" — click itemize (or the item count) to record specific charges with date, description, vendor/reference and amount. The sum of the items becomes that category\'s Actual Cost (overrides the auto/manual value), so you can track exactly what was charged — ideal for Accommodation, Transpo, Admin Cost, Insurances, Requirements.',
     'The CSV export now lists the itemized charges indented under each category.',
@@ -4818,7 +4825,7 @@ function _renderUserTable(users){
   $('#userMgmtContent').innerHTML=`
   <div style="padding:8px 14px;background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.2);border-radius:7px;margin-bottom:12px;font-size:11px;color:var(--text-secondary);display:flex;align-items:center;gap:8px">
     <i class="fas fa-info-circle" style="color:var(--accent-blue);flex-shrink:0"></i>
-    <span><strong>Module Access</strong> button appears on each user row (except your own). It lets you block specific sidebar modules for that user. Admins always see all modules regardless.</span>
+    <span><strong>Module Access</strong> button appears on each user row (except your own). It lets you block specific sidebar modules for that user. Admins always see all modules regardless. &nbsp;·&nbsp; The <strong>Budget</strong> toggle marks a user <em>Confidential</em> — only confidential users see budget &amp; cost amounts (in Budget by Category and the Execution Dashboard); everyone else sees them masked.</span>
   </div>
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
     ${[['fa-users','Total Users',users.length,'var(--accent-blue)'],
@@ -4838,7 +4845,7 @@ function _renderUserTable(users){
     <button class="btn btn-primary btn-sm" onclick="showInviteModal()" style="font-size:11px"><i class="fas fa-user-plus"></i> Invite User</button>
   </div>
   <div class="table-wrap"><table>
-    <thead><tr><th>User</th><th>Email</th><th>Dept/Role</th><th>Status</th><th>Registered</th><th>Last Login</th><th>Admin</th><th>Actions</th></tr></thead>
+    <thead><tr><th>User</th><th>Email</th><th>Dept/Role</th><th>Status</th><th>Registered</th><th>Last Login</th><th>Admin</th><th title="Confidential users can see budget &amp; cost amounts">Budget</th><th>Actions</th></tr></thead>
     <tbody>${users.length?_pgSlice('users',users).map(u=>{
       const isMe=_currentUser&&u.uid===_currentUser.uid;
       const sb={approved:'badge-green',pending:'badge-amber',rejected:'badge-red',suspended:'badge-red'};
@@ -4853,6 +4860,7 @@ function _renderUserTable(users){
         <td style="font-size:10px;font-family:var(--font-mono)">${u.createdAt?new Date(u.createdAt).toLocaleDateString():'-'}</td>
         <td style="font-size:10px;color:var(--text-secondary)">${u.lastLogin?new Date(u.lastLogin).toLocaleDateString():'-'}</td>
         <td><label class="toggle" style="width:34px;height:18px"><input type="checkbox" ${u.isAdmin?'checked':''} ${isMe?'disabled':''} onchange="toggleAdmin('${u.uid}',this.checked)"><span class="toggle-slider"></span></label></td>
+        <td title="${(typeof isUserConfidential==='function'&&isUserConfidential(u.uid,u.isAdmin,u.email))?'Can see budget amounts (Confidential)':'Budget amounts hidden (Non-confidential)'}"><label class="toggle" style="width:34px;height:18px"><input type="checkbox" ${(typeof isUserConfidential==='function'&&isUserConfidential(u.uid,u.isAdmin,u.email))?'checked':''} onchange="toggleConfidential('${u.uid}',this.checked,'${(u.email||'').replace(/'/g,'')}')"><span class="toggle-slider"></span></label></td>
         <td><div style="display:flex;gap:5px;flex-wrap:wrap">
           ${u.status==='pending'?`
           <button class="btn btn-success btn-sm" style="font-size:9px;padding:3px 8px" onclick="approveUser('${u.uid}','${u.name||'User'}','${u.email}')"><i class="fas fa-check"></i> Approve</button>
@@ -4862,7 +4870,7 @@ function _renderUserTable(users){
           ${!u.isAdmin?`<button class="btn btn-secondary btn-sm" style="font-size:9px;padding:3px 8px;white-space:nowrap;display:block;width:100%;margin-top:3px" onclick="showModuleAccess('${u.uid}','${(u.name||'User').replace(/'/g,'\'')}','${u.email||''}')" title="Module Access"><i class="fas fa-lock" style="margin-right:4px"></i>Module Access</button>`:''}
           ${!isMe?`<button class="btn btn-danger btn-sm btn-icon" onclick="deleteUser('${u.uid}','${u.name||'User'}')" title="Delete"><i class="fas fa-trash"></i></button>`:''}
         </div></td>
-      </tr>`;}).join(''):`<tr><td colspan="8"><div class="empty-state"><p>No users registered yet.</p></div></td></tr>`}
+      </tr>`;}).join(''):`<tr><td colspan="9"><div class="empty-state"><p>No users registered yet.</p></div></td></tr>`}
     </tbody>
   </table></div>
   ${users.length<=1?`<div style="margin-top:12px;padding:14px;background:rgba(56,139,253,.06);border:1px solid rgba(56,139,253,.15);border-radius:8px;font-size:12px;color:var(--text-secondary)">
@@ -4905,6 +4913,10 @@ function _renderUserTable(users){
           <input type="checkbox" id="inviteAdmin" style="width:14px;height:14px">
           Grant Admin privileges
         </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="inviteConfidential" style="width:14px;height:14px">
+          Confidential — can view budget &amp; cost amounts
+        </label>
       </div>
       <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
         <button class="btn btn-secondary btn-sm" onclick="closeInviteModal()">Cancel</button>
@@ -4917,7 +4929,7 @@ function _renderUserTable(users){
 
 function showInviteModal(){
   const m=document.getElementById('inviteUserModal');
-  if(m){m.style.display='flex';['inviteName','inviteEmail','inviteDept'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});const r=document.getElementById('inviteRole');if(r)r.value='User';const a=document.getElementById('inviteAdmin');if(a)a.checked=false;}
+  if(m){m.style.display='flex';['inviteName','inviteEmail','inviteDept'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});const r=document.getElementById('inviteRole');if(r)r.value='User';const a=document.getElementById('inviteAdmin');if(a)a.checked=false;const c=document.getElementById('inviteConfidential');if(c)c.checked=false;}
 }
 function closeInviteModal(){
   const m=document.getElementById('inviteUserModal');
@@ -4938,6 +4950,8 @@ async function saveInvitedUser(){
     if(existing){showToast('A user with that email already exists.','warning');return;}
     const profile={uid:'invited-'+Date.now(),email,name,status:'approved',isAdmin,role:isAdmin?'Admin':role,department:dept,registeredAt:new Date().toISOString(),approvedBy:_currentUser?.email||'admin'};
     await m365SaveUserProfile(token,siteId,profile,null);
+    const conf=document.getElementById('inviteConfidential')?.checked||false;
+    if(typeof setUserConfidential==='function')setUserConfidential(profile.uid,conf,email);
     showToast(name+' added and pre-approved. They can sign in immediately.','success',5000);
     closeInviteModal();
     _userMgmtCache=null;_userMgmtHash='';
@@ -4993,6 +5007,15 @@ async function toggleAdmin(uid,isAdmin){
   const ok=await m365SetAdmin(uid,isAdmin);
   if(!ok){renderUserManagement();return;} // m365SetAdmin already toasted why
   showToast('Admin status updated','success');
+  _userMgmtCache=null;_userMgmtHash='';
+  renderUserManagement();
+}
+
+// Mark a user Confidential (can see budget amounts) or Non-confidential (masked).
+function toggleConfidential(uid,val,email){
+  if(typeof setUserConfidential!=='function'){showToast('Budget access not available.','error');return;}
+  setUserConfidential(uid,!!val,email||'');
+  showToast(val?'User can now see budget amounts.':'Budget amounts now hidden for this user.','success');
   _userMgmtCache=null;_userMgmtHash='';
   renderUserManagement();
 }
@@ -10881,9 +10904,10 @@ setInterval(()=>{if(_m365LoggedIn)AppState.save();},30000);
    odAutoSyncToggle,odSaveClientId,
    saveSettings,exportAllData,importData,clearAllData,
    showPatchImport,applyPatch,removePatch,previewPatchFile,checkForUpdates,
-   renderUserManagement,approveUser,rejectUser,suspendUser,toggleAdmin,
+   renderUserManagement,approveUser,rejectUser,suspendUser,toggleAdmin,toggleConfidential,
    deleteUser,restoreUser,showModuleAccess,saveModuleAccess,
    hasModulePermission,getModulePermission,getModulePerms,setModulePerms,PERM_LEVELS,PERM_LABELS,PERM_COLORS,
+   isUserConfidential,setUserConfidential,canSeeBudget,
    uploadDoc,showDocDetail,saveDocDetail,downloadDoc,viewDoc,deleteDoc,
    attachFileToDoc,renderDocTable,searchDocs,exportDocsCsv,
    showAddProcurement,showEditProcurement,saveProcurement,deleteProcurement,importProcurement,previewProcImport,executeProcImport,
@@ -21015,6 +21039,8 @@ function _edPhotoStrip(pid){
 // ── Full HTML render from model ───────────────────────────────────
 function _edRender(m,opts){
   const live=opts.live, pid=opts.pid;
+  const seeB=(typeof canSeeBudget==='function')?canSeeBudget():true; // budget confidentiality
+  const curB=(n)=>seeB?_edCur(n):'₱ ••••'; // masked currency for non-confidential users
   const pill=(v)=>{const[l,c]=_edRating(v);return `<span class="ed-pill ${c}">${l}</span>`;};
   const bar=(pct,color)=>`<div class="ed-bar"><i style="width:${Math.max(0,Math.min(100,pct))}%;background:${color}"></i></div>`;
   const trend=m.spiTrend==='up'?'<span style="color:var(--accent-green)">▲</span>':m.spiTrend==='down'?'<span style="color:var(--accent-red)">▼</span>':'<span style="color:var(--text-muted)">▬</span>';
@@ -21083,18 +21109,18 @@ function _edRender(m,opts){
 
   <!-- BUDGET BY CATEGORY -->
   <div class="card ed-mb" style="border:1px solid rgba(57,211,242,.4)">
-    <div class="ed-h3" style="color:var(--accent-cyan)">Budget &amp; Cost — Itemized by Category <span class="ed-src" style="margin:0">${m.budgetFromCostSheet?'Cost Budget by Category (Cost Control sheet)':'grouped from Resource Allocation (planned vs actual cost)'}</span></div>
+    <div class="ed-h3" style="color:var(--accent-cyan)">Budget &amp; Cost — Itemized by Category <span class="ed-src" style="margin:0">${seeB?(m.budgetFromCostSheet?'Cost Budget by Category (Cost Control sheet)':'grouped from Resource Allocation (planned vs actual cost)'):'<span style="color:var(--accent-amber)"><i class="fas fa-lock"></i> Confidential — figures hidden</span>'}</span></div>
     <table class="ed-tbl">
       <thead><tr><th>Category</th><th class="r">Budgeted</th><th class="r">Actual</th><th class="r">Variance</th><th style="width:150px">% of Budget</th><th class="r">Used</th></tr></thead>
       <tbody>
         ${m.budgetRows.map(r=>{const v=r.budget-r.actual;return `<tr>
           <td><i class="ed-dot" style="background:${r.color}"></i>${esc(r.label)}</td>
-          <td class="r ed-mono">${_edCur(r.budget)}</td>
-          <td class="r ed-mono">${_edCur(r.actual)}</td>
-          <td class="r ed-mono" style="color:${v>=0?'var(--accent-green)':'var(--accent-red)'}">${v>=0?'+':''}${_edCur(v)}</td>
-          <td>${bar(_edPct(r.budget,m.budTotB),r.color)}</td>
-          <td class="r ed-mono">${_edPct(r.actual,r.budget)}%</td></tr>`;}).join('')||'<tr><td colspan="6" class="ed-empty">No allocations yet — add them in Resource Allocation.</td></tr>'}
-        ${m.budgetRows.length?`<tr class="ed-tot"><td>TOTAL</td><td class="r ed-mono">${_edCur(m.budTotB)}</td><td class="r ed-mono" style="color:var(--accent-blue)">${_edCur(m.budTotA)}</td><td class="r ed-mono" style="color:var(--accent-green)">+${_edCur(m.budTotB-m.budTotA)}</td><td>${bar(_edPct(m.budTotA,m.budTotB),'var(--accent-green)')}</td><td class="r ed-mono">${_edPct(m.budTotA,m.budTotB)}%</td></tr>`:''}
+          <td class="r ed-mono">${curB(r.budget)}</td>
+          <td class="r ed-mono">${curB(r.actual)}</td>
+          <td class="r ed-mono"${seeB?` style="color:${v>=0?'var(--accent-green)':'var(--accent-red)'}"`:''}>${seeB?((v>=0?'+':'')+_edCur(v)):'••••'}</td>
+          <td>${seeB?bar(_edPct(r.budget,m.budTotB),r.color):''}</td>
+          <td class="r ed-mono">${seeB?(_edPct(r.actual,r.budget)+'%'):'••%'}</td></tr>`;}).join('')||'<tr><td colspan="6" class="ed-empty">No allocations yet — add them in Resource Allocation.</td></tr>'}
+        ${m.budgetRows.length?`<tr class="ed-tot"><td>TOTAL</td><td class="r ed-mono">${curB(m.budTotB)}</td><td class="r ed-mono"${seeB?' style="color:var(--accent-blue)"':''}>${curB(m.budTotA)}</td><td class="r ed-mono"${seeB?' style="color:var(--accent-green)"':''}>${seeB?('+'+_edCur(m.budTotB-m.budTotA)):'••••'}</td><td>${seeB?bar(_edPct(m.budTotA,m.budTotB),'var(--accent-green)'):''}</td><td class="r ed-mono">${seeB?(_edPct(m.budTotA,m.budTotB)+'%'):'••%'}</td></tr>`:''}
       </tbody>
     </table>
   </div>
@@ -21145,7 +21171,7 @@ function _edRender(m,opts){
       <div class="ed-kpi"><div class="ed-lbl">On Site (headcount)</div><div class="ed-num">${m.onsiteTot}</div></div>
       <div class="ed-kpi"><div class="ed-lbl">Planned Man-hours</div><div class="ed-num">${_edNum(Math.round(m.mhPlan))}</div></div>
       <div class="ed-kpi"><div class="ed-lbl">Actual Man-hours${m.hasLogs?' <span style="font-weight:400;color:var(--accent-cyan);text-transform:none;letter-spacing:0">(logged)</span>':''}</div><div class="ed-num" style="color:var(--accent-cyan)">${_edNum(Math.round(m.mhAct))}</div></div>
-      <div class="ed-kpi"><div class="ed-lbl">Actual Labour Cost${m.mhCostManual?' <span style="font-weight:400;color:var(--accent-amber);text-transform:none;letter-spacing:0">(manual)</span>':''}</div><div class="ed-num" style="color:var(--accent-green)">${m.mhCost?_edCur(m.mhCost):'—'}</div></div>
+      <div class="ed-kpi"><div class="ed-lbl">Actual Labour Cost${(seeB&&m.mhCostManual)?' <span style="font-weight:400;color:var(--accent-amber);text-transform:none;letter-spacing:0">(manual)</span>':''}</div><div class="ed-num" style="color:var(--accent-green)">${seeB?(m.mhCost?_edCur(m.mhCost):'—'):'₱ ••••'}</div></div>
     </div>
     <table class="ed-tbl">
       <thead><tr><th>Role / Trade</th><th class="r">On Site</th><th class="r">Planned Hrs</th><th class="r">Actual Hrs</th><th class="r">Variance</th><th style="width:130px">% Used</th></tr></thead>
@@ -21383,6 +21409,8 @@ function _edPrintHTML(m,p,lh,doc,photos,live){
   const fcCls = (fcVar==null)?'':(fcVar>0?'var(--green)':(fcVar<0?'var(--red)':'var(--muted)'));
   const openNcr=(m.qualRows||[]).filter(q=>/ncr/i.test(q.type||'')&&/open/i.test(q.status||'')).length;
   const cpmRows=(fc.rows||[]).slice(0,4);
+  const seeB=(typeof canSeeBudget==='function')?canSeeBudget():true; // budget confidentiality
+  const pmB=(n)=>seeB?_pMoneyShort(n):'••••'; // masked money for non-confidential users
   const budRows=(m.budgetRows||[]).slice(0,6);
   const roleRows=(m.roleRows||[]).slice(0,5);
   const procRows=(m.procRows||[]).slice(0,4);
@@ -21484,14 +21512,14 @@ function _edPrintHTML(m,p,lh,doc,photos,live){
   <div class="body">
     <div class="col">
       <div class="box">
-        <div class="h">Budget &amp; Cost <span class="src">${m.budgetFromCostSheet?'Cost Budget by Category (₱)':'Resource Allocation (₱)'}</span></div>
+        <div class="h">Budget &amp; Cost <span class="src">${seeB?(m.budgetFromCostSheet?'Cost Budget by Category (₱)':'Resource Allocation (₱)'):'Confidential — hidden'}</span></div>
         <table><thead><tr><th>Category</th><th class="r">Budget</th><th class="r">Actual</th><th class="r">%</th></tr></thead><tbody>
-          ${budRows.map(r=>`<tr><td>${esc2(r.label)}</td><td class="r mono">${_pMoneyShort(r.budget)}</td><td class="r mono">${_pMoneyShort(r.actual)}</td><td class="r">${_pPctUsed(r.actual,r.budget)}</td></tr>`).join('')||'<tr><td colspan="4" style="color:#93a0ad">No allocation data.</td></tr>'}
-          ${budRows.length?`<tr class="tot"><td>TOTAL</td><td class="r mono">${_pMoneyShort(m.budTotB)}</td><td class="r mono">${_pMoneyShort(m.budTotA)}</td><td class="r">${_pPctUsed(m.budTotA,m.budTotB)}</td></tr>`:''}
+          ${budRows.map(r=>`<tr><td>${esc2(r.label)}</td><td class="r mono">${pmB(r.budget)}</td><td class="r mono">${pmB(r.actual)}</td><td class="r">${seeB?_pPctUsed(r.actual,r.budget):'••%'}</td></tr>`).join('')||'<tr><td colspan="4" style="color:#93a0ad">No allocation data.</td></tr>'}
+          ${budRows.length?`<tr class="tot"><td>TOTAL</td><td class="r mono">${pmB(m.budTotB)}</td><td class="r mono">${pmB(m.budTotA)}</td><td class="r">${seeB?_pPctUsed(m.budTotA,m.budTotB):'••%'}</td></tr>`:''}
         </tbody></table>
       </div>
       <div class="box" style="flex:1">
-        <div class="h">Man-hours by Role <span class="src">${m.hasLogs?'Daily log (actual)':(m.hpd+'h/d × '+m.dpw+'d + OT')}${m.mhCost?' · '+_pMoneyShort(m.mhCost)+(m.mhCostManual?' (manual)':''):''}</span></div>
+        <div class="h">Man-hours by Role <span class="src">${m.hasLogs?'Daily log (actual)':(m.hpd+'h/d × '+m.dpw+'d + OT')}${(seeB&&m.mhCost)?' · '+_pMoneyShort(m.mhCost)+(m.mhCostManual?' (manual)':''):''}</span></div>
         <table><thead><tr><th>Role</th><th class="r">Site</th><th class="r">Plan</th><th class="r">Act</th><th class="r">%</th></tr></thead><tbody>
           ${roleRows.map(r=>`<tr><td>${esc2(r.role)}</td><td class="r mono">${r.onsite}</td><td class="r mono">${Math.round(r.planHrs).toLocaleString()}</td><td class="r mono">${Math.round(r.actHrs).toLocaleString()}</td><td class="r">${_pPctUsed(r.actHrs,r.planHrs)}</td></tr>`).join('')||'<tr><td colspan="5" style="color:#93a0ad">No manpower records.</td></tr>'}
           ${roleRows.length?`<tr class="tot"><td>TOTAL</td><td class="r mono">${m.onsiteTot}</td><td class="r mono">${Math.round(m.mhPlan).toLocaleString()}</td><td class="r mono">${Math.round(m.mhAct).toLocaleString()}</td><td class="r">${_pPctUsed(m.mhAct,m.mhPlan)}</td></tr>`:''}
@@ -22317,6 +22345,8 @@ function _cbPct(bud,v){ return bud>0? (v/bud*100):0; }
 /* returns an HTML string; embedded at the top of the Cost Control tab */
 function renderCostBudgetPanel(pid){
   const rows=_cbRows(pid);
+  const seeB=(typeof canSeeBudget==='function')?canSeeBudget():true;
+  if(!seeB) return _cbPanelMasked(pid,rows);
   let totB=0,totA=0;
   const body=rows.map(r=>{
     const bud=Number(r.budget)||0;
@@ -22398,6 +22428,57 @@ function renderCostBudgetPanel(pid){
   </div>`;
 }
 
+/* ---- masked panel for NON-CONFIDENTIAL users ----
+   Category names and structure stay visible; every peso figure is hidden and
+   the sheet is read-only (no editing, itemize or export of amounts). */
+function _cbPanelMasked(pid,rows){
+  const M='₱ ••••••';
+  const body=rows.map(r=>`<tr>
+      <td class="cb-part">${esc(r.label)}${r.src?`<span class="cb-srctag">${_CB_SRC_LABEL[r.src]||''}</span>`:''}</td>
+      <td class="cb-r"><span class="cb-mask">${M}</span></td>
+      <td class="cb-r"><span class="cb-mask">${M}</span></td>
+      <td class="cb-r"><span class="cb-mask">••••</span></td>
+      <td class="cb-r"><span class="cb-mask">••%</span></td>
+      <td class="cb-r"></td>
+    </tr>`).join('');
+  return `
+  <style>
+    .cb-wrap{font-size:12px;margin-bottom:16px}
+    .cb-tbl{width:100%;border-collapse:collapse}
+    .cb-tbl th{background:var(--bg-hover,rgba(255,255,255,.04));text-align:left;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);border-bottom:2px solid var(--border-subtle,rgba(255,255,255,.12));white-space:nowrap}
+    .cb-tbl td{padding:5px 10px;border-bottom:1px solid var(--border-subtle,rgba(255,255,255,.06))}
+    .cb-tbl th.cb-r,.cb-tbl td.cb-r{text-align:right}
+    .cb-part{font-weight:600}
+    .cb-srctag{display:block;font-size:9px;font-weight:400;color:var(--text-muted)}
+    .cb-mask{font-family:var(--font-mono);font-size:11.5px;color:var(--text-muted);letter-spacing:1.5px;user-select:none}
+    .cb-net td{font-weight:800;border-top:2px solid var(--border-subtle,rgba(255,255,255,.2));background:var(--bg-hover,rgba(255,255,255,.05));padding:10px}
+    .cb-net .cb-lbl{color:var(--accent-amber)}
+    .cb-note{font-size:10px;color:var(--text-muted);margin-top:7px}
+    .cb-lock{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:600;color:var(--accent-amber);background:rgba(240,164,80,.12);border:1px solid rgba(240,164,80,.3);border-radius:6px;padding:3px 9px}
+  </style>
+  <div class="card cb-wrap">
+    <div class="section-header" style="margin-bottom:10px">
+      <div class="section-title"><i class="fas fa-funnel-dollar" style="margin-right:7px;color:var(--accent-cyan)"></i>Budget by Category</div>
+      <span class="cb-lock"><i class="fas fa-lock"></i> Confidential — budget figures hidden</span>
+    </div>
+    <div class="table-wrap"><table class="cb-tbl">
+      <thead><tr><th>Particular</th><th class="cb-r">Budget</th><th class="cb-r">Actual Cost</th><th class="cb-r">Variance</th><th class="cb-r">%</th><th class="cb-r"></th></tr></thead>
+      <tbody>
+        ${body||'<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:18px">No categories.</td></tr>'}
+        <tr class="cb-net">
+          <td class="cb-lbl">NET INCOME BASED ON TOTAL DIRECT COST</td>
+          <td class="cb-r"><span class="cb-mask">${M}</span></td>
+          <td class="cb-r"><span class="cb-mask">${M}</span></td>
+          <td class="cb-r"><span class="cb-mask">••••</span></td>
+          <td class="cb-r"><span class="cb-mask">••%</span></td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table></div>
+    <div class="cb-note"><i class="fas fa-info-circle" style="margin-right:4px"></i>Budget amounts are restricted to confidential users. Ask an administrator for access if you need to view these figures.</div>
+  </div>`;
+}
+
 /* ============================ EDIT HANDLERS ============================ */
 function _cbReRender(pid){
   // the panel lives inside the Cost Control tab — re-render the whole tab
@@ -22446,6 +22527,10 @@ function _cbResetStandard(pid){
 }
 /* ============================ ITEMIZED CHARGES (per category) ============================ */
 function showCbItems(pid,rowId){
+  if(typeof canSeeBudget==='function' && !canSeeBudget()){
+    if(typeof showToast==='function')showToast('Budget figures are confidential.','error');
+    return;
+  }
   const r=_cbFind(pid,rowId); if(!r)return;
   if(!Array.isArray(r.items))r.items=[];
   $('#genericModalTitle').textContent='Itemized Charges — '+r.label;
@@ -22494,6 +22579,10 @@ function _cbItemDel(pid,rowId,itemId){
   if(i>=0)r.items.splice(i,1); _cbTouch(pid); AppState.save(); _cbItemsRefresh(pid,rowId);
 }
 function exportCostBudget(pid){
+  if(typeof canSeeBudget==='function' && !canSeeBudget()){
+    if(typeof showToast==='function')showToast('Budget figures are confidential — export not permitted.','error');
+    return;
+  }
   const rows=_cbRows(pid);
   const out=[];
   rows.forEach(r=>{
@@ -28672,6 +28761,44 @@ function setModulePerms(uid,perms,email){
   if(i>=0)arr[i]={...arr[i],...rec};else arr.push(rec);
   AppState.save();
   try{localStorage.setItem(_getPermKey(uid),JSON.stringify(perms));}catch(e){} // legacy mirror for old builds
+}
+
+// ── Budget confidentiality (per-user) ─────────────────────────────
+// Users split into CONFIDENTIAL (may see budget amounts) and NON-CONFIDENTIAL
+// (budget figures shown masked). The flag rides on the same SharePoint-synced
+// userPerms record (field: confidential), so an admin's change reaches every
+// device. Default when the flag was never set: admins = true (so the admin who
+// sets this up is never locked out), everyone else = false (secure default).
+// The flag is INDEPENDENT of isAdmin — an admin can be made non-confidential.
+function isUserConfidential(uid, fallbackIsAdmin, email){
+  try{
+    const list=(AppState.data?.userPerms||[]);
+    let rec=list.find(p=>p.id===uid&&!p._deleted);
+    if(!rec && email) rec=list.find(p=>(p.email||'').toLowerCase()===(email||'').toLowerCase()&&!p._deleted);
+    if(rec && typeof rec.confidential==='boolean') return rec.confidential;
+  }catch(e){}
+  return !!fallbackIsAdmin;
+}
+function setUserConfidential(uid,val,email){
+  AppState.ensureData();
+  if(!AppState.data.userPerms)AppState.data.userPerms=[];
+  const arr=AppState.data.userPerms;
+  const i=arr.findIndex(p=>p.id===uid);
+  const who=(typeof _currentUserProfile!=='undefined'?_currentUserProfile?.email:'')||'';
+  const patch={confidential:!!val,confUpdatedBy:who,confUpdatedAt:new Date().toISOString()};
+  if(i>=0)arr[i]={...arr[i],...patch,email:(arr[i].email||email||'').toLowerCase()};
+  else arr.push({id:uid,email:(email||'').toLowerCase(),perms:{},...patch});
+  AppState.save();
+  if(typeof auditLog==='function')auditLog('confidential_update','Users','Budget Confidentiality',uid,null,{confidential:!!val},'Admin set budget confidentiality');
+}
+// Can the CURRENT signed-in user see budget amounts?
+function canSeeBudget(){
+  try{
+    const prof=typeof _currentUserProfile!=='undefined'?_currentUserProfile:null;
+    if(!prof) return false;
+    const uid=(typeof _currentUser!=='undefined'&&_currentUser)?_currentUser.uid:prof.uid;
+    return isUserConfidential(uid, prof.isAdmin||prof.role==='Admin', prof.email);
+  }catch(e){ return false; }
 }
 
 // Returns the permission level string ('none','view','edit','manage') for the current user on a module

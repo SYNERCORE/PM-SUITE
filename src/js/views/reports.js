@@ -357,6 +357,44 @@ function setModulePerms(uid,perms,email){
   try{localStorage.setItem(_getPermKey(uid),JSON.stringify(perms));}catch(e){} // legacy mirror for old builds
 }
 
+// ── Budget confidentiality (per-user) ─────────────────────────────
+// Users split into CONFIDENTIAL (may see budget amounts) and NON-CONFIDENTIAL
+// (budget figures shown masked). The flag rides on the same SharePoint-synced
+// userPerms record (field: confidential), so an admin's change reaches every
+// device. Default when the flag was never set: admins = true (so the admin who
+// sets this up is never locked out), everyone else = false (secure default).
+// The flag is INDEPENDENT of isAdmin — an admin can be made non-confidential.
+function isUserConfidential(uid, fallbackIsAdmin, email){
+  try{
+    const list=(AppState.data?.userPerms||[]);
+    let rec=list.find(p=>p.id===uid&&!p._deleted);
+    if(!rec && email) rec=list.find(p=>(p.email||'').toLowerCase()===(email||'').toLowerCase()&&!p._deleted);
+    if(rec && typeof rec.confidential==='boolean') return rec.confidential;
+  }catch(e){}
+  return !!fallbackIsAdmin;
+}
+function setUserConfidential(uid,val,email){
+  AppState.ensureData();
+  if(!AppState.data.userPerms)AppState.data.userPerms=[];
+  const arr=AppState.data.userPerms;
+  const i=arr.findIndex(p=>p.id===uid);
+  const who=(typeof _currentUserProfile!=='undefined'?_currentUserProfile?.email:'')||'';
+  const patch={confidential:!!val,confUpdatedBy:who,confUpdatedAt:new Date().toISOString()};
+  if(i>=0)arr[i]={...arr[i],...patch,email:(arr[i].email||email||'').toLowerCase()};
+  else arr.push({id:uid,email:(email||'').toLowerCase(),perms:{},...patch});
+  AppState.save();
+  if(typeof auditLog==='function')auditLog('confidential_update','Users','Budget Confidentiality',uid,null,{confidential:!!val},'Admin set budget confidentiality');
+}
+// Can the CURRENT signed-in user see budget amounts?
+function canSeeBudget(){
+  try{
+    const prof=typeof _currentUserProfile!=='undefined'?_currentUserProfile:null;
+    if(!prof) return false;
+    const uid=(typeof _currentUser!=='undefined'&&_currentUser)?_currentUser.uid:prof.uid;
+    return isUserConfidential(uid, prof.isAdmin||prof.role==='Admin', prof.email);
+  }catch(e){ return false; }
+}
+
 // Returns the permission level string ('none','view','edit','manage') for the current user on a module
 function getModulePermission(moduleId){
   const profile=typeof _currentUserProfile!=='undefined'?_currentUserProfile:null;

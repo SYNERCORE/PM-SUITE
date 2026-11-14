@@ -382,6 +382,8 @@ function _edPhotoStrip(pid){
 // ── Full HTML render from model ───────────────────────────────────
 function _edRender(m,opts){
   const live=opts.live, pid=opts.pid;
+  const seeB=(typeof canSeeBudget==='function')?canSeeBudget():true; // budget confidentiality
+  const curB=(n)=>seeB?_edCur(n):'₱ ••••'; // masked currency for non-confidential users
   const pill=(v)=>{const[l,c]=_edRating(v);return `<span class="ed-pill ${c}">${l}</span>`;};
   const bar=(pct,color)=>`<div class="ed-bar"><i style="width:${Math.max(0,Math.min(100,pct))}%;background:${color}"></i></div>`;
   const trend=m.spiTrend==='up'?'<span style="color:var(--accent-green)">▲</span>':m.spiTrend==='down'?'<span style="color:var(--accent-red)">▼</span>':'<span style="color:var(--text-muted)">▬</span>';
@@ -450,18 +452,18 @@ function _edRender(m,opts){
 
   <!-- BUDGET BY CATEGORY -->
   <div class="card ed-mb" style="border:1px solid rgba(57,211,242,.4)">
-    <div class="ed-h3" style="color:var(--accent-cyan)">Budget &amp; Cost — Itemized by Category <span class="ed-src" style="margin:0">${m.budgetFromCostSheet?'Cost Budget by Category (Cost Control sheet)':'grouped from Resource Allocation (planned vs actual cost)'}</span></div>
+    <div class="ed-h3" style="color:var(--accent-cyan)">Budget &amp; Cost — Itemized by Category <span class="ed-src" style="margin:0">${seeB?(m.budgetFromCostSheet?'Cost Budget by Category (Cost Control sheet)':'grouped from Resource Allocation (planned vs actual cost)'):'<span style="color:var(--accent-amber)"><i class="fas fa-lock"></i> Confidential — figures hidden</span>'}</span></div>
     <table class="ed-tbl">
       <thead><tr><th>Category</th><th class="r">Budgeted</th><th class="r">Actual</th><th class="r">Variance</th><th style="width:150px">% of Budget</th><th class="r">Used</th></tr></thead>
       <tbody>
         ${m.budgetRows.map(r=>{const v=r.budget-r.actual;return `<tr>
           <td><i class="ed-dot" style="background:${r.color}"></i>${esc(r.label)}</td>
-          <td class="r ed-mono">${_edCur(r.budget)}</td>
-          <td class="r ed-mono">${_edCur(r.actual)}</td>
-          <td class="r ed-mono" style="color:${v>=0?'var(--accent-green)':'var(--accent-red)'}">${v>=0?'+':''}${_edCur(v)}</td>
-          <td>${bar(_edPct(r.budget,m.budTotB),r.color)}</td>
-          <td class="r ed-mono">${_edPct(r.actual,r.budget)}%</td></tr>`;}).join('')||'<tr><td colspan="6" class="ed-empty">No allocations yet — add them in Resource Allocation.</td></tr>'}
-        ${m.budgetRows.length?`<tr class="ed-tot"><td>TOTAL</td><td class="r ed-mono">${_edCur(m.budTotB)}</td><td class="r ed-mono" style="color:var(--accent-blue)">${_edCur(m.budTotA)}</td><td class="r ed-mono" style="color:var(--accent-green)">+${_edCur(m.budTotB-m.budTotA)}</td><td>${bar(_edPct(m.budTotA,m.budTotB),'var(--accent-green)')}</td><td class="r ed-mono">${_edPct(m.budTotA,m.budTotB)}%</td></tr>`:''}
+          <td class="r ed-mono">${curB(r.budget)}</td>
+          <td class="r ed-mono">${curB(r.actual)}</td>
+          <td class="r ed-mono"${seeB?` style="color:${v>=0?'var(--accent-green)':'var(--accent-red)'}"`:''}>${seeB?((v>=0?'+':'')+_edCur(v)):'••••'}</td>
+          <td>${seeB?bar(_edPct(r.budget,m.budTotB),r.color):''}</td>
+          <td class="r ed-mono">${seeB?(_edPct(r.actual,r.budget)+'%'):'••%'}</td></tr>`;}).join('')||'<tr><td colspan="6" class="ed-empty">No allocations yet — add them in Resource Allocation.</td></tr>'}
+        ${m.budgetRows.length?`<tr class="ed-tot"><td>TOTAL</td><td class="r ed-mono">${curB(m.budTotB)}</td><td class="r ed-mono"${seeB?' style="color:var(--accent-blue)"':''}>${curB(m.budTotA)}</td><td class="r ed-mono"${seeB?' style="color:var(--accent-green)"':''}>${seeB?('+'+_edCur(m.budTotB-m.budTotA)):'••••'}</td><td>${seeB?bar(_edPct(m.budTotA,m.budTotB),'var(--accent-green)'):''}</td><td class="r ed-mono">${seeB?(_edPct(m.budTotA,m.budTotB)+'%'):'••%'}</td></tr>`:''}
       </tbody>
     </table>
   </div>
@@ -512,7 +514,7 @@ function _edRender(m,opts){
       <div class="ed-kpi"><div class="ed-lbl">On Site (headcount)</div><div class="ed-num">${m.onsiteTot}</div></div>
       <div class="ed-kpi"><div class="ed-lbl">Planned Man-hours</div><div class="ed-num">${_edNum(Math.round(m.mhPlan))}</div></div>
       <div class="ed-kpi"><div class="ed-lbl">Actual Man-hours${m.hasLogs?' <span style="font-weight:400;color:var(--accent-cyan);text-transform:none;letter-spacing:0">(logged)</span>':''}</div><div class="ed-num" style="color:var(--accent-cyan)">${_edNum(Math.round(m.mhAct))}</div></div>
-      <div class="ed-kpi"><div class="ed-lbl">Actual Labour Cost${m.mhCostManual?' <span style="font-weight:400;color:var(--accent-amber);text-transform:none;letter-spacing:0">(manual)</span>':''}</div><div class="ed-num" style="color:var(--accent-green)">${m.mhCost?_edCur(m.mhCost):'—'}</div></div>
+      <div class="ed-kpi"><div class="ed-lbl">Actual Labour Cost${(seeB&&m.mhCostManual)?' <span style="font-weight:400;color:var(--accent-amber);text-transform:none;letter-spacing:0">(manual)</span>':''}</div><div class="ed-num" style="color:var(--accent-green)">${seeB?(m.mhCost?_edCur(m.mhCost):'—'):'₱ ••••'}</div></div>
     </div>
     <table class="ed-tbl">
       <thead><tr><th>Role / Trade</th><th class="r">On Site</th><th class="r">Planned Hrs</th><th class="r">Actual Hrs</th><th class="r">Variance</th><th style="width:130px">% Used</th></tr></thead>
@@ -750,6 +752,8 @@ function _edPrintHTML(m,p,lh,doc,photos,live){
   const fcCls = (fcVar==null)?'':(fcVar>0?'var(--green)':(fcVar<0?'var(--red)':'var(--muted)'));
   const openNcr=(m.qualRows||[]).filter(q=>/ncr/i.test(q.type||'')&&/open/i.test(q.status||'')).length;
   const cpmRows=(fc.rows||[]).slice(0,4);
+  const seeB=(typeof canSeeBudget==='function')?canSeeBudget():true; // budget confidentiality
+  const pmB=(n)=>seeB?_pMoneyShort(n):'••••'; // masked money for non-confidential users
   const budRows=(m.budgetRows||[]).slice(0,6);
   const roleRows=(m.roleRows||[]).slice(0,5);
   const procRows=(m.procRows||[]).slice(0,4);
@@ -851,14 +855,14 @@ function _edPrintHTML(m,p,lh,doc,photos,live){
   <div class="body">
     <div class="col">
       <div class="box">
-        <div class="h">Budget &amp; Cost <span class="src">${m.budgetFromCostSheet?'Cost Budget by Category (₱)':'Resource Allocation (₱)'}</span></div>
+        <div class="h">Budget &amp; Cost <span class="src">${seeB?(m.budgetFromCostSheet?'Cost Budget by Category (₱)':'Resource Allocation (₱)'):'Confidential — hidden'}</span></div>
         <table><thead><tr><th>Category</th><th class="r">Budget</th><th class="r">Actual</th><th class="r">%</th></tr></thead><tbody>
-          ${budRows.map(r=>`<tr><td>${esc2(r.label)}</td><td class="r mono">${_pMoneyShort(r.budget)}</td><td class="r mono">${_pMoneyShort(r.actual)}</td><td class="r">${_pPctUsed(r.actual,r.budget)}</td></tr>`).join('')||'<tr><td colspan="4" style="color:#93a0ad">No allocation data.</td></tr>'}
-          ${budRows.length?`<tr class="tot"><td>TOTAL</td><td class="r mono">${_pMoneyShort(m.budTotB)}</td><td class="r mono">${_pMoneyShort(m.budTotA)}</td><td class="r">${_pPctUsed(m.budTotA,m.budTotB)}</td></tr>`:''}
+          ${budRows.map(r=>`<tr><td>${esc2(r.label)}</td><td class="r mono">${pmB(r.budget)}</td><td class="r mono">${pmB(r.actual)}</td><td class="r">${seeB?_pPctUsed(r.actual,r.budget):'••%'}</td></tr>`).join('')||'<tr><td colspan="4" style="color:#93a0ad">No allocation data.</td></tr>'}
+          ${budRows.length?`<tr class="tot"><td>TOTAL</td><td class="r mono">${pmB(m.budTotB)}</td><td class="r mono">${pmB(m.budTotA)}</td><td class="r">${seeB?_pPctUsed(m.budTotA,m.budTotB):'••%'}</td></tr>`:''}
         </tbody></table>
       </div>
       <div class="box" style="flex:1">
-        <div class="h">Man-hours by Role <span class="src">${m.hasLogs?'Daily log (actual)':(m.hpd+'h/d × '+m.dpw+'d + OT')}${m.mhCost?' · '+_pMoneyShort(m.mhCost)+(m.mhCostManual?' (manual)':''):''}</span></div>
+        <div class="h">Man-hours by Role <span class="src">${m.hasLogs?'Daily log (actual)':(m.hpd+'h/d × '+m.dpw+'d + OT')}${(seeB&&m.mhCost)?' · '+_pMoneyShort(m.mhCost)+(m.mhCostManual?' (manual)':''):''}</span></div>
         <table><thead><tr><th>Role</th><th class="r">Site</th><th class="r">Plan</th><th class="r">Act</th><th class="r">%</th></tr></thead><tbody>
           ${roleRows.map(r=>`<tr><td>${esc2(r.role)}</td><td class="r mono">${r.onsite}</td><td class="r mono">${Math.round(r.planHrs).toLocaleString()}</td><td class="r mono">${Math.round(r.actHrs).toLocaleString()}</td><td class="r">${_pPctUsed(r.actHrs,r.planHrs)}</td></tr>`).join('')||'<tr><td colspan="5" style="color:#93a0ad">No manpower records.</td></tr>'}
           ${roleRows.length?`<tr class="tot"><td>TOTAL</td><td class="r mono">${m.onsiteTot}</td><td class="r mono">${Math.round(m.mhPlan).toLocaleString()}</td><td class="r mono">${Math.round(m.mhAct).toLocaleString()}</td><td class="r">${_pPctUsed(m.mhAct,m.mhPlan)}</td></tr>`:''}
