@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.16.7';
-const APP_BUILD='20261114c';
+const APP_VERSION='2.16.8';
+const APP_BUILD='20261114d';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='IMPORTANT FIX: Cost Budget by Category, Daily Manpower Log, Progress Photos, Execution Dashboard snapshots/settings and the manual total-cost figures were not being saved to SharePoint and could be wiped on resync. They are now pushed to SharePoint and preserved (merged, not overwritten) on every sync. If you lost cost-budget figures, please re-enter them once — they will now persist.';
+const APP_RELEASE_NOTE='Cost Budget by Category: you can now "itemize" any category — break it into specific charges (date, description, vendor/ref, amount), and their total becomes that category\'s Actual Cost. Great for the manually-typed categories (Accommodation, Transpo, Admin, etc.) so you can track exactly what was charged. Itemized detail is included in the CSV export.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.16.8',date:'2026-11-14',type:'feat',notes:[
+    'Cost Budget by Category: each category row can now be "itemized" — click itemize (or the item count) to record specific charges with date, description, vendor/reference and amount. The sum of the items becomes that category\'s Actual Cost (overrides the auto/manual value), so you can track exactly what was charged — ideal for Accommodation, Transpo, Admin Cost, Insurances, Requirements.',
+    'The CSV export now lists the itemized charges indented under each category.',
+    'Itemized charges ride inside costBudgets, so they are covered by the v2.16.7 SharePoint persistence fix.',
+  ]},
   {version:'2.16.7',date:'2026-11-14',type:'fix',notes:[
     'CRITICAL data-loss fix: the newer main-blob data — Cost Budget by Category (costBudgets), Daily Manpower Log (manpowerLogs), manual total manpower cost (mplManualCost), pay multipliers, Progress Photos, and Execution Dashboard snapshots/settings — was never included in the SharePoint main-blob push, so a resync could wipe anything you had typed.',
     'These "ride-along" keys are now (a) pushed to SharePoint in the main blob and (b) merged (not overwritten) on every SharePoint→local sync, with last-write-wins on cost budgets and a tombstone-aware union on the rest. Added them to the default data shape too.',

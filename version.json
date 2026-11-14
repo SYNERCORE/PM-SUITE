@@ -1,1 +1,1 @@
-{"version":"2.16.7","note":"CRITICAL FIX: Cost Budget, Daily Manpower Log, manual costs, Progress Photos and Execution Dashboard snapshots/settings are now saved to SharePoint and merged (not wiped) on resync.","released":"2026-11-14 12:30"}
+{"version":"2.16.8","note":"Cost Budget by Category: itemize any category into specific charges (date, description, vendor/ref, amount); their total becomes the category's Actual Cost. Itemized detail included in CSV export.","released":"2026-11-14 13:30"}

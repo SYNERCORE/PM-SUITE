@@ -72,8 +72,13 @@ function _cbAuto(pid,src){
     default:           return 0;
   }
 }
-/* actual actually used for a row (manual override wins) */
+/* itemized line items under a row (specific charges) */
+function _cbItems(r){ return Array.isArray(r&&r.items)?r.items:[]; }
+function _cbItemsTotal(r){ return _cbItems(r).reduce((s,it)=>s+(Number(it.amount)||0),0); }
+/* actual actually used for a row.
+   Priority: itemized line items (sum) → manual value → auto-rolled from a module. */
 function _cbActual(pid,r){
+  if(_cbItems(r).length) return _cbItemsTotal(r);
   if(r.actualMode==='manual' || !r.src) return Number(r.actualManual)||0;
   return _cbAuto(pid,r.src);
 }
@@ -90,13 +95,23 @@ function renderCostBudgetPanel(pid){
     const act=_cbActual(pid,r);
     const v=bud-act; const pct=_cbPct(bud,v);
     totB+=bud; totA+=act;
+    const items=_cbItems(r); const hasItems=items.length>0;
     const isAuto=(r.src && r.actualMode!=='manual');
-    const actCell= isAuto
-      ? `<span class="cb-auto" title="Auto from ${_CB_SRC_LABEL[r.src]||'module'}">${_cbMoney(act)}</span>
-         <button class="cb-link" onclick="_cbSetMode('${pid}','${r.id}','manual')" title="Enter actual manually">override</button>`
-      : `<input class="form-input cb-in" type="number" step="0.01" value="${act||''}" placeholder="0.00"
+    let actCell;
+    if(hasItems){
+      // actual comes from the itemized charges — show the sum + link to manage them
+      actCell=`<span class="cb-auto" style="color:var(--text-primary)" title="Sum of ${items.length} itemized charge(s)">${_cbMoney(act)}</span>
+        <button class="cb-link" onclick="showCbItems('${pid}','${r.id}')" title="View / edit the itemized charges"><i class="fas fa-list-ul" style="font-size:9px"></i> ${items.length} item${items.length>1?'s':''}</button>`;
+    } else if(isAuto){
+      actCell=`<span class="cb-auto" title="Auto from ${_CB_SRC_LABEL[r.src]||'module'}">${_cbMoney(act)}</span>
+        <button class="cb-link" onclick="_cbSetMode('${pid}','${r.id}','manual')" title="Enter actual manually">override</button>
+        <button class="cb-link" onclick="showCbItems('${pid}','${r.id}')" title="Break down into specific charges">itemize</button>`;
+    } else {
+      actCell=`<input class="form-input cb-in" type="number" step="0.01" value="${act||''}" placeholder="0.00"
            oninput="_cbSetActual('${pid}','${r.id}',this.value)" onchange="_cbReRender('${pid}')">
-         ${r.src?`<button class="cb-link" onclick="_cbSetMode('${pid}','${r.id}','auto')" title="Auto from ${_CB_SRC_LABEL[r.src]||'module'}">auto</button>`:''}`;
+        ${r.src?`<button class="cb-link" onclick="_cbSetMode('${pid}','${r.id}','auto')" title="Auto from ${_CB_SRC_LABEL[r.src]||'module'}">auto</button>`:''}
+        <button class="cb-link" onclick="showCbItems('${pid}','${r.id}')" title="Break down into specific charges">itemize</button>`;
+    }
     return `<tr>
       <td class="cb-part">${esc(r.label)}${r.src?`<span class="cb-srctag">${_CB_SRC_LABEL[r.src]||''}</span>`:''}</td>
       <td class="cb-r"><input class="form-input cb-in" type="number" step="0.01" value="${bud||''}" placeholder="0.00"
@@ -151,7 +166,7 @@ function renderCostBudgetPanel(pid){
         </tr>
       </tbody>
     </table></div>
-    <div class="cb-note">Variance = Budget − Actual (positive = under budget / saved). % = Variance ÷ Budget. Auto actuals: Labor ← Daily Manpower Log; Materials/Tools/PPE/Mobilization/Demobilization/Third Party ← Resource Allocation actuals. Click <b>override</b> on any row to type the actual yourself.</div>
+    <div class="cb-note">Variance = Budget − Actual (positive = under budget / saved). % = Variance ÷ Budget. Auto actuals: Labor ← Daily Manpower Log; Materials/Tools/PPE/Mobilization/Demobilization/Third Party ← Resource Allocation actuals. Click <b>override</b> to type the actual yourself, or <b>itemize</b> to break a category into specific charges (their sum becomes the actual).</div>
   </div>`;
 }
 
@@ -201,11 +216,66 @@ function _cbResetStandard(pid){
   _cbTouch(pid); AppState.save(); _cbReRender(pid);
   if(typeof showToast==='function')showToast('Reset to standard categories','success');
 }
+/* ============================ ITEMIZED CHARGES (per category) ============================ */
+function showCbItems(pid,rowId){
+  const r=_cbFind(pid,rowId); if(!r)return;
+  if(!Array.isArray(r.items))r.items=[];
+  $('#genericModalTitle').textContent='Itemized Charges — '+r.label;
+  $('#genericModalBody').innerHTML=_cbItemsBody(pid,rowId);
+  $('#genericModalFooter').innerHTML=`<button class="btn btn-primary" onclick="closeModal('genericModal');_cbReRender('${pid}')"><i class="fas fa-check"></i> Done</button>`;
+  openModal('genericModal');
+}
+function _cbItemsBody(pid,rowId){
+  const r=_cbFind(pid,rowId); const items=_cbItems(r); const tot=_cbItemsTotal(r);
+  const rows=items.map(it=>`<tr>
+    <td style="padding:4px 6px"><input class="form-input" type="date" value="${it.date||''}" style="height:28px;font-size:11px" onchange="_cbItemSet('${pid}','${rowId}','${it.id}','date',this.value)"></td>
+    <td style="padding:4px 6px"><input class="form-input" value="${esc(it.desc||'')}" placeholder="e.g., Hotel — 5 rooms × 10 nights" style="height:28px;font-size:11px;min-width:180px" oninput="_cbItemSet('${pid}','${rowId}','${it.id}','desc',this.value)"></td>
+    <td style="padding:4px 6px"><input class="form-input" value="${esc(it.ref||'')}" placeholder="Vendor / PO / ref" style="height:28px;font-size:11px;min-width:120px" oninput="_cbItemSet('${pid}','${rowId}','${it.id}','ref',this.value)"></td>
+    <td style="padding:4px 6px"><input class="form-input" type="number" step="0.01" value="${it.amount||''}" placeholder="0.00" style="height:28px;font-size:11px;width:120px;text-align:right;font-family:var(--font-mono)" oninput="_cbItemSet('${pid}','${rowId}','${it.id}','amount',this.value)" onchange="_cbItemsRefresh('${pid}','${rowId}')"></td>
+    <td style="padding:4px 6px"><button class="btn btn-secondary btn-sm btn-icon" onclick="_cbItemDel('${pid}','${rowId}','${it.id}')" title="Remove"><i class="fas fa-trash"></i></button></td>
+  </tr>`).join('');
+  return `
+    <div style="font-size:11.5px;color:var(--text-secondary);margin-bottom:10px">Record each specific charge under <b>${esc(r.label)}</b>. Their total becomes this category's Actual Cost on the budget sheet.</div>
+    <div class="table-wrap"><table style="width:100%;border-collapse:collapse;font-size:11.5px">
+      <thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase">
+        <th style="text-align:left;padding:5px 6px">Date</th><th style="text-align:left;padding:5px 6px">Description</th>
+        <th style="text-align:left;padding:5px 6px">Vendor / Ref</th><th style="text-align:right;padding:5px 6px">Amount</th><th style="padding:5px 6px"></th>
+      </tr></thead>
+      <tbody id="cbItemsRows">
+        ${rows||'<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px">No items yet. Click “Add item”.</td></tr>'}
+        <tr style="border-top:2px solid var(--border-subtle,rgba(255,255,255,.15));font-weight:700">
+          <td colspan="3" style="padding:7px 6px">TOTAL (${items.length} item${items.length===1?'':'s'})</td>
+          <td style="padding:7px 6px;text-align:right;font-family:var(--font-mono);color:var(--accent-cyan)" id="cbItemsTot">${_cbMoney(tot)}</td><td></td>
+        </tr>
+      </tbody>
+    </table></div>
+    <div style="margin-top:10px"><button class="btn btn-secondary btn-sm" onclick="_cbItemAdd('${pid}','${rowId}')"><i class="fas fa-plus"></i> Add item</button></div>`;
+}
+function _cbItemsRefresh(pid,rowId){ const b=$('#genericModalBody'); if(b)b.innerHTML=_cbItemsBody(pid,rowId); }
+function _cbItemAdd(pid,rowId){
+  const r=_cbFind(pid,rowId); if(!r)return; if(!Array.isArray(r.items))r.items=[];
+  r.items.push({id:'cbi-'+Date.now().toString(36)+'-'+Math.floor(Math.random()*1000),date:'',desc:'',ref:'',amount:0});
+  _cbTouch(pid); AppState.save(); _cbItemsRefresh(pid,rowId);
+}
+function _cbItemSet(pid,rowId,itemId,field,val){
+  const r=_cbFind(pid,rowId); if(!r)return; const it=_cbItems(r).find(x=>x.id===itemId); if(!it)return;
+  it[field]=(field==='amount')?(+val||0):val; _cbTouch(pid); AppState.save();
+}
+function _cbItemDel(pid,rowId,itemId){
+  const r=_cbFind(pid,rowId); if(!r)return; const i=_cbItems(r).findIndex(x=>x.id===itemId);
+  if(i>=0)r.items.splice(i,1); _cbTouch(pid); AppState.save(); _cbItemsRefresh(pid,rowId);
+}
 function exportCostBudget(pid){
   const rows=_cbRows(pid);
-  const out=rows.map(r=>{const bud=+r.budget||0,act=_cbActual(pid,r),v=bud-act;return [r.label,bud,act,v,_cbPct(bud,v).toFixed(2)+'%'];});
+  const out=[];
+  rows.forEach(r=>{
+    const bud=+r.budget||0,act=_cbActual(pid,r),v=bud-act;
+    out.push([r.label,bud,act,v,_cbPct(bud,v).toFixed(2)+'%','']);
+    // itemized charges (indented detail under the category)
+    _cbItems(r).forEach(it=>out.push(['   • '+(it.desc||'(item)'),'',(+it.amount||0),'','',[it.date,it.ref].filter(Boolean).join(' / ')]));
+  });
   const totB=rows.reduce((s,r)=>s+(+r.budget||0),0), totA=rows.reduce((s,r)=>s+_cbActual(pid,r),0);
-  out.push(['NET INCOME BASED ON TOTAL DIRECT COST',totB,totA,totB-totA,_cbPct(totB,totB-totA).toFixed(2)+'%']);
+  out.push(['NET INCOME BASED ON TOTAL DIRECT COST',totB,totA,totB-totA,_cbPct(totB,totB-totA).toFixed(2)+'%','']);
   if(typeof exportCSV==='function')
-    exportCSV(out,['Particular','Budget','Actual Cost','Variance','%'],'cost_budget_'+pid+'.csv');
+    exportCSV(out,['Particular','Budget','Actual Cost','Variance','%','Detail'],'cost_budget_'+pid+'.csv');
 }
