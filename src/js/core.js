@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.16.6';
-const APP_BUILD='20261114b';
+const APP_VERSION='2.16.7';
+const APP_BUILD='20261114c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='The Execution Dashboard Budget & Cost section now uses the project\'s Cost Budget by Category sheet (from the Cost Control tab) when one exists — the same per-category budget and auto/manual actuals — falling back to the Resource Allocation grouping when there is no sheet. Reflected in the one-page printout.';
+const APP_RELEASE_NOTE='IMPORTANT FIX: Cost Budget by Category, Daily Manpower Log, Progress Photos, Execution Dashboard snapshots/settings and the manual total-cost figures were not being saved to SharePoint and could be wiped on resync. They are now pushed to SharePoint and preserved (merged, not overwritten) on every sync. If you lost cost-budget figures, please re-enter them once — they will now persist.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.16.7',date:'2026-11-14',type:'fix',notes:[
+    'CRITICAL data-loss fix: the newer main-blob data — Cost Budget by Category (costBudgets), Daily Manpower Log (manpowerLogs), manual total manpower cost (mplManualCost), pay multipliers, Progress Photos, and Execution Dashboard snapshots/settings — was never included in the SharePoint main-blob push, so a resync could wipe anything you had typed.',
+    'These "ride-along" keys are now (a) pushed to SharePoint in the main blob and (b) merged (not overwritten) on every SharePoint→local sync, with last-write-wins on cost budgets and a tombstone-aware union on the rest. Added them to the default data shape too.',
+    'Progress-photo previews already uploaded to SharePoint files are shipped without their base64 preview to keep the main blob small (full-res is safe in SharePoint).',
+  ]},
   {version:'2.16.6',date:'2026-11-14',type:'feat',notes:[
     'Execution Dashboard "Budget & Cost — Itemized by Category" now draws from the project\'s Cost Budget by Category sheet (the Cost Control tab) when one exists: same per-category budgets, same auto-rolled/manual actuals, same totals.',
     'When no cost sheet exists it falls back to the previous Resource Allocation grouping, so nothing breaks on projects that haven\'t set up a cost sheet. The section source note shows which is in use.',
@@ -1239,6 +1244,15 @@ const SHIC_LIST_CONFIG = {
   },
 };
 const SHIC_OFFLOADED_KEYS = Object.values(SHIC_LIST_CONFIG).map(c => c.dataKey);
+// ── Ride-along keys ───────────────────────────────────────
+// These live in the MAIN BLOB (they have no dedicated SharePoint sub-list). They
+// must be (a) pushed to SharePoint inside the main-blob payload and (b) preserved
+// on every SharePoint→local merge, or a resync wipes them. Added after features
+// shipped v2.15–v2.16 (Daily Manpower Log, Progress Photos, Execution Dashboard
+// snapshots/settings, Cost Budget by Category). Arrays merge by id/projectId;
+// maps merge key-by-key (costBudgets uses _lastModified for last-write-wins).
+const SHIC_RIDEALONG_ARRAY_KEYS = ['manpowerLogs','progressPhotos','execDashSnapshots','execDashSettings'];
+const SHIC_RIDEALONG_MAP_KEYS   = ['costBudgets','mplManualCost','payMultipliers'];
 // Cache for list IDs to avoid re-resolving
 const _spListIds = {}; // { 'SHIC_Tasks': 'list-id', ... }
 // OneDrive / MSAL
@@ -1509,6 +1523,14 @@ function getDefaultData(){
     deletionRequests:[], // [{id,arrayKey,recordId,recordType,recordLabel,requestedBy,requestedByEmail,requestedAt,reason,status,reviewedBy,reviewedAt,rejectionReason}]
     libraryDocs:[], // [{id,name,number,rev,category,description,tags,fileName,fileType,fileUrl,fileWebUrl,spDriveId,spItemId,size,status,uploadedBy,uploadedAt,supersededBy,revisionOf}]
     projectIdHistory:[], // [{projectId(current),oldId,newId,changedBy,changedAt,reason}]
+    // Ride-along keys (no dedicated sub-list; carried in the main blob — see SHIC_RIDEALONG_* ):
+    manpowerLogs:[],      // Daily Manpower Log entries
+    progressPhotos:[],    // Progress Photos gallery
+    execDashSnapshots:[], // Execution Dashboard daily snapshots
+    execDashSettings:[],  // Execution Dashboard manual inputs (keyed by projectId)
+    costBudgets:{},       // Cost Budget by Category (map: projectId → {rows,_lastModified})
+    mplManualCost:{},     // Manual total manpower cost (map: projectId → number)
+    payMultipliers:{},    // Premium pay multipliers config
   };
 }
 

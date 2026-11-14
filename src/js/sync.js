@@ -2287,6 +2287,53 @@ function _spMergeAppendArrays(base, donor) {
   return Merge.appendArrays(base, donor);
 }
 
+// ── Ride-along key merge (main-blob keys with no dedicated sub-list) ──
+// Union a map/object key-by-key. `winner` provides the value on a key clash;
+// when both sides carry `tsField` the newer timestamp wins regardless of side
+// (true last-write-wins, used for costBudgets._lastModified).
+function _spMergeObjMap(local, remote, localWins, tsField) {
+  const L = (local && typeof local === 'object' && !Array.isArray(local)) ? local : {};
+  const R = (remote && typeof remote === 'object' && !Array.isArray(remote)) ? remote : {};
+  const out = Object.assign({}, localWins ? R : L); // start from the "loser" so all its keys survive
+  const winner = localWins ? L : R;
+  Object.keys(winner).forEach(k => {
+    const wv = winner[k], ov = out[k];
+    if (ov == null) { out[k] = wv; return; }
+    if (tsField && wv && ov && wv[tsField] && ov[tsField]) {
+      out[k] = (new Date(wv[tsField]) >= new Date(ov[tsField])) ? wv : ov;
+    } else { out[k] = wv; }
+  });
+  return out;
+}
+// Union two arrays keyed by a non-`id` primary key (e.g. execDashSettings → projectId).
+function _spMergePkArray(local, remote, pk, localWins) {
+  const map = {};
+  const first  = localWins ? (remote || []) : (local  || []);
+  const second = localWins ? (local  || []) : (remote || []);
+  first.forEach(r => { if (r && r[pk] != null) map[r[pk]] = r; });
+  second.forEach(r => { if (r && r[pk] != null) map[r[pk]] = r; }); // second (winner) overwrites
+  return Object.values(map);
+}
+// Fold ride-along keys into `merged` (which currently holds the REMOTE values) by
+// merging in the LOCAL AppState.data values. Call BEFORE reassigning AppState.data.
+// localWins=true when this device has pending edits that must not be lost.
+function _spFoldRideAlong(merged, localWins) {
+  try {
+    const AKEYS = (typeof SHIC_RIDEALONG_ARRAY_KEYS !== 'undefined') ? SHIC_RIDEALONG_ARRAY_KEYS : [];
+    const MKEYS = (typeof SHIC_RIDEALONG_MAP_KEYS   !== 'undefined') ? SHIC_RIDEALONG_MAP_KEYS   : [];
+    AKEYS.forEach(k => {
+      const L = Array.isArray(AppState.data[k]) ? AppState.data[k] : [];
+      const R = Array.isArray(merged[k]) ? merged[k] : [];
+      if (k === 'execDashSettings') merged[k] = _spMergePkArray(L, R, 'projectId', localWins);
+      else merged[k] = _spMergeArrays(L, R, localWins, k); // union by id; localWins controls conflicts
+    });
+    MKEYS.forEach(k => {
+      merged[k] = _spMergeObjMap(AppState.data[k], merged[k], localWins, k === 'costBudgets' ? '_lastModified' : null);
+    });
+  } catch (e) { try { console.warn('[SP] ride-along merge failed:', e.message); } catch (_) {} }
+  return merged;
+}
+
 // ── True when local changes haven't been confirmed on SharePoint ──
 function _spHasLocalEdits() {
   return !!_spOfflineQueue || (typeof _pendingEdits !== 'undefined' && _pendingEdits);
@@ -2339,6 +2386,7 @@ function _spApplyRemote(data, _ts, _by) {
         showToast('Admin dropdown settings applied from SharePoint', 'info', 3500);
       }
     }
+    _spFoldRideAlong(merged, true); // preserve local ride-along edits (costBudgets, manpowerLogs, …)
     AppState.data = Object.assign(getDefaultData(), merged);
     if (typeof _restoreDropdownBackup === 'function') _restoreDropdownBackup();
     if (typeof migrateData === 'function') migrateData();
@@ -2403,6 +2451,7 @@ function _spApplyRemote(data, _ts, _by) {
         }
         merged.settings = Object.assign({}, merged.settings || {}, _keep);
       }
+      _spFoldRideAlong(merged, false); // remote wins, but keep any local-only ride-along data
       AppState.data = Object.assign(getDefaultData(), merged);
     }
     if (typeof migrateData === 'function') migrateData();
@@ -3276,11 +3325,25 @@ function SHIC_OFFLOADED_KEYS_REFRESH() {
 // so SharePoint still holds the data.
 function _spBuildMainBlobPayload(subListsOk) {
   if (subListsOk) {
-    return {
+    const payload = {
       settings:      AppState.data.settings || {},
       _deletedIds:   _spDeletedIds,
       _schemaVersion: (typeof SHIC_SCHEMA_VERSION !== 'undefined') ? SHIC_SCHEMA_VERSION : 0,
     };
+    // Ride-along keys have no sub-list, so they MUST travel in the main blob or they
+    // never reach SharePoint and get wiped on the next resync.
+    const AK = (typeof SHIC_RIDEALONG_ARRAY_KEYS !== 'undefined') ? SHIC_RIDEALONG_ARRAY_KEYS : [];
+    const MK = (typeof SHIC_RIDEALONG_MAP_KEYS   !== 'undefined') ? SHIC_RIDEALONG_MAP_KEYS   : [];
+    AK.forEach(k => { if (AppState.data[k] != null) payload[k] = AppState.data[k]; });
+    MK.forEach(k => { if (AppState.data[k] != null) payload[k] = AppState.data[k]; });
+    // Progress-photo previews are base64 — keep the main blob lean by shipping only
+    // the preview for photos not yet uploaded to SharePoint files (those with an
+    // spItemId can re-fetch full-res). Metadata is always kept so the record survives.
+    if (Array.isArray(payload.progressPhotos)) {
+      payload.progressPhotos = payload.progressPhotos.map(ph =>
+        (ph && ph.spItemId && ph.img) ? Object.assign({}, ph, { img: '' }) : ph);
+    }
+    return payload;
   }
   // Fallback: sub-lists failed — keep legacy full-shape blob so SP has the data
   const dataForPush = { ...AppState.data };
@@ -3366,6 +3429,7 @@ async function spPushData(silent = false, forcePull = false) {
       if (_rPushedAt > _lPushedAt) {
         merged.settings.dropdowns = Object.assign({}, _rSet.dropdowns || {});
       }
+      _spFoldRideAlong(merged, true); // local edits being pushed must win over remote
       AppState.data = Object.assign(getDefaultData(), merged);
       if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
     try { _spFlushMergeConflicts(); } catch(e) {}

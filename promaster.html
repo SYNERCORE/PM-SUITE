@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.16.6';
-const APP_BUILD='20261114b';
+const APP_VERSION='2.16.7';
+const APP_BUILD='20261114c';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='The Execution Dashboard Budget & Cost section now uses the project\'s Cost Budget by Category sheet (from the Cost Control tab) when one exists — the same per-category budget and auto/manual actuals — falling back to the Resource Allocation grouping when there is no sheet. Reflected in the one-page printout.';
+const APP_RELEASE_NOTE='IMPORTANT FIX: Cost Budget by Category, Daily Manpower Log, Progress Photos, Execution Dashboard snapshots/settings and the manual total-cost figures were not being saved to SharePoint and could be wiped on resync. They are now pushed to SharePoint and preserved (merged, not overwritten) on every sync. If you lost cost-budget figures, please re-enter them once — they will now persist.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.16.7',date:'2026-11-14',type:'fix',notes:[
+    'CRITICAL data-loss fix: the newer main-blob data — Cost Budget by Category (costBudgets), Daily Manpower Log (manpowerLogs), manual total manpower cost (mplManualCost), pay multipliers, Progress Photos, and Execution Dashboard snapshots/settings — was never included in the SharePoint main-blob push, so a resync could wipe anything you had typed.',
+    'These "ride-along" keys are now (a) pushed to SharePoint in the main blob and (b) merged (not overwritten) on every SharePoint→local sync, with last-write-wins on cost budgets and a tombstone-aware union on the rest. Added them to the default data shape too.',
+    'Progress-photo previews already uploaded to SharePoint files are shipped without their base64 preview to keep the main blob small (full-res is safe in SharePoint).',
+  ]},
   {version:'2.16.6',date:'2026-11-14',type:'feat',notes:[
     'Execution Dashboard "Budget & Cost — Itemized by Category" now draws from the project\'s Cost Budget by Category sheet (the Cost Control tab) when one exists: same per-category budgets, same auto-rolled/manual actuals, same totals.',
     'When no cost sheet exists it falls back to the previous Resource Allocation grouping, so nothing breaks on projects that haven\'t set up a cost sheet. The section source note shows which is in use.',
@@ -1835,6 +1840,15 @@ const SHIC_LIST_CONFIG = {
   },
 };
 const SHIC_OFFLOADED_KEYS = Object.values(SHIC_LIST_CONFIG).map(c => c.dataKey);
+// ── Ride-along keys ───────────────────────────────────────
+// These live in the MAIN BLOB (they have no dedicated SharePoint sub-list). They
+// must be (a) pushed to SharePoint inside the main-blob payload and (b) preserved
+// on every SharePoint→local merge, or a resync wipes them. Added after features
+// shipped v2.15–v2.16 (Daily Manpower Log, Progress Photos, Execution Dashboard
+// snapshots/settings, Cost Budget by Category). Arrays merge by id/projectId;
+// maps merge key-by-key (costBudgets uses _lastModified for last-write-wins).
+const SHIC_RIDEALONG_ARRAY_KEYS = ['manpowerLogs','progressPhotos','execDashSnapshots','execDashSettings'];
+const SHIC_RIDEALONG_MAP_KEYS   = ['costBudgets','mplManualCost','payMultipliers'];
 // Cache for list IDs to avoid re-resolving
 const _spListIds = {}; // { 'SHIC_Tasks': 'list-id', ... }
 // OneDrive / MSAL
@@ -2105,6 +2119,14 @@ function getDefaultData(){
     deletionRequests:[], // [{id,arrayKey,recordId,recordType,recordLabel,requestedBy,requestedByEmail,requestedAt,reason,status,reviewedBy,reviewedAt,rejectionReason}]
     libraryDocs:[], // [{id,name,number,rev,category,description,tags,fileName,fileType,fileUrl,fileWebUrl,spDriveId,spItemId,size,status,uploadedBy,uploadedAt,supersededBy,revisionOf}]
     projectIdHistory:[], // [{projectId(current),oldId,newId,changedBy,changedAt,reason}]
+    // Ride-along keys (no dedicated sub-list; carried in the main blob — see SHIC_RIDEALONG_* ):
+    manpowerLogs:[],      // Daily Manpower Log entries
+    progressPhotos:[],    // Progress Photos gallery
+    execDashSnapshots:[], // Execution Dashboard daily snapshots
+    execDashSettings:[],  // Execution Dashboard manual inputs (keyed by projectId)
+    costBudgets:{},       // Cost Budget by Category (map: projectId → {rows,_lastModified})
+    mplManualCost:{},     // Manual total manpower cost (map: projectId → number)
+    payMultipliers:{},    // Premium pay multipliers config
   };
 }
 
@@ -7880,6 +7902,53 @@ function _spMergeAppendArrays(base, donor) {
   return Merge.appendArrays(base, donor);
 }
 
+// ── Ride-along key merge (main-blob keys with no dedicated sub-list) ──
+// Union a map/object key-by-key. `winner` provides the value on a key clash;
+// when both sides carry `tsField` the newer timestamp wins regardless of side
+// (true last-write-wins, used for costBudgets._lastModified).
+function _spMergeObjMap(local, remote, localWins, tsField) {
+  const L = (local && typeof local === 'object' && !Array.isArray(local)) ? local : {};
+  const R = (remote && typeof remote === 'object' && !Array.isArray(remote)) ? remote : {};
+  const out = Object.assign({}, localWins ? R : L); // start from the "loser" so all its keys survive
+  const winner = localWins ? L : R;
+  Object.keys(winner).forEach(k => {
+    const wv = winner[k], ov = out[k];
+    if (ov == null) { out[k] = wv; return; }
+    if (tsField && wv && ov && wv[tsField] && ov[tsField]) {
+      out[k] = (new Date(wv[tsField]) >= new Date(ov[tsField])) ? wv : ov;
+    } else { out[k] = wv; }
+  });
+  return out;
+}
+// Union two arrays keyed by a non-`id` primary key (e.g. execDashSettings → projectId).
+function _spMergePkArray(local, remote, pk, localWins) {
+  const map = {};
+  const first  = localWins ? (remote || []) : (local  || []);
+  const second = localWins ? (local  || []) : (remote || []);
+  first.forEach(r => { if (r && r[pk] != null) map[r[pk]] = r; });
+  second.forEach(r => { if (r && r[pk] != null) map[r[pk]] = r; }); // second (winner) overwrites
+  return Object.values(map);
+}
+// Fold ride-along keys into `merged` (which currently holds the REMOTE values) by
+// merging in the LOCAL AppState.data values. Call BEFORE reassigning AppState.data.
+// localWins=true when this device has pending edits that must not be lost.
+function _spFoldRideAlong(merged, localWins) {
+  try {
+    const AKEYS = (typeof SHIC_RIDEALONG_ARRAY_KEYS !== 'undefined') ? SHIC_RIDEALONG_ARRAY_KEYS : [];
+    const MKEYS = (typeof SHIC_RIDEALONG_MAP_KEYS   !== 'undefined') ? SHIC_RIDEALONG_MAP_KEYS   : [];
+    AKEYS.forEach(k => {
+      const L = Array.isArray(AppState.data[k]) ? AppState.data[k] : [];
+      const R = Array.isArray(merged[k]) ? merged[k] : [];
+      if (k === 'execDashSettings') merged[k] = _spMergePkArray(L, R, 'projectId', localWins);
+      else merged[k] = _spMergeArrays(L, R, localWins, k); // union by id; localWins controls conflicts
+    });
+    MKEYS.forEach(k => {
+      merged[k] = _spMergeObjMap(AppState.data[k], merged[k], localWins, k === 'costBudgets' ? '_lastModified' : null);
+    });
+  } catch (e) { try { console.warn('[SP] ride-along merge failed:', e.message); } catch (_) {} }
+  return merged;
+}
+
 // ── True when local changes haven't been confirmed on SharePoint ──
 function _spHasLocalEdits() {
   return !!_spOfflineQueue || (typeof _pendingEdits !== 'undefined' && _pendingEdits);
@@ -7932,6 +8001,7 @@ function _spApplyRemote(data, _ts, _by) {
         showToast('Admin dropdown settings applied from SharePoint', 'info', 3500);
       }
     }
+    _spFoldRideAlong(merged, true); // preserve local ride-along edits (costBudgets, manpowerLogs, …)
     AppState.data = Object.assign(getDefaultData(), merged);
     if (typeof _restoreDropdownBackup === 'function') _restoreDropdownBackup();
     if (typeof migrateData === 'function') migrateData();
@@ -7996,6 +8066,7 @@ function _spApplyRemote(data, _ts, _by) {
         }
         merged.settings = Object.assign({}, merged.settings || {}, _keep);
       }
+      _spFoldRideAlong(merged, false); // remote wins, but keep any local-only ride-along data
       AppState.data = Object.assign(getDefaultData(), merged);
     }
     if (typeof migrateData === 'function') migrateData();
@@ -8869,11 +8940,25 @@ function SHIC_OFFLOADED_KEYS_REFRESH() {
 // so SharePoint still holds the data.
 function _spBuildMainBlobPayload(subListsOk) {
   if (subListsOk) {
-    return {
+    const payload = {
       settings:      AppState.data.settings || {},
       _deletedIds:   _spDeletedIds,
       _schemaVersion: (typeof SHIC_SCHEMA_VERSION !== 'undefined') ? SHIC_SCHEMA_VERSION : 0,
     };
+    // Ride-along keys have no sub-list, so they MUST travel in the main blob or they
+    // never reach SharePoint and get wiped on the next resync.
+    const AK = (typeof SHIC_RIDEALONG_ARRAY_KEYS !== 'undefined') ? SHIC_RIDEALONG_ARRAY_KEYS : [];
+    const MK = (typeof SHIC_RIDEALONG_MAP_KEYS   !== 'undefined') ? SHIC_RIDEALONG_MAP_KEYS   : [];
+    AK.forEach(k => { if (AppState.data[k] != null) payload[k] = AppState.data[k]; });
+    MK.forEach(k => { if (AppState.data[k] != null) payload[k] = AppState.data[k]; });
+    // Progress-photo previews are base64 — keep the main blob lean by shipping only
+    // the preview for photos not yet uploaded to SharePoint files (those with an
+    // spItemId can re-fetch full-res). Metadata is always kept so the record survives.
+    if (Array.isArray(payload.progressPhotos)) {
+      payload.progressPhotos = payload.progressPhotos.map(ph =>
+        (ph && ph.spItemId && ph.img) ? Object.assign({}, ph, { img: '' }) : ph);
+    }
+    return payload;
   }
   // Fallback: sub-lists failed — keep legacy full-shape blob so SP has the data
   const dataForPush = { ...AppState.data };
@@ -8959,6 +9044,7 @@ async function spPushData(silent = false, forcePull = false) {
       if (_rPushedAt > _lPushedAt) {
         merged.settings.dropdowns = Object.assign({}, _rSet.dropdowns || {});
       }
+      _spFoldRideAlong(merged, true); // local edits being pushed must win over remote
       AppState.data = Object.assign(getDefaultData(), merged);
       if (typeof _rebaselineMAtHashes === 'function') _rebaselineMAtHashes();
     try { _spFlushMergeConflicts(); } catch(e) {}

@@ -1,1 +1,1 @@
-{"version":"2.16.6","note":"Execution Dashboard Budget & Cost section now uses the project's Cost Budget by Category sheet when one exists (same per-category budgets + auto/manual actuals); falls back to Resource Allocation otherwise. Reflected in the printout.","released":"2026-11-14 11:00"}
+{"version":"2.16.7","note":"CRITICAL FIX: Cost Budget, Daily Manpower Log, manual costs, Progress Photos and Execution Dashboard snapshots/settings are now saved to SharePoint and merged (not wiped) on resync.","released":"2026-11-14 12:30"}
