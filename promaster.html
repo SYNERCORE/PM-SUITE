@@ -595,8 +595,8 @@ kbd {
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js"></script>
 <script>
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.17.1';
-const APP_BUILD='20261114f';
+const APP_VERSION='2.17.2';
+const APP_BUILD='20261114g';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -611,11 +611,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Cost figures now reconcile across the app: the Budget by Category sheet is the single source of truth. The Cost Control "Amount Spent", Budget Utilization, EVM and the Manpower Cost card all auto-roll from it (Manpower Cost now reads the Daily Manpower Log). "Amount Spent" is auto with a manual override. Budget confidentiality now covers the whole Cost Control tab for non-confidential users.';
+const APP_RELEASE_NOTE='Contract Budget now also auto-rolls from the Budget by Category sheet (budget total), matching Amount Spent — both are auto with a manual override. Fixed Budget Utilization showing a huge % when no budget was set: it now reads "no budget set" and Remaining shows — until you enter budgets. Type the category budgets and the banner fills in.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.17.2',date:'2026-11-14',type:'fix',notes:[
+    'Contract Budget now auto-rolls from the Budget by Category budget total (sum of category budgets), symmetric with Amount Spent — both auto with a manual override and a "use auto" revert. Type the category budgets and Contract Budget fills in.',
+    'Fixed the Budget Utilization showing an absurd percentage (e.g. 115,286,043%) and a scary red banner when no contract budget was set — it was dividing a spent amount by a zero budget. Utilization now shows "no budget set" and Remaining shows "—" until a budget is entered.',
+    'Safety guard: projects that already had a hand-typed budget or spent are treated as manual overrides, so the new auto-roll never overwrites existing figures; only zero/new ones auto-fill from the sheet.',
+  ]},
   {version:'2.17.1',date:'2026-11-14',type:'feat',notes:[
     'Cost reconciliation — the Budget by Category sheet is now the single source of truth for a project\'s actual cost. The Cost Control "Amount Spent", Budget Utilization %, EVM (CPI/SPI/EAC) and the "Manpower Cost" card all auto-roll from it, so the numbers agree across the Cost Control tab, project list, dashboards and reports.',
     'Fixed: the "Manpower Cost" card ignored the Daily Manpower Log — it now reads the manual total (or logged cost, or manpower allocations), so a manual labour cost entered in the Daily Manpower Log shows up in Cost Control.',
@@ -16100,9 +16105,16 @@ function renderDetailCostControl(){
 
   // ── Single source of truth: Budget by Category sheet drives everything ──
   const cbT=(typeof cbTotals==='function')?cbTotals(pid):{budget:0,actual:0,exists:false};
-  // Auto-sync project.spent to the sheet's actual (unless manually overridden),
-  // so the banner, project list, dashboards and reports all agree.
-  if(cbT.exists && !p.spentManual){ const v=Math.round(cbT.actual*100)/100; if(p.spent!==v){ p.spent=v; AppState.save(); } }
+  // One-time guard: a project that already had a hand-typed budget/spent is treated
+  // as a manual override so auto-sync never clobbers existing figures. New/zero ones
+  // default to auto so they roll up from the sheet.
+  if(p.spentManual===undefined)  p.spentManual =(Number(p.spent)>0);
+  if(p.budgetManual===undefined) p.budgetManual=(Number(p.budget)>0);
+  // Auto-sync project.budget (from the category budget total) and project.spent (from
+  // the category actual total) unless manually overridden — so the banner, project
+  // list, dashboards and reports all agree.
+  if(cbT.exists && !p.spentManual){  const v =Math.round(cbT.actual*100)/100; if(p.spent !==v ){ p.spent =v;  AppState.save(); } }
+  if(cbT.exists && !p.budgetManual){ const bv=Math.round(cbT.budget*100)/100; if(p.budget!==bv){ p.budget=bv; AppState.save(); } }
 
   // Register (Cost Breakdown) totals — this ledger keeps its own totals
   const regPlanned=costs.reduce((s,c)=>s+c.planned,0);
@@ -16123,8 +16135,9 @@ function renderDetailCostControl(){
   const budget=p.budget;
   const spent=p.spent;
   const spentAuto=cbT.exists && !p.spentManual;
+  const budgetAuto=cbT.exists && !p.budgetManual;
   const remaining=budget-spent;
-  const budgetPct=Math.round((spent/Math.max(budget,1))*100);
+  const budgetPct=budget>0?Math.round((spent/budget)*100):null; // null = no budget set yet
 
   // Procurement commitment total
   const poTotal=procurement.reduce((s,po)=>s+po.amount,0);
@@ -16142,7 +16155,7 @@ function renderDetailCostControl(){
   <!-- Budget Health Banner -->
   <div style="background:${budgetPct>90?'linear-gradient(135deg,#4a0f0f,#7f1d1d)':budgetPct>75?'linear-gradient(135deg,#3d2800,#7c4a00)':'linear-gradient(135deg,#0d2147,#112266)'};border:1px solid ${budgetPct>90?'rgba(248,81,73,.4)':budgetPct>75?'rgba(240,164,80,.4)':'rgba(56,139,253,.25)'};border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
     <div>
-      <div style="font-size:11px;color:rgba(255,255,255,.6);margin-bottom:3px">Contract Budget</div>
+      <div style="font-size:11px;color:rgba(255,255,255,.6);margin-bottom:3px">Contract Budget ${seeB?`<span style="font-size:9px;font-weight:600;padding:1px 6px;border-radius:999px;${budgetAuto?'background:rgba(63,185,80,.25);color:#7ee787':'background:rgba(240,164,80,.25);color:#f0a450'}">${budgetAuto?'auto':'manual'}</span>`:''}</div>
       <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);color:#fff">${CUR(budget)}</div>
     </div>
     <div style="text-align:center">
@@ -16151,11 +16164,11 @@ function renderDetailCostControl(){
     </div>
     <div style="text-align:center">
       <div style="font-size:11px;color:rgba(255,255,255,.6);margin-bottom:3px">Remaining</div>
-      <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);color:${remaining<0?'var(--accent-red)':'#fff'}">${CUR(remaining)}</div>
+      <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);color:${budgetPct==null?'rgba(255,255,255,.5)':remaining<0?'var(--accent-red)':'#fff'}">${budgetPct==null?(seeB?'—':'₱ ••••••'):CUR(remaining)}</div>
     </div>
     <div style="min-width:200px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:11px;color:rgba(255,255,255,.7)">Budget Utilization</span><span style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:${budgetPct>90?'var(--accent-red)':budgetPct>75?'var(--accent-amber)':'var(--accent-green)'}">${PCT(budgetPct)}</span></div>
-      <div class="progress-bar" style="height:10px;background:rgba(255,255,255,.15)"><div class="progress-fill" style="width:${seeB?Math.min(100,budgetPct):0}%;background:${budgetPct>90?'var(--accent-red)':budgetPct>75?'var(--accent-amber)':'var(--accent-green)'};border-radius:5px"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:11px;color:rgba(255,255,255,.7)">Budget Utilization</span><span style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:${budgetPct>90?'var(--accent-red)':budgetPct>75?'var(--accent-amber)':'var(--accent-green)'}">${budgetPct==null?(seeB?'<span style="color:rgba(255,255,255,.5);font-weight:600">no budget set</span>':'••%'):PCT(budgetPct)}</span></div>
+      <div class="progress-bar" style="height:10px;background:rgba(255,255,255,.15)"><div class="progress-fill" style="width:${(seeB&&budgetPct!=null)?Math.min(100,budgetPct):0}%;background:${budgetPct>90?'var(--accent-red)':budgetPct>75?'var(--accent-amber)':'var(--accent-green)'};border-radius:5px"></div></div>
     </div>
   </div>
 
@@ -16166,7 +16179,12 @@ function renderDetailCostControl(){
   ${seeB?`<div class="card" style="margin-bottom:14px">
     <div class="card-title" style="margin-bottom:10px">Update Budget & Spent</div>
     <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-      <div class="form-group" style="margin:0;flex:1;min-width:160px"><label class="form-label">Contract Budget (₱)</label><input class="form-input" type="number" id="ccBudget" value="${budget}" oninput="updateCCBudget('${pid}')"></div>
+      <div class="form-group" style="margin:0;flex:1;min-width:200px">
+        <label class="form-label" style="display:flex;justify-content:space-between;align-items:center">Contract Budget (₱)
+          ${budgetAuto?`<span style="font-size:9px;color:var(--accent-green)" title="Auto-computed from the Budget by Category budget total">● auto from Budget by Category</span>`:(cbT.exists?`<a href="javascript:void(0)" onclick="ccBudgetAuto('${pid}')" style="font-size:10px;color:var(--accent-blue)" title="Revert to the Budget by Category budget total">↺ use auto</a>`:'')}
+        </label>
+        <input class="form-input" type="number" id="ccBudget" value="${budget}" oninput="updateCCBudget('${pid}')" ${cbT.exists&&budgetAuto?'style="opacity:.75"':''}>
+      </div>
       <div class="form-group" style="margin:0;flex:1;min-width:200px">
         <label class="form-label" style="display:flex;justify-content:space-between;align-items:center">Amount Spent (₱)
           ${spentAuto?`<span style="font-size:9px;color:var(--accent-green)" title="Auto-computed from the Budget by Category actual total">● auto from Budget by Category</span>`:`<a href="javascript:void(0)" onclick="ccSpentAuto('${pid}')" style="font-size:10px;color:var(--accent-blue)" title="Revert to auto-computed from the Budget by Category sheet">↺ use auto</a>`}
@@ -16176,7 +16194,7 @@ function renderDetailCostControl(){
       <div class="form-group" style="margin:0;flex:1;min-width:160px"><label class="form-label">Progress %</label><input class="form-input" type="number" id="ccProg" value="${p.progress}" min="0" max="100" oninput="updateCCProgress('${pid}')"></div>
       <button class="btn btn-success btn-sm" onclick="saveCCQuick('${pid}')"><i class="fas fa-save"></i> Save</button>
     </div>
-    ${cbT.exists?`<div style="font-size:10px;color:var(--text-muted);margin-top:8px"><i class="fas fa-info-circle"></i> Amount Spent auto-rolls from the Budget by Category actual total (${_cbMoney?_cbMoney(cbT.actual):fmtCur(cbT.actual)}). Type a value to override; click “use auto” to revert.</div>`:''}
+    ${cbT.exists?`<div style="font-size:10px;color:var(--text-muted);margin-top:8px"><i class="fas fa-info-circle"></i> Contract Budget and Amount Spent auto-roll from the Budget by Category sheet (budget ${_cbMoney?_cbMoney(cbT.budget):fmtCur(cbT.budget)} · actual ${_cbMoney?_cbMoney(cbT.actual):fmtCur(cbT.actual)}). Type a value to override; click “use auto” to revert.</div>`:`<div style="font-size:10px;color:var(--text-muted);margin-top:8px"><i class="fas fa-info-circle"></i> No Budget by Category figures yet — type the category budgets in the sheet below and Contract Budget will fill in automatically.</div>`}
   </div>`:''}
 
   <!-- EVM KPIs -->
@@ -16251,7 +16269,8 @@ function renderDetailCostControl(){
   </div>`;
 }
 
-function updateCCBudget(pid){const p=(AppState.data.projects||[]).find(x=>x.id===pid);if(p&&$('#ccBudget')){p.budget=parseFloat($('#ccBudget').value)||p.budget;AppState.save();}}
+function updateCCBudget(pid){const p=(AppState.data.projects||[]).find(x=>x.id===pid);if(p&&$('#ccBudget')){p.budget=parseFloat($('#ccBudget').value)||0;p.budgetManual=true;AppState.save();}}
+function ccBudgetAuto(pid){const p=(AppState.data.projects||[]).find(x=>x.id===pid);if(!p)return;p.budgetManual=false;const t=(typeof cbTotals==='function')?cbTotals(pid):{budget:0,exists:false};if(t.exists){p.budget=Math.round(t.budget*100)/100;}AppState.save();renderDetailCostControl();showToast('Contract Budget set to auto (from Budget by Category)','success');}
 function updateCCSpent(pid){const p=(AppState.data.projects||[]).find(x=>x.id===pid);if(p&&$('#ccSpent')){p.spent=parseFloat($('#ccSpent').value)||0;p.spentManual=true;AppState.save();}}
 function ccSpentAuto(pid){const p=(AppState.data.projects||[]).find(x=>x.id===pid);if(!p)return;p.spentManual=false;if(typeof _cbSyncProjectSpent==='function')_cbSyncProjectSpent(pid);AppState.save();renderDetailCostControl();showToast('Amount Spent set to auto (from Budget by Category)','success');}
 function updateCCProgress(pid){const p=(AppState.data.projects||[]).find(x=>x.id===pid);if(p&&$('#ccProg')){p.progress=parseInt($('#ccProg').value)||p.progress;AppState.save();}}

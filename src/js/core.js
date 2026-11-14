@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.17.1';
-const APP_BUILD='20261114f';
+const APP_VERSION='2.17.2';
+const APP_BUILD='20261114g';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Cost figures now reconcile across the app: the Budget by Category sheet is the single source of truth. The Cost Control "Amount Spent", Budget Utilization, EVM and the Manpower Cost card all auto-roll from it (Manpower Cost now reads the Daily Manpower Log). "Amount Spent" is auto with a manual override. Budget confidentiality now covers the whole Cost Control tab for non-confidential users.';
+const APP_RELEASE_NOTE='Contract Budget now also auto-rolls from the Budget by Category sheet (budget total), matching Amount Spent — both are auto with a manual override. Fixed Budget Utilization showing a huge % when no budget was set: it now reads "no budget set" and Remaining shows — until you enter budgets. Type the category budgets and the banner fills in.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.17.2',date:'2026-11-14',type:'fix',notes:[
+    'Contract Budget now auto-rolls from the Budget by Category budget total (sum of category budgets), symmetric with Amount Spent — both auto with a manual override and a "use auto" revert. Type the category budgets and Contract Budget fills in.',
+    'Fixed the Budget Utilization showing an absurd percentage (e.g. 115,286,043%) and a scary red banner when no contract budget was set — it was dividing a spent amount by a zero budget. Utilization now shows "no budget set" and Remaining shows "—" until a budget is entered.',
+    'Safety guard: projects that already had a hand-typed budget or spent are treated as manual overrides, so the new auto-roll never overwrites existing figures; only zero/new ones auto-fill from the sheet.',
+  ]},
   {version:'2.17.1',date:'2026-11-14',type:'feat',notes:[
     'Cost reconciliation — the Budget by Category sheet is now the single source of truth for a project\'s actual cost. The Cost Control "Amount Spent", Budget Utilization %, EVM (CPI/SPI/EAC) and the "Manpower Cost" card all auto-roll from it, so the numbers agree across the Cost Control tab, project list, dashboards and reports.',
     'Fixed: the "Manpower Cost" card ignored the Daily Manpower Log — it now reads the manual total (or logged cost, or manpower allocations), so a manual labour cost entered in the Daily Manpower Log shows up in Cost Control.',
