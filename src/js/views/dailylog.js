@@ -390,6 +390,7 @@ function saveMplManualCost(clear){
     else AppState.data.mplManualCost[pid]=Math.round(v*100)/100;
   }
   AppState.save();
+  if(typeof _cbSyncProjectSpent==='function')_cbSyncProjectSpent(pid); // keep project.spent / Cost Control aligned
   closeModal('genericModal');
   renderManpowerLog();
   showToast(clear?'Reverted to computed cost':'Total manpower cost saved','success');

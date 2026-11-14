@@ -85,6 +85,32 @@ function _cbActual(pid,r){
 function _cbMoney(n){ return '₱'+(Number(n)||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function _cbPct(bud,v){ return bud>0? (v/bud*100):0; }
 
+/* ---- single source of truth: budget & actual totals for a project ----
+   Read-only (does NOT create a record). Used by the Cost Control banner,
+   EVM, the cost cards and the Execution Dashboard so every budget number in
+   the app agrees with this sheet. */
+function cbTotals(pid){
+  const rec=(AppState.data.costBudgets||{})[pid];
+  if(!rec||!rec.rows||!rec.rows.length) return {budget:0,actual:0,rows:0,exists:false};
+  let b=0,a=0;
+  rec.rows.forEach(r=>{ b+=Number(r.budget)||0; a+=_cbActual(pid,r); });
+  return {budget:b, actual:a, rows:rec.rows.length, exists:true};
+}
+/* Push the sheet's actual total into project.spent so every view that reads
+   project.spent (project list, dashboards, reports) stays aligned — unless the
+   user has set a manual override (project.spentManual). Returns the effective
+   spent value. */
+function _cbSyncProjectSpent(pid){
+  const p=(AppState.data.projects||[]).find(x=>x.id===pid);
+  if(!p) return null;
+  const t=cbTotals(pid);
+  if(!t.exists) return (typeof p.spent==='number'?p.spent:0);
+  if(p.spentManual) return (typeof p.spent==='number'?p.spent:0);
+  const v=Math.round(t.actual*100)/100;
+  if(p.spent!==v){ p.spent=v; try{AppState.save();}catch(e){} }
+  return v;
+}
+
 /* ============================ PANEL RENDER ============================ */
 /* returns an HTML string; embedded at the top of the Cost Control tab */
 function renderCostBudgetPanel(pid){

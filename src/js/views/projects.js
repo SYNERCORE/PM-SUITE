@@ -4127,25 +4127,47 @@ function renderDetailCostControl(){
   const procurement=(AppState.data.procurement||[]).filter(po=>po.projectId===pid);
   const materials=(AppState.data.materials||[]).filter(m=>m.projectId===pid);
 
-  const totPlanned=costs.reduce((s,c)=>s+c.planned,0);
-  const totActual=costs.reduce((s,c)=>s+c.actual,0);
+  // ── Budget confidentiality: mask every peso figure for non-confidential users ──
+  const seeB=(typeof canSeeBudget==='function')?canSeeBudget():true;
+  const CUR=(n)=>seeB?fmtCur(n):'₱ ••••••';
+  const NUM=(n)=>seeB?fmtNum(n):'••••';
+  const PCT=(n)=>seeB?(n+'%'):'••%';
+
+  // ── Single source of truth: Budget by Category sheet drives everything ──
+  const cbT=(typeof cbTotals==='function')?cbTotals(pid):{budget:0,actual:0,exists:false};
+  // Auto-sync project.spent to the sheet's actual (unless manually overridden),
+  // so the banner, project list, dashboards and reports all agree.
+  if(cbT.exists && !p.spentManual){ const v=Math.round(cbT.actual*100)/100; if(p.spent!==v){ p.spent=v; AppState.save(); } }
+
+  // Register (Cost Breakdown) totals — this ledger keeps its own totals
+  const regPlanned=costs.reduce((s,c)=>s+c.planned,0);
+  const regActual=costs.reduce((s,c)=>s+c.actual,0);
+
+  // EVM now reflects the Budget by Category sheet (falls back to the register if no sheet)
+  const evmB=cbT.exists?cbT.budget:regPlanned;
+  const evmA=cbT.exists?cbT.actual:regActual;
   const avgProg=p.progress/100;
-  const EV=totPlanned*avgProg;
-  const AC=totActual;
-  const PV=totPlanned*(p.progress>0?Math.min(1,(new Date()-new Date(p.startDate))/(new Date(p.endDate)-new Date(p.startDate))):0);
+  const EV=evmB*avgProg;
+  const AC=evmA;
+  const PV=evmB*(p.progress>0?Math.min(1,(new Date()-new Date(p.startDate))/(new Date(p.endDate)-new Date(p.startDate))):0);
   const CPI=AC>0?(EV/AC).toFixed(2):'—';
   const SPI=PV>0?(EV/PV).toFixed(2):'—';
   const cv=EV-AC;
-  const EAC=parseFloat(CPI)>0?totPlanned/parseFloat(CPI):totPlanned;
-  const VAC=totPlanned-EAC;
+  const EAC=parseFloat(CPI)>0?evmB/parseFloat(CPI):evmB;
+  const VAC=evmB-EAC;
   const budget=p.budget;
   const spent=p.spent;
+  const spentAuto=cbT.exists && !p.spentManual;
   const remaining=budget-spent;
   const budgetPct=Math.round((spent/Math.max(budget,1))*100);
 
   // Procurement commitment total
   const poTotal=procurement.reduce((s,po)=>s+po.amount,0);
-  const mpCostTotal=manpower.reduce((s,m)=>s+m.cost,0);
+  // Manpower Cost now reads the Daily Manpower Log (manual total → logged cost → manpower allocations)
+  const mpCostTotal=(typeof _cbAuto==='function')?_cbAuto(pid,'labor'):manpower.reduce((s,m)=>s+m.cost,0);
+  const mpManual=(AppState.data.mplManualCost||{})[pid]!=null;
+  const mpLogDays=(AppState.data.manpowerLogs||[]).filter(e=>e.projectId===pid&&!e._deleted).length;
+  const mpSub=mpManual?'manual total (Daily Log)':(mpLogDays?mpLogDays+' days logged':'no daily log yet');
   const matCostTotal=materials.reduce((s,m)=>s+m.qty*m.unitCost,0);
   const allocCost=(AppState.data.resourceAllocations||[]).filter(a=>a.projectId===pid).reduce((s,a)=>s+a.plannedCost,0);
 
@@ -4156,56 +4178,62 @@ function renderDetailCostControl(){
   <div style="background:${budgetPct>90?'linear-gradient(135deg,#4a0f0f,#7f1d1d)':budgetPct>75?'linear-gradient(135deg,#3d2800,#7c4a00)':'linear-gradient(135deg,#0d2147,#112266)'};border:1px solid ${budgetPct>90?'rgba(248,81,73,.4)':budgetPct>75?'rgba(240,164,80,.4)':'rgba(56,139,253,.25)'};border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
     <div>
       <div style="font-size:11px;color:rgba(255,255,255,.6);margin-bottom:3px">Contract Budget</div>
-      <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);color:#fff">${fmtCur(budget)}</div>
+      <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);color:#fff">${CUR(budget)}</div>
     </div>
     <div style="text-align:center">
-      <div style="font-size:11px;color:rgba(255,255,255,.6);margin-bottom:3px">Amount Spent</div>
-      <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);color:${budgetPct>90?'var(--accent-red)':budgetPct>75?'var(--accent-amber)':'#3fb950'}">${fmtCur(spent)}</div>
+      <div style="font-size:11px;color:rgba(255,255,255,.6);margin-bottom:3px">Amount Spent ${seeB?`<span style="font-size:9px;font-weight:600;padding:1px 6px;border-radius:999px;${spentAuto?'background:rgba(63,185,80,.25);color:#7ee787':'background:rgba(240,164,80,.25);color:#f0a450'}">${spentAuto?'auto':'manual'}</span>`:''}</div>
+      <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);color:${budgetPct>90?'var(--accent-red)':budgetPct>75?'var(--accent-amber)':'#3fb950'}">${CUR(spent)}</div>
     </div>
     <div style="text-align:center">
       <div style="font-size:11px;color:rgba(255,255,255,.6);margin-bottom:3px">Remaining</div>
-      <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);color:${remaining<0?'var(--accent-red)':'#fff'}">${fmtCur(remaining)}</div>
+      <div style="font-size:26px;font-weight:800;font-family:var(--font-mono);color:${remaining<0?'var(--accent-red)':'#fff'}">${CUR(remaining)}</div>
     </div>
     <div style="min-width:200px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:11px;color:rgba(255,255,255,.7)">Budget Utilization</span><span style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:${budgetPct>90?'var(--accent-red)':budgetPct>75?'var(--accent-amber)':'var(--accent-green)'}">${budgetPct}%</span></div>
-      <div class="progress-bar" style="height:10px;background:rgba(255,255,255,.15)"><div class="progress-fill" style="width:${Math.min(100,budgetPct)}%;background:${budgetPct>90?'var(--accent-red)':budgetPct>75?'var(--accent-amber)':'var(--accent-green)'};border-radius:5px"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:11px;color:rgba(255,255,255,.7)">Budget Utilization</span><span style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:${budgetPct>90?'var(--accent-red)':budgetPct>75?'var(--accent-amber)':'var(--accent-green)'}">${PCT(budgetPct)}</span></div>
+      <div class="progress-bar" style="height:10px;background:rgba(255,255,255,.15)"><div class="progress-fill" style="width:${seeB?Math.min(100,budgetPct):0}%;background:${budgetPct>90?'var(--accent-red)':budgetPct>75?'var(--accent-amber)':'var(--accent-green)'};border-radius:5px"></div></div>
     </div>
   </div>
 
   <!-- Budget by Category (standard cost-control sheet) -->
   ${typeof renderCostBudgetPanel==='function'?renderCostBudgetPanel(pid):''}
 
-  <!-- Quick edit budget/spent -->
-  <div class="card" style="margin-bottom:14px">
+  <!-- Quick edit budget/spent (confidential users only) -->
+  ${seeB?`<div class="card" style="margin-bottom:14px">
     <div class="card-title" style="margin-bottom:10px">Update Budget & Spent</div>
     <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
       <div class="form-group" style="margin:0;flex:1;min-width:160px"><label class="form-label">Contract Budget (₱)</label><input class="form-input" type="number" id="ccBudget" value="${budget}" oninput="updateCCBudget('${pid}')"></div>
-      <div class="form-group" style="margin:0;flex:1;min-width:160px"><label class="form-label">Amount Spent (₱)</label><input class="form-input" type="number" id="ccSpent" value="${spent}" oninput="updateCCSpent('${pid}')"></div>
+      <div class="form-group" style="margin:0;flex:1;min-width:200px">
+        <label class="form-label" style="display:flex;justify-content:space-between;align-items:center">Amount Spent (₱)
+          ${spentAuto?`<span style="font-size:9px;color:var(--accent-green)" title="Auto-computed from the Budget by Category actual total">● auto from Budget by Category</span>`:`<a href="javascript:void(0)" onclick="ccSpentAuto('${pid}')" style="font-size:10px;color:var(--accent-blue)" title="Revert to auto-computed from the Budget by Category sheet">↺ use auto</a>`}
+        </label>
+        <input class="form-input" type="number" id="ccSpent" value="${spent}" oninput="updateCCSpent('${pid}')" ${cbT.exists&&spentAuto?'style="opacity:.75"':''}>
+      </div>
       <div class="form-group" style="margin:0;flex:1;min-width:160px"><label class="form-label">Progress %</label><input class="form-input" type="number" id="ccProg" value="${p.progress}" min="0" max="100" oninput="updateCCProgress('${pid}')"></div>
       <button class="btn btn-success btn-sm" onclick="saveCCQuick('${pid}')"><i class="fas fa-save"></i> Save</button>
     </div>
-  </div>
+    ${cbT.exists?`<div style="font-size:10px;color:var(--text-muted);margin-top:8px"><i class="fas fa-info-circle"></i> Amount Spent auto-rolls from the Budget by Category actual total (${_cbMoney?_cbMoney(cbT.actual):fmtCur(cbT.actual)}). Type a value to override; click “use auto” to revert.</div>`:''}
+  </div>`:''}
 
   <!-- EVM KPIs -->
   <div class="grid grid-3" style="margin-bottom:14px">
     <div class="evm-card"><div class="evm-value" style="color:${parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)'}">${CPI}</div><div class="evm-label">Cost Performance Index (CPI)</div><div class="evm-status" style="color:${parseFloat(CPI)>=1?'var(--accent-green)':'var(--accent-red)'}">${parseFloat(CPI)>=1?'✓ Cost Efficient':'✗ Cost Overrun'}</div></div>
     <div class="evm-card"><div class="evm-value" style="color:${parseFloat(SPI)>=1?'var(--accent-green)':'var(--accent-amber)'}">${SPI}</div><div class="evm-label">Schedule Performance Index (SPI)</div><div class="evm-status" style="color:${parseFloat(SPI)>=1?'var(--accent-green)':'var(--accent-amber)'}">${parseFloat(SPI)>=1?'✓ On Schedule':'! Behind Schedule'}</div></div>
-    <div class="evm-card"><div class="evm-value" style="color:${VAC>=0?'var(--accent-green)':'var(--accent-red)'}">₱${fmtNum(Math.abs(EAC))}</div><div class="evm-label">EAC (Estimate at Completion)</div><div class="evm-status" style="color:${EAC<=budget?'var(--accent-green)':'var(--accent-red)'}">${EAC<=budget?'Within Budget':'Over Budget by ₱'+fmtNum(EAC-budget)}</div></div>
+    <div class="evm-card"><div class="evm-value" style="color:${VAC>=0?'var(--accent-green)':'var(--accent-red)'}">₱${NUM(Math.abs(EAC))}</div><div class="evm-label">EAC (Estimate at Completion)</div><div class="evm-status" style="color:${EAC<=budget?'var(--accent-green)':'var(--accent-red)'}">${EAC<=budget?'Within Budget':'Over Budget by ₱'+NUM(EAC-budget)}</div></div>
   </div>
 
   <!-- Cost Committed Overview -->
   <div class="grid grid-4" style="margin-bottom:14px">
-    ${sc('fas fa-file-invoice','PO Committed',fmtNum(poTotal),procurement.length+' purchase orders','#388bfd','rgba(56,139,253,.15)')}
-    ${sc('fas fa-hard-hat','Manpower Cost',fmtNum(mpCostTotal),manpower.length+' trades this week','#f0a450','rgba(240,164,80,.15)')}
-    ${sc('fas fa-boxes','Materials Value',fmtNum(matCostTotal),materials.length+' material items','#3fb950','rgba(63,185,80,.15)')}
-    ${sc('fas fa-users','Resource Allocation',fmtNum(allocCost),allocs.length+' allocated resources','#bc8cff','rgba(188,140,255,.15)')}
+    ${sc('fas fa-file-invoice','PO Committed',NUM(poTotal),procurement.length+' purchase orders','#388bfd','rgba(56,139,253,.15)')}
+    ${sc('fas fa-hard-hat','Manpower Cost',NUM(mpCostTotal),mpSub,'#f0a450','rgba(240,164,80,.15)')}
+    ${sc('fas fa-boxes','Materials Value',NUM(matCostTotal),materials.length+' material items','#3fb950','rgba(63,185,80,.15)')}
+    ${sc('fas fa-users','Resource Allocation',NUM(allocCost),allocs.length+' allocated resources','#bc8cff','rgba(188,140,255,.15)')}
   </div>
 
   <!-- Cost breakdown table with inline editing -->
   <div class="card" style="margin-bottom:14px">
     <div class="section-header" style="margin-bottom:10px">
-      <div class="section-title">Cost Breakdown Register <span style="font-size:11px;font-weight:400;color:var(--text-secondary)">— all fields editable</span></div>
-      <button class="btn btn-primary btn-sm" onclick="showAddCostItem()"><i class="fas fa-plus"></i> Add Line Item</button>
+      <div class="section-title">Cost Breakdown Register <span style="font-size:11px;font-weight:400;color:var(--text-secondary)">— ${seeB?'all fields editable':'confidential — amounts hidden'}</span></div>
+      ${seeB?`<button class="btn btn-primary btn-sm" onclick="showAddCostItem()"><i class="fas fa-plus"></i> Add Line Item</button>`:''}
     </div>
     <div class="table-wrap"><table>
       <thead><tr><th>ID</th><th>Category</th><th>Description</th><th>Planned (₱)</th><th>Actual (₱)</th><th>Variance (₱)</th><th>% Used</th><th></th></tr></thead>
@@ -4214,20 +4242,20 @@ function renderDetailCostControl(){
         const pct=Math.min(999,Math.round((c.actual/Math.max(c.planned,1))*100));
         return`<tr>
         <td style="font-size:10px;font-family:var(--font-mono)">${c.id}</td>
-        <td><select class="form-select" style="height:30px;font-size:11px;min-width:100px" onchange="updateCostField('${c.id}','category',this.value)">${_getDropdown('cost_categories').map(cat=>`<option value="${cat}" ${c.category===cat?'selected':''}>${cat}</option>`).join('')}</select></td>
-        <td><input class="form-input" value="${c.description}" style="min-width:160px;height:26px;font-size:11px" oninput="updateCostField('${c.id}','description',this.value)" onchange="updateCostField('${c.id}','description',this.value)"></td>
-        <td><input class="form-input" type="number" value="${c.planned}" style="width:110px;height:26px;font-family:var(--font-mono);font-size:11px" oninput="updateCostField('${c.id}','planned',+this.value)" onchange="updateCostField('${c.id}','planned',+this.value);setTimeout(()=>renderDetailCostControl(),700)"></td>
-        <td><input class="form-input" type="number" value="${c.actual}" style="width:110px;height:26px;font-family:var(--font-mono);font-size:11px;${c.actual>c.planned?'border-color:var(--accent-red);color:var(--accent-red)':''}" oninput="updateCostField('${c.id}','actual',+this.value)" onchange="updateCostField('${c.id}','actual',+this.value);setTimeout(()=>renderDetailCostControl(),700)"></td>
-        <td style="font-family:var(--font-mono);font-weight:700;color:${v>=0?'var(--accent-green)':'var(--accent-red)'}">${v>=0?'+':''}${fmtCur(Math.abs(v))}</td>
-        <td><div style="display:flex;align-items:center;gap:5px"><div class="progress-bar" style="width:65px;height:5px"><div class="progress-fill" style="width:${Math.min(100,pct)}%;background:${pct>90?'var(--accent-red)':pct>70?'var(--accent-amber)':'var(--accent-green)'}"></div></div><span style="font-size:10px;font-family:var(--font-mono);font-weight:${pct>90?'700':'400'};color:${pct>90?'var(--accent-red)':'inherit'}">${pct}%</span></div></td>
-        <td><button class="btn btn-danger btn-sm btn-icon" onclick="deleteCostItem('${c.id}')"><i class="fas fa-trash"></i></button></td>
-      </tr>`;}).join(''):`<tr><td colspan="8"><div class="empty-state"><i class="fas fa-dollar-sign"></i><p>No cost items. Click "Add Line Item".</p></div></td></tr>`}
+        <td>${seeB?`<select class="form-select" style="height:30px;font-size:11px;min-width:100px" onchange="updateCostField('${c.id}','category',this.value)">${_getDropdown('cost_categories').map(cat=>`<option value="${cat}" ${c.category===cat?'selected':''}>${cat}</option>`).join('')}</select>`:esc(c.category||'—')}</td>
+        <td>${seeB?`<input class="form-input" value="${c.description}" style="min-width:160px;height:26px;font-size:11px" oninput="updateCostField('${c.id}','description',this.value)" onchange="updateCostField('${c.id}','description',this.value)">`:esc(c.description||'—')}</td>
+        <td>${seeB?`<input class="form-input" type="number" value="${c.planned}" style="width:110px;height:26px;font-family:var(--font-mono);font-size:11px" oninput="updateCostField('${c.id}','planned',+this.value)" onchange="updateCostField('${c.id}','planned',+this.value);setTimeout(()=>renderDetailCostControl(),700)">`:`<span style="font-family:var(--font-mono);color:var(--text-muted)">₱ ••••••</span>`}</td>
+        <td>${seeB?`<input class="form-input" type="number" value="${c.actual}" style="width:110px;height:26px;font-family:var(--font-mono);font-size:11px;${c.actual>c.planned?'border-color:var(--accent-red);color:var(--accent-red)':''}" oninput="updateCostField('${c.id}','actual',+this.value)" onchange="updateCostField('${c.id}','actual',+this.value);setTimeout(()=>renderDetailCostControl(),700)">`:`<span style="font-family:var(--font-mono);color:var(--text-muted)">₱ ••••••</span>`}</td>
+        <td style="font-family:var(--font-mono);font-weight:700;color:${v>=0?'var(--accent-green)':'var(--accent-red)'}">${seeB?((v>=0?'+':'')+fmtCur(Math.abs(v))):'••••'}</td>
+        <td>${seeB?`<div style="display:flex;align-items:center;gap:5px"><div class="progress-bar" style="width:65px;height:5px"><div class="progress-fill" style="width:${Math.min(100,pct)}%;background:${pct>90?'var(--accent-red)':pct>70?'var(--accent-amber)':'var(--accent-green)'}"></div></div><span style="font-size:10px;font-family:var(--font-mono);font-weight:${pct>90?'700':'400'};color:${pct>90?'var(--accent-red)':'inherit'}">${pct}%</span></div>`:'<span style="font-family:var(--font-mono);color:var(--text-muted)">••%</span>'}</td>
+        <td>${seeB?`<button class="btn btn-danger btn-sm btn-icon" onclick="deleteCostItem('${c.id}')"><i class="fas fa-trash"></i></button>`:''}</td>
+      </tr>`;}).join(''):`<tr><td colspan="8"><div class="empty-state"><i class="fas fa-dollar-sign"></i><p>No cost items.${seeB?' Click "Add Line Item".':''}</p></div></td></tr>`}
       ${costs.length?`<tr style="background:var(--bg-hover);font-weight:700">
         <td colspan="3" style="padding:10px 11px;font-size:12px">TOTAL</td>
-        <td style="font-family:var(--font-mono)">${fmtCur(totPlanned)}</td>
-        <td style="font-family:var(--font-mono);color:${totActual>totPlanned?'var(--accent-red)':'var(--accent-green)'}">${fmtCur(totActual)}</td>
-        <td style="font-family:var(--font-mono);font-weight:700;color:${totPlanned-totActual>=0?'var(--accent-green)':'var(--accent-red)'}">
-          ${totPlanned-totActual>=0?'+':''}${fmtCur(Math.abs(totPlanned-totActual))}</td>
+        <td style="font-family:var(--font-mono)">${CUR(regPlanned)}</td>
+        <td style="font-family:var(--font-mono);color:${regActual>regPlanned?'var(--accent-red)':'var(--accent-green)'}">${CUR(regActual)}</td>
+        <td style="font-family:var(--font-mono);font-weight:700;color:${regPlanned-regActual>=0?'var(--accent-green)':'var(--accent-red)'}">
+          ${seeB?((regPlanned-regActual>=0?'+':'')+fmtCur(Math.abs(regPlanned-regActual))):'••••'}</td>
         <td colspan="2"></td>
       </tr>`:''}
       </tbody>
@@ -4247,19 +4275,20 @@ function renderDetailCostControl(){
         <td style="font-size:12px;font-weight:500">${po.description}</td>
         <td style="font-size:11px">${po.vendor}</td>
         <td><span class="badge badge-gray">${po.category}</span></td>
-        <td style="font-family:var(--font-mono);font-weight:600;color:var(--accent-green)">${fmtCur(po.amount)}</td>
+        <td style="font-family:var(--font-mono);font-weight:600;color:var(--accent-green)">${CUR(po.amount)}</td>
         <td style="font-size:11px;font-family:var(--font-mono)">${po.poDate}</td>
         <td style="font-size:11px;font-family:var(--font-mono);color:${isOverdue(po.deliveryDate)&&po.status!=='delivered'?'var(--accent-red)':'inherit'}">${po.deliveryDate}</td>
         <td>${sBadge(po.status)}</td>
       </tr>`).join(''):`<tr><td colspan="8" style="text-align:center;padding:12px;color:var(--text-muted)">No POs for this project</td></tr>`}
-      ${procurement.length?`<tr style="background:var(--bg-hover);font-weight:700"><td colspan="4" style="padding:9px 11px">TOTAL COMMITTED</td><td style="font-family:var(--font-mono)">${fmtCur(poTotal)}</td><td colspan="3"></td></tr>`:''}
+      ${procurement.length?`<tr style="background:var(--bg-hover);font-weight:700"><td colspan="4" style="padding:9px 11px">TOTAL COMMITTED</td><td style="font-family:var(--font-mono)">${CUR(poTotal)}</td><td colspan="3"></td></tr>`:''}
       </tbody>
     </table></div>
   </div>`;
 }
 
 function updateCCBudget(pid){const p=(AppState.data.projects||[]).find(x=>x.id===pid);if(p&&$('#ccBudget')){p.budget=parseFloat($('#ccBudget').value)||p.budget;AppState.save();}}
-function updateCCSpent(pid){const p=(AppState.data.projects||[]).find(x=>x.id===pid);if(p&&$('#ccSpent')){p.spent=parseFloat($('#ccSpent').value)||0;AppState.save();}}
+function updateCCSpent(pid){const p=(AppState.data.projects||[]).find(x=>x.id===pid);if(p&&$('#ccSpent')){p.spent=parseFloat($('#ccSpent').value)||0;p.spentManual=true;AppState.save();}}
+function ccSpentAuto(pid){const p=(AppState.data.projects||[]).find(x=>x.id===pid);if(!p)return;p.spentManual=false;if(typeof _cbSyncProjectSpent==='function')_cbSyncProjectSpent(pid);AppState.save();renderDetailCostControl();showToast('Amount Spent set to auto (from Budget by Category)','success');}
 function updateCCProgress(pid){const p=(AppState.data.projects||[]).find(x=>x.id===pid);if(p&&$('#ccProg')){p.progress=parseInt($('#ccProg').value)||p.progress;AppState.save();}}
 function saveCCQuick(pid){
   const p=(AppState.data.projects||[]).find(x=>x.id===pid);

@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.17.0';
-const APP_BUILD='20261114e';
+const APP_VERSION='2.17.1';
+const APP_BUILD='20261114f';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,17 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='Budget confidentiality: users can now be split into Confidential (can see budget & cost amounts) and Non-confidential (amounts shown masked as ₱ ••••). Set the new "Budget" toggle per user in User Management. Budget figures are masked in Budget by Category and the Execution Dashboard for non-confidential users. Secure default: only admins can see budgets until you grant access.';
+const APP_RELEASE_NOTE='Cost figures now reconcile across the app: the Budget by Category sheet is the single source of truth. The Cost Control "Amount Spent", Budget Utilization, EVM and the Manpower Cost card all auto-roll from it (Manpower Cost now reads the Daily Manpower Log). "Amount Spent" is auto with a manual override. Budget confidentiality now covers the whole Cost Control tab for non-confidential users.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.17.1',date:'2026-11-14',type:'feat',notes:[
+    'Cost reconciliation — the Budget by Category sheet is now the single source of truth for a project\'s actual cost. The Cost Control "Amount Spent", Budget Utilization %, EVM (CPI/SPI/EAC) and the "Manpower Cost" card all auto-roll from it, so the numbers agree across the Cost Control tab, project list, dashboards and reports.',
+    'Fixed: the "Manpower Cost" card ignored the Daily Manpower Log — it now reads the manual total (or logged cost, or manpower allocations), so a manual labour cost entered in the Daily Manpower Log shows up in Cost Control.',
+    '"Amount Spent" is now auto-computed from the sheet actual, with a manual override (type a value to override, click "use auto" to revert). project.spent is kept in sync so every view agrees.',
+    'Budget confidentiality now covers the whole Cost Control tab — for non-confidential users the budget health banner, EVM, cost cards, Cost Breakdown Register and PO amounts are masked too (not just Budget by Category + the dashboard).',
+  ]},
   {version:'2.17.0',date:'2026-11-14',type:'feat',notes:[
     'Budget confidentiality — users are now split into Confidential and Non-confidential. Only confidential users can see budget & cost amounts; everyone else sees them masked as ₱ ••••.',
     'New "Budget" toggle on each user row in User Management (Admin → Users) marks a user confidential. It is independent of Admin — an admin can be made non-confidential.',
