@@ -1,1 +1,1 @@
-{"version":"2.16.5","note":"New Budget by Category sheet in the Cost Control tab: type a budget per main cost category (standard 12, editable); Actual auto-rolls from Daily Manpower Log + Resource Allocation; Variance, % and Net Income total.","released":"2026-11-14 09:30"}
+{"version":"2.16.6","note":"Execution Dashboard Budget & Cost section now uses the project's Cost Budget by Category sheet when one exists (same per-category budgets + auto/manual actuals); falls back to Resource Allocation otherwise. Reflected in the printout.","released":"2026-11-14 11:00"}

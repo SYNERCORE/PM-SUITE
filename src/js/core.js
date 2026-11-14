@@ -1,6 +1,6 @@
 // ── APP VERSION & BUILD INFO ──────────────────────────────
-const APP_VERSION='2.16.5';
-const APP_BUILD='20261114a';
+const APP_VERSION='2.16.6';
+const APP_BUILD='20261114b';
 
 // ── DATA SCHEMA VERSION ───────────────────────────────────
 // Bumped each time the persisted data shape changes in a way that needs
@@ -15,11 +15,16 @@ const _SCHEMA_MIGRATIONS=[
   //   } }
 ];
 // One-line summary of this release — shown in the update banner on other users' screens
-const APP_RELEASE_NOTE='New "Budget by Category" sheet in the Cost Control tab: type a budget per your standard cost categories (Mobilization, Demobilization, Labor, Accommodation, Transpo, Requirements, Admin Cost, Third Party, Insurances, Materials, PPE, Tools — editable), with Actual auto-rolled from the Daily Manpower Log and Resource Allocation where tracked (override to manual anytime), Variance, %, and a NET INCOME BASED ON TOTAL DIRECT COST total.';
+const APP_RELEASE_NOTE='The Execution Dashboard Budget & Cost section now uses the project\'s Cost Budget by Category sheet (from the Cost Control tab) when one exists — the same per-category budget and auto/manual actuals — falling back to the Resource Allocation grouping when there is no sheet. Reflected in the one-page printout.';
 const APP_NAME='SHIC Enterprise PM Suite';
 const APP_CODENAME='Syncore';
 // CHANGELOG — add new entries at the top when patching
 const APP_CHANGELOG=[
+  {version:'2.16.6',date:'2026-11-14',type:'feat',notes:[
+    'Execution Dashboard "Budget & Cost — Itemized by Category" now draws from the project\'s Cost Budget by Category sheet (the Cost Control tab) when one exists: same per-category budgets, same auto-rolled/manual actuals, same totals.',
+    'When no cost sheet exists it falls back to the previous Resource Allocation grouping, so nothing breaks on projects that haven\'t set up a cost sheet. The section source note shows which is in use.',
+    'The one-page printout Budget & Cost block follows the same source.',
+  ]},
   {version:'2.16.5',date:'2026-11-14',type:'feat',notes:[
     'New "Budget by Category" sheet at the top of the project Cost Control tab — a top-down cost-control view that mirrors the standard SY3 project cost sheet.',
     'Type one budget figure per main cost category. Ships with the standard 12 (Mobilization, Demobilization, Labor, Accommodation, Transpo, Requirements, Admin Cost, Third Party, Insurances, Materials, PPE, Tools) and you can add, rename or remove categories per project (or Reset to standard).',

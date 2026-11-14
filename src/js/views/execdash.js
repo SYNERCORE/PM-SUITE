@@ -130,8 +130,19 @@ function _edModel(pid){
     const row=catAgg[c.id]||catAgg[cats[cats.length-1].id];
     row.budget+=Number(a.plannedCost)||0; row.actual+=Number(a.actualCost)||0;
   });
-  const budgetRows=Object.values(catAgg).filter(r=>r.budget||r.actual)
+  let budgetRows=Object.values(catAgg).filter(r=>r.budget||r.actual)
     .sort((a,b)=>b.budget-a.budget);
+  // The Cost Budget by Category sheet (top-down, from the Cost Control tab) is the
+  // authoritative budget when it exists — it matches the standard cost-control sheet.
+  // Falls back to the Resource Allocation grouping above when there's no cost sheet.
+  let budgetFromCostSheet=false;
+  const _cbRec=(D.costBudgets||{})[pid];
+  if(_cbRec && _cbRec.rows && _cbRec.rows.length && typeof _cbActual==='function'){
+    const _pal=['#f85149','#f0a450','#39d3f2','#bc8cff','#3fb950','#388bfd','#8b949e','#e3b341','#db61a2','#2dd4bf','#a371f7','#f778ba'];
+    const _cb=_cbRec.rows.map((r,i)=>({label:r.label,color:_pal[i%_pal.length],budget:Number(r.budget)||0,actual:(typeof _cbActual==='function'?_cbActual(pid,r):0)}))
+      .filter(r=>r.budget||r.actual).sort((a,b)=>b.budget-a.budget);
+    if(_cb.length){ budgetRows=_cb; budgetFromCostSheet=true; }
+  }
   const budTotB=budgetRows.reduce((s,r)=>s+r.budget,0);
   const budTotA=budgetRows.reduce((s,r)=>s+r.actual,0);
 
@@ -252,7 +263,7 @@ function _edModel(pid){
     spi, prevSpi, spiTrend: spi>prevSpi?'up':spi<prevSpi?'down':'flat',
     actualPct, plannedPct,
     cpm:{...cpm,fcVar},
-    budgetRows, budTotB, budTotA,
+    budgetRows, budTotB, budTotA, budgetFromCostSheet,
     roleRows, mhPlan, mhAct, onsiteTot, hpd, dpw, hasLogs, loggedMh, mhCost, mhCostManual, mhSrc,
     procRows,
     actRows, riskRows, qualRows, phaseRows, last24, planned3,
@@ -439,7 +450,7 @@ function _edRender(m,opts){
 
   <!-- BUDGET BY CATEGORY -->
   <div class="card ed-mb" style="border:1px solid rgba(57,211,242,.4)">
-    <div class="ed-h3" style="color:var(--accent-cyan)">Budget &amp; Cost — Itemized by Category <span class="ed-src" style="margin:0">grouped from Resource Allocation (planned vs actual cost)</span></div>
+    <div class="ed-h3" style="color:var(--accent-cyan)">Budget &amp; Cost — Itemized by Category <span class="ed-src" style="margin:0">${m.budgetFromCostSheet?'Cost Budget by Category (Cost Control sheet)':'grouped from Resource Allocation (planned vs actual cost)'}</span></div>
     <table class="ed-tbl">
       <thead><tr><th>Category</th><th class="r">Budgeted</th><th class="r">Actual</th><th class="r">Variance</th><th style="width:150px">% of Budget</th><th class="r">Used</th></tr></thead>
       <tbody>
@@ -840,7 +851,7 @@ function _edPrintHTML(m,p,lh,doc,photos,live){
   <div class="body">
     <div class="col">
       <div class="box">
-        <div class="h">Budget &amp; Cost <span class="src">Resource Allocation (₱)</span></div>
+        <div class="h">Budget &amp; Cost <span class="src">${m.budgetFromCostSheet?'Cost Budget by Category (₱)':'Resource Allocation (₱)'}</span></div>
         <table><thead><tr><th>Category</th><th class="r">Budget</th><th class="r">Actual</th><th class="r">%</th></tr></thead><tbody>
           ${budRows.map(r=>`<tr><td>${esc2(r.label)}</td><td class="r mono">${_pMoneyShort(r.budget)}</td><td class="r mono">${_pMoneyShort(r.actual)}</td><td class="r">${_pPctUsed(r.actual,r.budget)}</td></tr>`).join('')||'<tr><td colspan="4" style="color:#93a0ad">No allocation data.</td></tr>'}
           ${budRows.length?`<tr class="tot"><td>TOTAL</td><td class="r mono">${_pMoneyShort(m.budTotB)}</td><td class="r mono">${_pMoneyShort(m.budTotA)}</td><td class="r">${_pPctUsed(m.budTotA,m.budTotB)}</td></tr>`:''}
